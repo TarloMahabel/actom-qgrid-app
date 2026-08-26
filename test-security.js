@@ -61,13 +61,25 @@ s.check('no CDN import in shipped app code', cdnRefs.length === 0, cdnRefs.join(
 
 s.group('content security policy');
 const toml = read('netlify.toml');
+const gen = read('scripts/gen-config.mjs');
+/* Strip comments before asserting. These files explain the bugs they guard
+   against — gen-config.mjs discusses why a "*.supabase.co" wildcard would be
+   wrong — and matching that prose reports a fault that does not exist. This
+   is the third time an assertion has tripped on its own documentation. */
+const genCode = gen.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+/* The policy is built in gen-config.mjs, not here: connect-src has to name
+   this division's Supabase project. netlify.toml must NOT define one, because
+   it takes precedence over the generated _headers and would override it. */
+s.check('netlify.toml defines no CSP', !/^\s*Content-Security-Policy/m.test(toml));
 for (const rule of ["default-src 'none'", "script-src 'self'", "frame-ancestors 'none'",
-                    "object-src 'none'", "base-uri 'none'"]) {
-  s.check(`CSP sets ${rule}`, toml.includes(rule));
+                    "object-src 'none'", "base-uri 'none'", "manifest-src 'self'"]) {
+  s.check(`generated CSP sets ${rule}`, gen.includes(rule));
 }
-s.check('CSP has no unsafe-eval', !toml.includes('unsafe-eval'));
-s.check('connect-src is generated per division, not wildcarded',
-  read('scripts/gen-config.mjs').includes('connect-src'));
+s.check('generated CSP has no unsafe-eval', !genCode.includes('unsafe-eval'));
+s.check('connect-src is pinned per division, not wildcarded',
+  genCode.includes('connect-src') && !genCode.includes('*.supabase.co'));
+s.check('generation refuses to write a CSP containing a newline',
+  /refusing to write it/.test(gen));
 
 s.group('shared assets are in step');
 const shared = { 'tokens.css': 'apps/inspect/tokens.css', 'inspect.css': 'apps/inspect/styles.css',

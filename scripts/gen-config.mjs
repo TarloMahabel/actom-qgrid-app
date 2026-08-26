@@ -67,11 +67,37 @@ window.QGRID_CONFIG = ${JSON.stringify(cfg, null, 2)};
 
 // Realtime needs the wss origin as well as https, or the subscription
 // silently fails and the app looks stale rather than broken.
+/* One line, no newlines, no leading whitespace. An HTTP header cannot
+   contain a newline: written as a multi-line string this collapsed to
+   roughly "default-src 'none'" and blocked every script on the site.
+
+   manifest-src, font-src and worker-src are named explicitly. With
+   default-src 'none' anything unnamed falls back to none and is blocked —
+   the manifest was, which was the only thing the console reported. */
+const CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self'",
+  "manifest-src 'self'",
+  "worker-src 'self' blob:",
+  `connect-src 'self' ${url} ${wss}`,
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "upgrade-insecure-requests"
+].join("; ");
+
+if (/[\r\n]/.test(CSP)) { console.error("CSP contains a newline — refusing to write it."); process.exit(1); }
+
 writeFileSync(join(APP_DIR, "_headers"),
-`# Generated at deploy time. connect-src is pinned to this division's
-# Supabase project only.
+`# Generated at deploy time by scripts/gen-config.mjs.
+# The Content-Security-Policy lives ONLY here: connect-src names this
+# division's Supabase project, which is not known until build time.
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ${url} ${wss}; form-action 'none'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; upgrade-insecure-requests
+  Content-Security-Policy: ${CSP}
 `);
 
 console.log(`config.js + _headers written for ${cfg.division.code} ` +

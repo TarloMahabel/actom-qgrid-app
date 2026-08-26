@@ -28,9 +28,12 @@
 #
 # The app needs no compilation. The command writes two files that cannot
 # be committed because they differ per division: config.js, and _headers
-# carrying a CSP whose connect-src names that division's Supabase project.
-# See scripts/gen-config.mjs. The generated _headers is applied on top of
-# the policies below and takes precedence for Content-Security-Policy.
+# carrying the Content-Security-Policy, whose connect-src names that
+# division's Supabase project. See scripts/gen-config.mjs.
+#
+# The CSP is defined ONLY in that generated file. If the build fails, no
+# CSP is sent at all — which is worse than a strict one, so the build is
+# written to fail loudly rather than publish a half-configured site.
 # =====================================================================
 
 [build]
@@ -43,22 +46,29 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    # Baseline. The generated _headers replaces the CSP with one that pins
-    # connect-src to this division's project. If generation ever fails,
-    # this policy leaves the app unable to reach any backend at all —
-    # which is the safe way to fail.
-    Content-Security-Policy = """
-      default-src 'none';
-      script-src 'self';
-      style-src 'self' 'unsafe-inline';
-      img-src 'self' data: blob:;
-      connect-src 'self';
-      form-action 'none';
-      frame-ancestors 'none';
-      base-uri 'none';
-      object-src 'none';
-      upgrade-insecure-requests
-    """
+    # ------------------------------------------------------------------
+    # NO Content-Security-Policy HERE. Deliberately.
+    #
+    # netlify.toml TAKES PRECEDENCE over the generated _headers file for
+    # the same header on the same path. An earlier version defined the CSP
+    # here as a multi-line TOML string:
+    #
+    #     Content-Security-Policy = """
+    #       default-src 'none';
+    #       script-src 'self';
+    #       ...
+    #     """
+    #
+    # An HTTP header cannot contain newlines. The value was mangled down to
+    # roughly "default-src 'none'" — which blocks scripts, styles and every
+    # request — and because this file wins, it overrode the correct
+    # single-line policy that scripts/gen-config.mjs writes to _headers.
+    # The app served a splash screen that never advanced, with nothing in
+    # the console except a manifest warning.
+    #
+    # The CSP belongs in the generated file anyway: connect-src has to name
+    # this division's Supabase project, which is not known until build time.
+    # ------------------------------------------------------------------
     Strict-Transport-Security    = "max-age=31536000; includeSubDomains; preload"
     X-Content-Type-Options       = "nosniff"
     X-Frame-Options              = "DENY"
