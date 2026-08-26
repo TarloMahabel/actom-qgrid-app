@@ -305,9 +305,16 @@ function vDash(m) {
   return head(m, `Inspection performance for ${esc(S.division?.name || DIVISION.name)}. Every figure is read from a database view, so it cannot drift from the records.`,
     `<button class="btn" data-act="refresh">Refresh</button>`) + tabbar(m) + body;
 }
+/* Called from render() without await, so a thrown error here becomes an
+   unhandled rejection: nothing on screen, nothing actionable in the console.
+   Checking the returned `error` covered a Postgres error but not a network
+   failure, which throws. */
 async function loadYield() {
-  const { data, error } = await supabase.from("v_stage_yield").select("*");
   const host = $("yieldHost"); if (!host) return;
+  let data, error;
+  try { ({ data, error } = await supabase.from("v_stage_yield").select("*")); }
+  catch (e) { error = e; }
+  if (!$("yieldHost")) return;                       // view changed while loading
   if (error) { host.innerHTML = `<div class="empty">${esc(explain(error))}</div>`; return; }
   if (!data?.length) { host.innerHTML = `<div class="empty">No completed inspections in the last 30 days.</div>`; return; }
   const max = Math.max(...data.map(r => r.inspections));
@@ -857,7 +864,7 @@ function refGrid(list) {
   const cols = list.cols;
   const grid = `${cols.map(c => c.w || "1fr").join(" ")} 150px`;
 
-  return `<div class="card" style="margin-bottom:13px"><h3>${list.title}
+  return `<div class="card" style="margin-bottom:13px"><h3>${esc(list.title)}
       <span class="cl">${rows.length} entries${dirty ? ` · ${dirty} unsaved` : ""}</span></h3>
     <div class="bd">
       <div class="note" style="margin-bottom:12px">${list.note}</div>
@@ -885,7 +892,7 @@ function refGrid(list) {
                  <option value="">—</option>
                  ${c.options().map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join("")}
                </select>`
-            : `<input data-new="${list.table}|${c.f}" placeholder="new ${c.label.toLowerCase()}"
+            : `<input data-new="${list.table}|${c.f}" placeholder="new ${esc(c.label.toLowerCase())}"
                  type="${c.type === "number" ? "number" : "text"}"
                  style="width:100%;padding:6px 8px;border:1px dashed #c8d6e3;border-radius:7px">`).join("")}
           <div style="text-align:right">
@@ -982,9 +989,14 @@ async function deleteRefRow(table, id) {
 }
 
 async function loadAudit() {
-  const { data, error } = await supabase.from("audit_trail")
-    .select("at,actor_name,action,entity,entity_id").order("at", { ascending: false }).limit(60);
   const host = $("auditHost"); if (!host) return;
+  let data, error;
+  try {
+    ({ data, error } = await supabase.from("audit_trail")
+      .select("at,actor_name,action,entity,entity_id")
+      .order("at", { ascending: false }).limit(60));
+  } catch (e) { error = e; }
+  if (!$("auditHost")) return;
   if (error) { host.innerHTML = `<div class="empty">${esc(explain(error))}</div>`; return; }
   host.innerHTML = T(["When", "Who", "Action", "Record", "Reference"],
     (data || []).map(r => [`<span class="id">${new Date(r.at).toLocaleString("en-ZA")}</span>`,
@@ -1517,7 +1529,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-generate-wo],[data-tpl],[data-id]");
+  const t = e.target.closest("[data-go],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-tpl],[data-id]");
   if (!t) return;
   const d = t.dataset;
 

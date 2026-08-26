@@ -25,6 +25,7 @@ echo "=== Static checks ==="
 run_suite test-security
 run_suite test-hook
 run_suite test-deploy
+run_suite test-integrity
 
 echo
 echo "=== Boot path (real vendored client) ==="

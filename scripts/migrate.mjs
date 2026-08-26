@@ -40,9 +40,15 @@ for (const d of targets) {
     // re-run is a no-op. The Supabase CLI wants its own directory layout;
     // keeping the SQL in db/ and applying it with psql means one obvious
     // place to look and one obvious order to read it in.
+    /* Locked down as it is created. A signed-in user who could delete a row
+       from this table would make the next run re-apply that migration against
+       a database that already has it. Migration 005 does the same thing, but
+       this runs first on a fresh division. */
     execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-q", "-c", `
       create table if not exists public.qgrid_migrations (
-        filename text primary key, applied_at timestamptz not null default now());`],
+        filename text primary key, applied_at timestamptz not null default now());
+      alter table public.qgrid_migrations enable row level security;
+      revoke all on public.qgrid_migrations from anon, authenticated;`],
       { stdio: "inherit" });
 
     const files = readdirSync("db").filter(f => /^\d{3}-.*\.sql$/.test(f)).sort();
