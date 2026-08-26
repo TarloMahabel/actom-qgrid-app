@@ -134,6 +134,7 @@ async function gate() {
 
   clearInterval(recheckTimer);
   S.profile = profile;
+  bootedUserId = session.user.id;
   show("app");
   return true;
 }
@@ -189,11 +190,20 @@ async function loadData() {
 const reload = async () => { await loadData(); render(); };
 
 /* Realtime, debounced. Several inspectors submitting at once should cause
-   one repaint, not six. */
-let rtTimer;
+   one repaint, not six.
+
+   The channel is torn down before a new one is opened. supabase.channel()
+   hands back the EXISTING channel when the name is already in use, and
+   calling .on() on a channel that has already subscribed throws:
+
+     cannot add `postgres_changes` callbacks for realtime:qgrid after `subscribe()`
+
+   which is what happened every time boot ran twice. */
+let rtTimer, channel = null;
 function subscribe() {
+  if (channel) { supabase.removeChannel(channel); channel = null; }
   const bump = () => { clearTimeout(rtTimer); rtTimer = setTimeout(reload, 600); };
-  supabase.channel("qgrid")
+  channel = supabase.channel("qgrid")
     .on("postgres_changes", { event: "*", schema: "public", table: "inspections" }, bump)
     .on("postgres_changes", { event: "*", schema: "public", table: "failed_checks" }, bump)
     .on("postgres_changes", { event: "*", schema: "public", table: "template_revisions" }, bump)
@@ -1465,7 +1475,26 @@ function withTimeout(promise, ms, what) {
   ]);
 }
 
+/* Boot is guarded two ways.
+
+   Re-entrancy: start() was called at the bottom of this file AND again by
+   onAuthStateChange, which fires on page load. Two concurrent boots raced
+   each other and the second one blew up on the realtime channel.
+
+   Redundant events: TOKEN_REFRESHED and INITIAL_SESSION arrive routinely
+   and mean nothing has changed for the user, so they must not trigger a
+   full reload — on a shop-floor tablet left open all shift, a token
+   refresh every hour would wipe a half-captured inspection. */
+let booting = false;
+let bootedUserId = null;
+
 async function start() {
+  if (booting) return;
+  booting = true;
+  try { await boot(); } finally { booting = false; }
+}
+
+async function boot() {
   paintLogos();
   if (!window.ACTOM_LOGO) console.warn("logo.js did not load — check the deploy includes it.");
   $("gateDivision").textContent = DIVISION.name || "Inspections";
@@ -1482,13 +1511,23 @@ async function start() {
   $("loader")?.classList.add("gone");
   setTimeout(() => $("loader")?.remove(), 600);
 }
-supabase.auth.onAuthStateChange((event) => {
-  if (event === "SIGNED_IN" || event === "SIGNED_OUT") start().catch(bootFailed);
-console.info("QGrid app.js loaded — build",
-  (window.QGRID_CONFIG && window.QGRID_CONFIG.build && window.QGRID_CONFIG.build.commit) || "?");
+supabase.auth.onAuthStateChange((event, session) => {
+  const uid = (session && session.user && session.user.id) || null;
+  /* INITIAL_SESSION and TOKEN_REFRESHED arrive routinely and mean nothing has
+     changed for this user. Re-booting on them would discard a half-captured
+     inspection on a tablet left open all shift — and re-booting on
+     INITIAL_SESSION is what made boot run twice and break realtime with
+     "cannot add postgres_changes callbacks ... after subscribe()". */
+  if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED" ||
+      event === "USER_UPDATED") return;
+  if (event !== "SIGNED_OUT" && uid === bootedUserId) return;
+  bootedUserId = uid;
+  start().catch(bootFailed);
 });
-start().catch(bootFailed);
+
 console.info("QGrid app.js loaded — build",
   (window.QGRID_CONFIG && window.QGRID_CONFIG.build && window.QGRID_CONFIG.build.commit) || "?");
+
+start().catch(bootFailed);
 
 })();

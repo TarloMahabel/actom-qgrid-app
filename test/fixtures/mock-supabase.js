@@ -91,11 +91,55 @@
                     publish_template_revision: { rev:4, status:"published" },
                     generate_inspections: { works_order:"WO-44812", created:3 } };
       return Promise.resolve({ data: map[fn], error: null }); },
-    channel: () => ({ on() { return this; }, subscribe() { return this; } }),
+    /* Faithful to the real client, deliberately.
+
+     The previous stub accepted .on() at any time and returned a fresh
+     object on every channel() call, so it could not reproduce the fault
+     that actually reached production: supabase.channel() returns the
+     EXISTING channel for a name already in use, and .on() after
+     .subscribe() throws. A stub that is more permissive than the library
+     hides exactly the bugs worth catching. */
+  channel: function (name) {
+    CALLS.push(["channel", name]);
+    if (!this._channels) this._channels = {};
+    if (this._channels[name]) return this._channels[name];
+    const ch = {
+      name,
+      subscribed: false,
+      on(...a) {
+        if (this.subscribed) {
+          throw new Error("cannot add `postgres_changes` callbacks for realtime:" +
+            this.name + " after `subscribe()`");
+        }
+        CALLS.push(["channel.on", this.name]);
+        return this;
+      },
+      subscribe() { this.subscribed = true; CALLS.push(["channel.subscribe", this.name]); return this; }
+    };
+    this._channels[name] = ch;
+    return ch;
+  },
+  removeChannel: function (ch) {
+    CALLS.push(["removeChannel", ch && ch.name]);
+    if (this._channels && ch) delete this._channels[ch.name];
+    return Promise.resolve({ error: null });
+  },
     auth: {
       getSession: () => Promise.resolve({ data: { session: { user: { email: "varshan.mahabel@actom.co.za", id: "u1" } } } }),
       getUser: () => Promise.resolve({ data: { user: { id: "u1" } } }),
-      onAuthStateChange: () => ({ data: { subscription: { unsubscribe(){} } } }),
+      /* Fires the way the real client does. supabase-js emits INITIAL_SESSION
+       (and SIGNED_IN when a session is restored) shortly after the listener
+       is registered, which is what caused boot to run twice in production.
+       A stub that never emits cannot reproduce that, so the behaviour was
+       untested and only the source text was being checked. */
+    onAuthStateChange: (cb) => {
+      setTimeout(() => {
+        try { cb("INITIAL_SESSION", { user: { id: "u1" } }); } catch (e) { CALLS.push(["authcb-threw", String(e.message)]); }
+        try { cb("SIGNED_IN", { user: { id: "u1" } }); } catch (e) { CALLS.push(["authcb-threw", String(e.message)]); }
+        try { cb("TOKEN_REFRESHED", { user: { id: "u1" } }); } catch (e) { CALLS.push(["authcb-threw", String(e.message)]); }
+      }, 30);
+      return { data: { subscription: { unsubscribe() {} } } };
+    },
       signOut: () => Promise.resolve({})
     }
   };

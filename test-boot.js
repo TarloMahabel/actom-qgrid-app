@@ -146,6 +146,34 @@ const CONFIG = 'window.QGRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"e
     w3.document.body.textContent.includes('not configured') ||
     w3.document.body.textContent.includes('could not start'));
 
+  s.group('booting twice does not break realtime');
+  /* The reported failure: start() ran once at the bottom of app.js and again
+     from onAuthStateChange on page load. The second run re-used the existing
+     realtime channel and Supabase threw
+       cannot add `postgres_changes` callbacks for realtime:qgrid after `subscribe()`
+     which surfaced to the user as "QGrid could not start". */
+  s.check('a repeat subscribe tears the old channel down first',
+    read('app.js').includes('removeChannel'));
+  s.check('boot is guarded against re-entry', read('app.js').includes('if (booting) return'));
+  s.check('routine auth events do not re-boot',
+    read('app.js').includes('TOKEN_REFRESHED'));
+  s.check('a repeat sign-in for the same user is ignored',
+    read('app.js').includes('uid === bootedUserId'));
+
+  /* Behavioural, not textual: the mock now emits INITIAL_SESSION, SIGNED_IN
+     and TOKEN_REFRESHED after the listener registers, exactly as the real
+     client does. That is what made boot run twice. */
+  const d5 = makeDom(); const w5 = d5.window;
+  w5.eval(read('vendor/supabase.js'));
+  w5.eval(CONFIG);
+  w5.eval(read('supabase.js'));
+  w5.eval(read('logo.js')); w5.eval(read('changelog.js')); w5.eval(read('app.js'));
+  await new Promise(r => setTimeout(r, 900));
+  const body5 = w5.document.body.textContent;
+  s.check('auth events do not produce a boot failure',
+    !body5.includes('could not start'),
+    (body5.match(/could not start[\s\S]{0,90}/) || [''])[0].trim());
+
   s.group('a hang is reported, not endured');
   /* The real failure this covers: supabase.auth.getSession() never settling.
      No exception, no console output, splash screen forever. */
