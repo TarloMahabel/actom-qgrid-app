@@ -465,7 +465,7 @@ function vSched(m) {
         <select id="fStage"><option value="">All stages</option>${S.stages.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select>
         <select id="fStatus"><option value="">All statuses</option>${["scheduled","in_progress","completed"].map(x => `<option>${x}</option>`).join("")}</select>
         <span class="spacer"></span>
-        ${canPlan() ? `<button class="btn pri" data-act="generate">Generate from works order</button>` : ""}
+        ${canPlan() ? `<button class="btn" data-tab="2">Projects &amp; works orders →</button>` : ""}
       </div>` +
       T(["Reference", "Inspection", "Stage", "Project / works order", "Unit", "Planned", "Inspector", "Status"],
         S.inspections.slice(0, 80).map(i => {
@@ -488,18 +488,7 @@ function vSched(m) {
       }))
       : `<div class="card"><div class="empty">Nothing unassigned. This list is the leading indicator of an overdue, so an empty one is the goal.</div></div>`;
   } else {
-    const noPublished = publishedRevs().length === 0;
-    const noMatrix = S.requirements.filter(r => r.template_id && r.level !== "na").length === 0;
-    body = `<div class="note" style="margin-bottom:13px">A works order is what the schedule is
-        generated from: <b>Generate</b> reads the requirements matrix for that project's product
-        family and creates every inspection it calls for.</div>`
-      + (noPublished ? `<div class="note q" style="margin-bottom:13px"><b>No published template.</b>
-          Generating will create nothing until at least one template has a published revision —
-          drafts are skipped. Publish one in the Form designer first.</div>` : "")
-      + (noMatrix ? `<div class="note q" style="margin-bottom:13px"><b>The requirements matrix is
-          empty.</b> Nothing tells the scheduler what to inspect. Attach a template to at least one
-          family and stage under Inspection requirements.</div>` : "")
-      + WORK_LISTS.map(refGrid).join("");
+    body = worksView();
   }
 
   return head(m, "Inspections are generated from the requirements matrix, then assigned.",
@@ -833,30 +822,7 @@ const REF_LISTS = [
              options: () => S.departments.map(x => [x.id, x.name]) }] }
 ];
 
-/* Projects and works orders use the same editable grid. They were meant to
-   come from SYSPRO in Phase 2 and to be inserted by hand until then, which
-   left the Generate dialog with an empty dropdown and no way to fill it
-   without opening the SQL editor. */
-const WORK_LISTS = [
-  { table: "projects", title: "Projects", state: "projects",
-    order: "code",
-    note: "A contract or order. The product family decides which inspections the matrix calls for.",
-    cols: [{ f: "code", label: "Code", type: "text", w: "130px" },
-           { f: "name", label: "Name", type: "text" },
-           { f: "customer", label: "Customer", type: "text", w: "190px" },
-           { f: "family_id", label: "Product family", type: "select", w: "190px",
-             options: () => S.families.map(x => [x.id, x.name]) }] },
-
-  { table: "works_orders", title: "Works orders", state: "worksOrders",
-    order: "code", noRetire: true,
-    note: "What is actually being built. Quantity decides how many inspections a 100% rule generates.",
-    cols: [{ f: "code", label: "Code", type: "text", w: "130px" },
-           { f: "project_id", label: "Project", type: "select", w: "200px",
-             options: () => S.projects.map(x => [x.id, x.code]) },
-           { f: "description", label: "Description", type: "text" },
-           { f: "qty", label: "Qty", type: "number", w: "80px" }] }
-];
-const ALL_LISTS = () => REF_LISTS.concat(WORK_LISTS);
+const ALL_LISTS = () => REF_LISTS;
 
 const draftKey = (table, id, field) => `${table}|${id}|${field}`;
 const draftCount = () => Object.keys(S.refDraft).length;
@@ -904,12 +870,9 @@ function refGrid(list) {
             align-items:center;padding:4px 2px;${r.active === false ? "opacity:.6" : ""}">
         ${cols.map(c => `<div>${refCell(list, r, c)}</div>`).join("")}
         <div style="text-align:right;display:flex;gap:5px;justify-content:flex-end">
-          ${list.noRetire
-            ? `<button class="btn sm pri" data-generate-wo="${r.id}"
-                 title="Create the inspections the requirements matrix calls for">Generate</button>`
-            : `<button class="btn sm" data-ref-toggle="${list.table}|${r.id}"
-                 title="${r.active === false ? "Bring back into use" : "Hide from new forms, keep history"}"
-               >${r.active === false ? "Restore" : "Retire"}</button>`}
+          <button class="btn sm" data-ref-toggle="${list.table}|${r.id}"
+            title="${r.active === false ? "Bring back into use" : "Hide from new forms, keep history"}"
+          >${r.active === false ? "Restore" : "Retire"}</button>
           <button class="btn sm danger" data-ref-del="${list.table}|${r.id}"
             title="Only possible if nothing references it">×</button>
         </div></div>`).join("")}
@@ -1280,37 +1243,231 @@ async function saveTemplate() {
   finally { busy(false); }
 }
 
-function generateSchedule() {
-  const open = S.worksOrders.filter(w => w.status === "open");
-  /* An empty dropdown with no explanation is the same failure as a hidden
-     button: it looks broken rather than unconfigured. Say what is missing and
-     where to go and fix it. */
-  if (!open.length) {
-    openModal("Generate inspections", `
-      <div class="note q"><b>There are no open works orders.</b> A works order is what
-        inspections are generated from — it names what is being built, and its project
-        decides which product family the requirements matrix is read for.</div>
-      <p style="font-size:13px;color:var(--ink-2);margin:14px 0 0">Add one under
-        <b>Scheduling → Projects &amp; works orders</b>. You will need a project first,
-        with a product family set.</p>`,
-      [["Close", "close"], ["Take me there", "goto-works-orders", "pri"]], {});
-    return;
+
+/* ---------------------------------------------------------------
+   Projects and works orders.
+
+   Built as an ordered flow rather than two editable tables. The tables
+   were technically complete and genuinely confusing: two empty grids
+   side by side, an add row that looked like part of the table, a Save
+   button with nothing to save, and no hint that a works order belongs to
+   a project or that anything had to happen in a particular order.
+
+   A works order IS a child of a project, so it is drawn as one. And
+   because generating depends on a published template and a populated
+   matrix, the prerequisites are shown as a checklist instead of failing
+   silently at the end.
+   --------------------------------------------------------------- */
+function worksView() {
+  const publishedCount = publishedRevs().length;
+  const matrixCount = S.requirements.filter(r => r.template_id && r.level !== "na").length;
+
+  const steps = [
+    { ok: publishedCount > 0, label: "A published inspection template",
+      detail: publishedCount
+        ? `${publishedCount} published`
+        : "Drafts are skipped when generating. Publish one in the Form designer.",
+      go: publishedCount ? null : ["dsn", "Form designer"] },
+    { ok: matrixCount > 0, label: "Requirements set for a product family",
+      detail: matrixCount
+        ? `${matrixCount} requirement${matrixCount === 1 ? "" : "s"} configured`
+        : "Nothing tells the scheduler what to inspect.",
+      go: matrixCount ? null : ["req", "Inspection requirements"] },
+    { ok: S.projects.length > 0, label: "A project with a product family",
+      detail: S.projects.length ? `${S.projects.length} project${S.projects.length === 1 ? "" : "s"}` : "Add one below.",
+      go: null }
+  ];
+  const blocked = steps.filter(x => !x.ok).length;
+
+  const checklist = `<div class="card" style="margin-bottom:14px">
+    <h3>Before inspections can be generated
+      <span class="cl">${steps.length - blocked} of ${steps.length} ready</span></h3>
+    <div class="bd">
+      ${steps.map(x => `<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;
+            ${x.ok ? "" : "color:var(--ink)"}">
+        <span style="width:18px;height:18px;border-radius:50%;flex:0 0 18px;display:grid;
+              place-items:center;font-size:11px;font-weight:700;color:#fff;margin-top:1px;
+              background:${x.ok ? "var(--ok)" : "var(--warn)"}">${x.ok ? "✓" : "!"}</span>
+        <div style="flex:1"><div style="font-size:12.8px;font-weight:600">${x.label}</div>
+          <div class="sub">${esc(x.detail)}</div></div>
+        ${x.go ? `<button class="btn sm" data-go="${x.go[0]}">${x.go[1]} →</button>` : ""}
+      </div>`).join("")}
+    </div></div>`;
+
+  if (!S.projects.length) {
+    return checklist + `<div class="card"><div class="bd" style="text-align:center;padding:38px 20px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px">Start with a project</div>
+      <p style="color:var(--ink-2);font-size:13px;max-width:440px;margin:0 auto 18px">
+        A project is a contract or order. Its product family is what decides which inspections
+        the requirements matrix calls for, so it has to be set.</p>
+      <button class="btn pri" data-act="add-project">Add a project</button>
+    </div></div>`;
   }
-  openModal("Generate inspections", `
-    <div class="fld"><label>Works order</label><select id="gWo">
-      ${open.map(w => {
-        const p = byId(S.projects, w.project_id);
-        const fam = p ? byId(S.families, p.family_id) : null;
-        return `<option value="${w.id}">${esc(w.code)} — ${esc(p?.code || "no project")}` +
-               ` · ${esc(fam?.name || "no family")} · qty ${w.qty}</option>`;
-      }).join("")}</select>
-      <div class="hint">The product family comes from the project. Without one, the matrix
-        cannot be read and nothing is generated.</div></div>
-    <div class="note">Reads the requirements matrix for that product family and creates every
-      inspection it calls for. Templates without a published revision are skipped.</div>`,
-    [["Cancel", "close"], ["Generate", "save-generate", "pri"]], {});
+
+  const card = p => {
+    const orders = S.worksOrders.filter(w => w.project_id === p.id);
+    const fam = byId(S.families, p.family_id);
+    return `<div class="card" style="margin-bottom:13px">
+      <div class="bd" style="padding-bottom:6px">
+        <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+          <div style="flex:1;min-width:230px">
+            <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+              <span class="id" style="font-size:12.8px">${esc(p.code)}</span>
+              <b style="font-size:13.5px">${esc(p.name)}</b>
+              ${fam ? pill(fam.name) : pill("No product family")}
+            </div>
+            <div class="sub">${esc(p.customer || "no customer recorded")} ·
+              ${orders.length} works order${orders.length === 1 ? "" : "s"}</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn sm" data-act="edit-project" data-id="${p.id}">Edit</button>
+            <button class="btn sm danger" data-act="del-project" data-id="${p.id}">×</button>
+          </div>
+        </div>
+        ${!fam ? `<div class="note q" style="margin-top:11px">No product family, so the
+          requirements matrix cannot be read for this project and nothing will generate.
+          Edit it and set one.</div>` : ""}
+      </div>
+
+      <div style="border-top:1px solid var(--line);padding:0 16px 14px">
+        ${orders.length ? `<div style="display:grid;grid-template-columns:120px 1fr 60px 110px 190px;
+              gap:9px;padding:10px 2px 6px;font-size:10px;letter-spacing:.12em;
+              text-transform:uppercase;color:var(--muted);font-weight:700">
+            <div>Works order</div><div>Description</div><div>Qty</div><div>Inspections</div><div></div>
+          </div>` : ""}
+        ${orders.map(w => {
+          const made = S.inspections.filter(i => i.works_order_id === w.id).length;
+          return `<div style="display:grid;grid-template-columns:120px 1fr 60px 110px 190px;gap:9px;
+                align-items:center;padding:6px 2px;border-top:1px solid var(--line-2)">
+            <span class="id">${esc(w.code)}</span>
+            <span style="font-size:12.6px">${esc(w.description || "—")}</span>
+            <span style="font-size:12.6px">${w.qty}</span>
+            <span>${made ? pill(`${made} generated`) : `<span style="color:var(--muted);font-size:12px">none yet</span>`}</span>
+            <div style="display:flex;gap:6px;justify-content:flex-end">
+              ${w.status === "held" ? pill("Held") : ""}
+              <button class="btn sm" data-act="edit-wo" data-id="${w.id}">Edit</button>
+              <button class="btn sm ${made ? "" : "pri"}" data-act="gen-wo" data-id="${w.id}"
+                ${blocked ? "disabled title=\"Complete the checklist above first\"" : ""}
+              >${made ? "Generate again" : "Generate"}</button>
+            </div></div>`;
+        }).join("")}
+        ${orders.length ? "" : `<div style="padding:12px 2px;color:var(--muted);font-size:12.5px">
+          No works orders yet. A works order is what is actually being built — its quantity
+          decides how many inspections a 100% rule creates.</div>`}
+        <div style="padding-top:10px">
+          <button class="btn sm" data-act="add-wo" data-id="${p.id}">+ Add works order</button>
+        </div>
+      </div></div>`;
+  };
+
+  return checklist
+    + S.projects.slice().sort((a, b) => a.code.localeCompare(b.code)).map(card).join("")
+    + `<div style="margin-top:4px"><button class="btn" data-act="add-project">+ Add a project</button></div>`;
 }
 
+function projectModal(existing) {
+  const p = existing || {};
+  openModal(existing ? `Edit ${p.code}` : "Add a project", `
+    <div class="two">
+      <div class="fld"><label>Project code</label>
+        <input id="pCode" value="${esc(p.code || "")}" placeholder="P-26118"></div>
+      <div class="fld"><label>Customer</label>
+        <input id="pCustomer" value="${esc(p.customer || "")}" placeholder="Eskom Distribution"></div>
+    </div>
+    <div class="fld"><label>Name</label>
+      <input id="pName" value="${esc(p.name || "")}" placeholder="12 kV panels x 24"></div>
+    <div class="fld"><label>Product family</label>
+      <select id="pFamily">
+        <option value="">— none —</option>
+        ${S.families.map(f => `<option value="${f.id}" ${p.family_id === f.id ? "selected" : ""}>${esc(f.name)}</option>`).join("")}
+      </select>
+      <div class="hint">Decides which inspections the requirements matrix calls for. Without it,
+        nothing generates.</div></div>`,
+    [["Cancel", "close"], [existing ? "Save" : "Add project", "save-project", "pri"]],
+    { id: p.id });
+}
+
+function worksOrderModal(projectId, existing) {
+  const w = existing || {};
+  const pid = existing ? w.project_id : projectId;
+  openModal(existing ? `Edit ${w.code}` : "Add a works order", `
+    <div class="two">
+      <div class="fld"><label>Works order code</label>
+        <input id="wCode" value="${esc(w.code || "")}" placeholder="WO-44812"></div>
+      <div class="fld"><label>Project</label>
+        <select id="wProject">
+          ${S.projects.map(p => `<option value="${p.id}" ${String(pid) === String(p.id) ? "selected" : ""}>${esc(p.code)} — ${esc(p.name)}</option>`).join("")}
+        </select></div>
+    </div>
+    <div class="fld"><label>Description</label>
+      <input id="wDesc" value="${esc(w.description || "")}" placeholder="Panels 1 to 3"></div>
+    <div class="two">
+      <div class="fld"><label>Quantity</label>
+        <input id="wQty" type="number" min="1" value="${w.qty || 1}">
+        <div class="hint">A 100% sampling rule creates one inspection per unit.</div></div>
+      <div class="fld"><label>Status</label>
+        <select id="wStatus">
+          ${["open", "held", "closed"].map(x => `<option ${w.status === x ? "selected" : ""}>${x}</option>`).join("")}
+        </select></div>
+    </div>`,
+    [["Cancel", "close"], [existing ? "Save" : "Add works order", "save-wo", "pri"]],
+    { id: w.id });
+}
+
+async function saveProject() {
+  const row = {
+    code: $("pCode").value.trim(), name: $("pName").value.trim(),
+    customer: $("pCustomer").value.trim() || null,
+    family_id: $("pFamily").value ? Number($("pFamily").value) : null
+  };
+  if (!row.code || !row.name) { toast("A project needs a code and a name.", "bad"); return; }
+  busy(true);
+  try {
+    const { error } = modalCtx.id
+      ? await supabase.from("projects").update(row).eq("id", modalCtx.id)
+      : await supabase.from("projects").insert(row);
+    if (error) throw error;
+    closeModal(); await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function saveWorksOrder() {
+  const row = {
+    code: $("wCode").value.trim(), project_id: Number($("wProject").value),
+    description: $("wDesc").value.trim() || null,
+    qty: Math.max(1, Number($("wQty").value) || 1),
+    status: $("wStatus").value
+  };
+  if (!row.code) { toast("A works order needs a code.", "bad"); return; }
+  busy(true);
+  try {
+    const { error } = modalCtx.id
+      ? await supabase.from("works_orders").update(row).eq("id", modalCtx.id)
+      : await supabase.from("works_orders").insert(row);
+    if (error) throw error;
+    closeModal(); await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function deleteProject(id) {
+  const p = byId(S.projects, id);
+  if (!confirm(`Delete project "${p.code}"?\n\nRefused if any works order or inspection references it.`)) return;
+  busy(true);
+  try {
+    const { error } = await supabase.from("projects").delete().eq("id", id);
+    if (error) throw error;
+    toast(`${p.code} deleted.`, "ok"); await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+/* There is no separate "generate" dialog any more. Generating lives on the
+   works order it applies to, under Scheduling → Projects & works orders. The
+   dialog was a second way to do the same thing, and being a dropdown it could
+   not show what mattered — which project, which family, how many inspections
+   already exist — so it made a clear action look like a form to fill in. */
 async function generateForWorksOrder(id) {
   busy(true);
   try {
@@ -1324,17 +1481,6 @@ async function generateForWorksOrder(id) {
   } catch (e) { toast(explain(e), "bad"); }
   finally { busy(false); }
 }
-async function saveGenerate() {
-  busy(true);
-  try {
-    const { data, error } = await supabase.rpc("generate_inspections", { p_works_order: +$("gWo").value });
-    if (error) throw error;
-    toast(`${data.created} inspection(s) created for ${data.works_order}.`, data.created ? "ok" : "bad");
-    closeModal(); await reload();
-  } catch (e) { toast(explain(e), "bad"); }
-  finally { busy(false); }
-}
-
 /* ---- modal plumbing ---- */
 let modalCtx = {};
 function openModal(title, body, buttons, ctx) {
@@ -1371,7 +1517,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-generate-wo],[data-tpl]");
+  const t = e.target.closest("[data-go],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-generate-wo],[data-tpl],[data-id]");
   if (!t) return;
   const d = t.dataset;
 
@@ -1452,10 +1598,14 @@ document.addEventListener("click", async e => {
     case "submit-inspection": return submitInspection();
     case "toggle-hp": return toggleHoldPoints();
     case "toggle-2nd": return toggleSecondApprover();
-    case "generate": return generateSchedule();
-    case "save-generate": return saveGenerate();
-    case "goto-works-orders":
-      closeModal(); S.view = "sched"; S.tab = 2; buildNav(); return render();
+    case "add-project": return projectModal(null);
+    case "edit-project": return projectModal(byId(S.projects, Number(t.dataset.id)));
+    case "del-project": return deleteProject(Number(t.dataset.id));
+    case "save-project": return saveProject();
+    case "add-wo": return worksOrderModal(Number(t.dataset.id), null);
+    case "edit-wo": return worksOrderModal(null, byId(S.worksOrders, Number(t.dataset.id)));
+    case "save-wo": return saveWorksOrder();
+    case "gen-wo": return generateForWorksOrder(t.dataset.id);
     case "save-cell": return saveCell();
     case "clear-cell": { const { existingId } = modalCtx;
       if (existingId) { await supabase.from("inspection_requirements").delete().eq("id", existingId); }
