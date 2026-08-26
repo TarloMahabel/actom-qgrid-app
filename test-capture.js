@@ -56,8 +56,8 @@ const { loadApp, suite } = require('./test/harness');
   /* The prerequisites are shown up front. Generating depends on a published
      template and a populated matrix, and failing silently at the end of the
      flow taught the user nothing. */
-  s.check('prerequisites are listed before anything else',
-    $('page').innerHTML.includes('Before inspections can be generated'));
+  s.check('the full setup chain is listed before anything else',
+    $('page').innerHTML.includes('Getting to a scheduled inspection'));
   s.check('a works order is drawn inside its project',
     $('page').innerHTML.indexOf('Add works order') > $('page').innerHTML.indexOf('works order'));
   s.check('adding a project is offered', !!d.querySelector('[data-act="add-project"]'));
@@ -88,6 +88,46 @@ const { loadApp, suite } = require('./test/harness');
   s.check('saving inserts the works order', insW && insW[2].code === 'WO-99999',
     insW ? JSON.stringify(insW[2]) : 'no call');
 
+  s.group('an empty schedule says what is blocking it');
+  /* Reported as "I cannot schedule even if a project is created": the Schedule
+     tab said only "Nothing to show yet", which is indistinguishable from a
+     broken app. Every screen that can be empty now names the same next step. */
+  const partial = await loadApp('inspect', {
+    afterMock: win => {
+      const D = win.GRID_TEST_DATA;
+      D.works_orders = []; D.inspections = []; D.inspection_requirements = [];
+      D.projects = [{ id: 1, code: 'P-26118', name: 'Eskom panels', family_id: null, active: true }];
+    }
+  });
+  const pd = partial.window.document;
+  for (const [tab, label] of [[0, 'Schedule'], [1, 'Unassigned']]) {
+    pd.querySelector('#nav button[data-go="sched"]').click(); await partial.sleep(60);
+    pd.querySelector(`.tabs button[data-tab="${tab}"]`).click(); await partial.sleep(120);
+    const txt = partial.$('page').textContent;
+    s.check(`${label} names the next step`, txt.includes('Next step'));
+    s.check(`${label} says what is missing`, txt.includes('tells the scheduler what to inspect'));
+    s.check(`${label} links to the screen that fixes it`,
+      !!pd.querySelector('[data-goto="req"]'));
+  }
+  /* The blocker is the FIRST unmet step, not just any of them: a project with
+     no family and no works orders are also missing, but the requirements
+     matrix comes first in the chain and is what to do next. */
+  pd.querySelector('[data-goto="req"]').click(); await partial.sleep(140);
+  /* Assert the heading, not body copy: the first version matched a lowercase
+     phrase that only appeared as a capitalised table header, so it failed
+     against a link that worked perfectly. */
+  s.check('the link lands on the requirements matrix',
+    partial.$('page').querySelector('h1').textContent.includes('Inspection requirements'));
+
+  pd.querySelector('#nav button[data-go="sched"]').click(); await partial.sleep(60);
+  pd.querySelector('.tabs button[data-tab="2"]').click(); await partial.sleep(140);
+  const chain = partial.$('page').textContent;
+  s.check('the full chain is shown with progress', chain.includes('of 6 done'));
+  s.check('completed steps are ticked', chain.includes('1 published'));
+  s.check('a project with no product family is flagged',
+    chain.includes("Set the project's product family"));
+  s.check('deep links carry the tab', !!pd.querySelector('[data-goto="sched:2"]'));
+
   s.group('an empty division is guided, not left blank');
   /* Booted with nothing set up. Two empty tables and a Save button with
      nothing to save was the confusing part; this asserts the replacement
@@ -106,11 +146,11 @@ const { loadApp, suite } = require('./test/harness');
   const bare_html = bare.$('page').innerHTML;
   s.check('it names the single next step', bare_html.includes('Start with a project'));
   s.check('it flags the missing published template',
-    bare_html.includes('Publish one in the Form designer'));
+    bare_html.includes('has to be published'));
   s.check('it flags the empty requirements matrix',
     bare_html.includes('what to inspect'));
   s.check('it links straight to the screens that fix it',
-    !!bd.querySelector('[data-go="dsn"]') && !!bd.querySelector('[data-go="req"]'));
+    !!bd.querySelector('[data-goto="dsn"]') && !!bd.querySelector('[data-goto="req"]'));
   s.check('no empty table with a dead Save button', !bare_html.includes('No unsaved changes'));
 
   /* Generating has exactly one home now — the works order row. The old header

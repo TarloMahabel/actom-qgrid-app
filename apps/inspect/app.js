@@ -288,6 +288,7 @@ function vDash(m) {
       <div class="card kpi ${d.unassigned ? "warn" : "good"}"><div class="k">Unassigned</div><div class="v">${d.unassigned ?? 0}</div><div class="d">scheduled with no inspector</div></div>
       <div class="card kpi ${d.awaiting_disposition ? "alert" : "good"}"><div class="k">Awaiting disposition</div><div class="v">${d.awaiting_disposition ?? 0}</div><div class="d">failed checks with no decision</div></div>
     </div>
+    ${nextStep() ? readinessCard("Setup is not finished") : ""}
     <div class="card"><h3>Open work</h3>${
       T(["Reference", "Inspection", "Stage", "Unit", "Planned", "Inspector", "Status"],
         S.inspections.filter(i => i.status !== "completed").slice(0, 12).map(i => {
@@ -342,7 +343,8 @@ function vWork(m) {
           pill(i.planned_date < today() && i.status === "scheduled" ? "Overdue" : i.status),
           `<button class="btn sm pri" data-open-capture="${i.id}">${i.status === "in_progress" ? "Resume" : "Start"}</button>`];
       }))
-      : `<div class="card"><div class="empty">Nothing assigned to you. Scheduled work appears here automatically.</div></div>`;
+      : emptyBecause("Nothing assigned to you",
+          "Nothing assigned to you. Scheduled work appears here automatically.");
   }
   else if (S.tab === 1) body = renderCapture();
   else if (S.tab === 2) {
@@ -474,7 +476,8 @@ function vSched(m) {
         <span class="spacer"></span>
         ${canPlan() ? `<button class="btn" data-tab="2">Projects &amp; works orders →</button>` : ""}
       </div>` +
-      T(["Reference", "Inspection", "Stage", "Project / works order", "Unit", "Planned", "Inspector", "Status"],
+      (S.inspections.length
+        ? T(["Reference", "Inspection", "Stage", "Project / works order", "Unit", "Planned", "Inspector", "Status"],
         S.inspections.slice(0, 80).map(i => {
           const t = tplForRev(i.template_rev_id);
           return [`<span class="id">${esc(i.ref)}</span>`, esc(t?.name || "—"), esc(stageName(i.stage_id)),
@@ -482,7 +485,9 @@ function vSched(m) {
             esc(i.unit_ref || "—"), fmtDate(i.planned_date),
             i.assigned_to ? esc(byId(S.people, i.assigned_to)?.full_name || "—") : pill("Unassigned"),
             pill(i.planned_date < today() && i.status === "scheduled" ? "Overdue" : i.status)];
-        }));
+        }))
+        : emptyBecause("Nothing is scheduled yet",
+            "Nothing scheduled. Generate from a works order when there is work to inspect."));
   } else if (S.tab === 1) {
     const u = unassigned();
     body = u.length ? T(["Reference", "Inspection", "Stage", "Unit", "Planned", "Assign to"],
@@ -493,7 +498,8 @@ function vSched(m) {
           `<select data-assign="${i.id}"><option value="">— choose —</option>${
             S.people.filter(p => p.active).map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("")}</select>`];
       }))
-      : `<div class="card"><div class="empty">Nothing unassigned. This list is the leading indicator of an overdue, so an empty one is the goal.</div></div>`;
+      : emptyBecause("Nothing unassigned",
+          "Nothing unassigned. This list is the leading indicator of an overdue, so an empty one is the goal.");
   } else {
     body = worksView();
   }
@@ -728,8 +734,13 @@ function vReq(m) {
       }).join("")}</tr>`).join("")}
   </tbody></table></div>`;
 
+  const noPub = publishedRevs().length === 0;
   return head(m, "Which inspection is required, at which stage, for which product. Click any cell to configure it.",
     `<button class="btn" data-act="refresh">Refresh</button>`) + tabbar(m)
+    + (noPub ? `<div class="note q" style="margin-bottom:13px"><b>No template is published.</b>
+        A requirement can be set against a draft, but the scheduler skips it — nothing will be
+        generated until a revision is published.
+        <button class="btn sm" data-goto="dsn" style="margin-left:8px">Form designer →</button></div>` : "")
     + `<div class="card"><div class="bd">${table}
         <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;font-size:11.5px;align-items:center">
           ${HP() ? `<span><span class="mc hold" style="padding:2px 8px">Hold point</span> blocks the works order</span>` : ""}
@@ -1256,6 +1267,88 @@ async function saveTemplate() {
 }
 
 
+
+/* ---------------------------------------------------------------
+   Readiness.
+
+   Getting from a bare division to a scheduled inspection takes six
+   things in order, and every screen that can be empty was saying only
+   "Nothing to show yet" — which is indistinguishable from a broken app.
+   The chain is computed once here so the works-order view, the schedule,
+   the unassigned list and the inspector's queue all name the SAME next
+   step rather than each guessing.
+   --------------------------------------------------------------- */
+function readiness() {
+  const published = publishedRevs().length;
+  const matrix = S.requirements.filter(r => r.template_id && r.level !== "na").length;
+  const withFamily = S.projects.filter(p => p.family_id).length;
+  return [
+    { ok: published > 0,
+      label: "Publish an inspection template",
+      detail: published ? `${published} published`
+        : "A draft is skipped when generating — it has to be published.",
+      go: ["dsn", "Form designer"] },
+    { ok: matrix > 0,
+      label: "Say which inspections a product family needs",
+      detail: matrix ? `${matrix} requirement${matrix === 1 ? "" : "s"} configured`
+        : "Nothing yet tells the scheduler what to inspect.",
+      go: ["req", "Inspection requirements"] },
+    { ok: S.projects.length > 0,
+      label: "Add a project",
+      detail: S.projects.length ? `${S.projects.length} project${S.projects.length === 1 ? "" : "s"}`
+        : "A contract or order.",
+      go: ["sched", "Projects & works orders", 2] },
+    { ok: withFamily > 0,
+      label: "Set the project's product family",
+      detail: withFamily ? `${withFamily} with a family set`
+        : "Without one, the requirements matrix cannot be read for it.",
+      go: ["sched", "Projects & works orders", 2] },
+    { ok: S.worksOrders.length > 0,
+      label: "Add a works order to the project",
+      detail: S.worksOrders.length ? `${S.worksOrders.length} works order${S.worksOrders.length === 1 ? "" : "s"}`
+        : "What is actually being built. Its quantity decides how many inspections are created.",
+      go: ["sched", "Projects & works orders", 2] },
+    { ok: S.inspections.length > 0,
+      label: "Generate the inspections",
+      detail: S.inspections.length ? `${S.inspections.length} inspection${S.inspections.length === 1 ? "" : "s"}`
+        : "Press Generate on the works order.",
+      go: ["sched", "Projects & works orders", 2] }
+  ];
+}
+const nextStep = () => readiness().find(x => !x.ok) || null;
+
+function readinessCard(title) {
+  const steps = readiness();
+  const done = steps.filter(x => x.ok).length;
+  return `<div class="card" style="margin-bottom:14px">
+    <h3>${esc(title)} <span class="cl">${done} of ${steps.length} done</span></h3>
+    <div class="bd">
+      ${steps.map((x, i) => `<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;
+            ${i && !steps[i - 1].ok && !x.ok ? "opacity:.55" : ""}">
+        <span style="width:19px;height:19px;border-radius:50%;flex:0 0 19px;display:grid;
+              place-items:center;font-size:10.5px;font-weight:700;color:#fff;margin-top:1px;
+              background:${x.ok ? "var(--ok)" : "var(--muted)"}">${x.ok ? "✓" : i + 1}</span>
+        <div style="flex:1"><div style="font-size:12.8px;font-weight:600">${esc(x.label)}</div>
+          <div class="sub">${esc(x.detail)}</div></div>
+        ${x.ok ? "" : `<button class="btn sm" data-goto="${x.go[0]}${x.go[2] !== undefined ? ":" + x.go[2] : ""}">${esc(x.go[1])} →</button>`}
+      </div>`).join("")}
+    </div></div>`;
+}
+
+/* The empty state for a list that has nothing in it BECAUSE setup is
+   incomplete, as opposed to nothing in it because the work is done. */
+function emptyBecause(whatIsEmpty, doneMessage) {
+  const step = nextStep();
+  if (!step) return `<div class="card"><div class="empty">${esc(doneMessage)}</div></div>`;
+  return `<div class="card"><div class="bd" style="text-align:center;padding:34px 20px">
+    <div style="font-size:14.5px;font-weight:700;margin-bottom:5px">${esc(whatIsEmpty)}</div>
+    <p style="color:var(--ink-2);font-size:13px;max-width:460px;margin:0 auto 6px">
+      Next step: <b>${esc(step.label)}</b></p>
+    <p style="color:var(--muted);font-size:12.5px;max-width:460px;margin:0 auto 18px">${esc(step.detail)}</p>
+    <button class="btn pri" data-goto="${step.go[0]}${step.go[2] !== undefined ? ":" + step.go[2] : ""}">${esc(step.go[1])} →</button>
+  </div></div>`;
+}
+
 /* ---------------------------------------------------------------
    Projects and works orders.
 
@@ -1271,40 +1364,9 @@ async function saveTemplate() {
    silently at the end.
    --------------------------------------------------------------- */
 function worksView() {
-  const publishedCount = publishedRevs().length;
-  const matrixCount = S.requirements.filter(r => r.template_id && r.level !== "na").length;
-
-  const steps = [
-    { ok: publishedCount > 0, label: "A published inspection template",
-      detail: publishedCount
-        ? `${publishedCount} published`
-        : "Drafts are skipped when generating. Publish one in the Form designer.",
-      go: publishedCount ? null : ["dsn", "Form designer"] },
-    { ok: matrixCount > 0, label: "Requirements set for a product family",
-      detail: matrixCount
-        ? `${matrixCount} requirement${matrixCount === 1 ? "" : "s"} configured`
-        : "Nothing tells the scheduler what to inspect.",
-      go: matrixCount ? null : ["req", "Inspection requirements"] },
-    { ok: S.projects.length > 0, label: "A project with a product family",
-      detail: S.projects.length ? `${S.projects.length} project${S.projects.length === 1 ? "" : "s"}` : "Add one below.",
-      go: null }
-  ];
+  const steps = readiness();
   const blocked = steps.filter(x => !x.ok).length;
-
-  const checklist = `<div class="card" style="margin-bottom:14px">
-    <h3>Before inspections can be generated
-      <span class="cl">${steps.length - blocked} of ${steps.length} ready</span></h3>
-    <div class="bd">
-      ${steps.map(x => `<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;
-            ${x.ok ? "" : "color:var(--ink)"}">
-        <span style="width:18px;height:18px;border-radius:50%;flex:0 0 18px;display:grid;
-              place-items:center;font-size:11px;font-weight:700;color:#fff;margin-top:1px;
-              background:${x.ok ? "var(--ok)" : "var(--warn)"}">${x.ok ? "✓" : "!"}</span>
-        <div style="flex:1"><div style="font-size:12.8px;font-weight:600">${x.label}</div>
-          <div class="sub">${esc(x.detail)}</div></div>
-        ${x.go ? `<button class="btn sm" data-go="${x.go[0]}">${x.go[1]} →</button>` : ""}
-      </div>`).join("")}
-    </div></div>`;
+  const checklist = readinessCard("Getting to a scheduled inspection");
 
   if (!S.projects.length) {
     return checklist + `<div class="card"><div class="bd" style="text-align:center;padding:38px 20px">
@@ -1529,11 +1591,19 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-tpl],[data-id]");
+  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-tpl],[data-id]");
   if (!t) return;
   const d = t.dataset;
 
   if (d.go) return go(d.go);
+  if (d.goto) {
+    /* "view" or "view:tab" — the readiness steps point at a specific tab, and
+       landing on the right module but the wrong tab is barely better than not
+       linking at all. */
+    const [v, tb] = d.goto.split(":");
+    S.view = v; S.tab = tb ? Number(tb) : 0; buildNav(); render(); window.scrollTo(0, 0);
+    return;
+  }
   if (d.tab !== undefined) { S.tab = +d.tab; return render(); }
   if (d.openCapture) return openCapture(d.openCapture);
   if (d.sel) { S.designer.sel = d.sel; return render(); }
