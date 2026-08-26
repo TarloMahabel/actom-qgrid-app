@@ -1,0 +1,11 @@
+config.js
+.env
+.env.*
+!.env.example
+node_modules/
+.netlify/
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini

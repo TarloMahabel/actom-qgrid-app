@@ -1,0 +1,37 @@
+{
+  "_comment": "Division registry. Metadata only - never secrets. Secrets live in GitHub Actions secrets named DB_URL_<CODE>.",
+  "product": "qgrid-inspections",
+  "repo": "TarloMahabel/actom-qgrid-app",
+  "divisions": [
+    {
+      "code": "MVS",
+      "name": "ACTOM MV Switchgear",
+      "supabase_project_ref": "REPLACE_ME",
+      "netlify_site_name": "actom-qgrid-mvs",
+      "domain": "qgrid-mvs.actom.co.za",
+      "status": "pilot",
+      "go_live": "2026-11-03",
+      "seed": "db/seed/division_mvs.sql"
+    },
+    {
+      "code": "DTX",
+      "name": "ACTOM Distribution Transformers",
+      "supabase_project_ref": null,
+      "netlify_site_name": "actom-qgrid-dtx",
+      "domain": "qgrid-dtx.actom.co.za",
+      "status": "planned",
+      "go_live": null,
+      "seed": "db/seed/division_generic.sql"
+    },
+    {
+      "code": "RM",
+      "name": "Reid & Mitchell",
+      "supabase_project_ref": null,
+      "netlify_site_name": "actom-qgrid-rm",
+      "domain": "qgrid-rm.actom.co.za",
+      "status": "planned",
+      "go_live": null,
+      "seed": "db/seed/division_generic.sql"
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACTOM QGrid — Inspections</title>
+<link rel="stylesheet" href="styles.css?v=1">
+<!-- config.js is generated at deploy time by scripts/gen-config.mjs from the
+     Netlify site environment variables. It is never committed. -->
+<script src="config.js?v=1"></script>
+</head>
+<body>
+
+<!-- ---------------- loading ---------------- -->
+<div id="loader">
+  <svg width="290" height="88" viewBox="0 0 320 96" fill="none" aria-label="ACTOM">
+    <text x="14" y="56" font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif" font-size="58" font-weight="300" letter-spacing="3" fill="#fff">ACTOM</text>
+    <path class="spark" d="M14 72 H150 L172 50 H196 L214 72 H306" stroke="#fff" stroke-width="2.4" fill="none" stroke-linejoin="round"/>
+    <path class="spark" d="M14 79 H146 L168 57" stroke="#fff" stroke-width="2.4" fill="none" stroke-linejoin="round" opacity=".85"/>
+    <text x="306" y="92" text-anchor="end" font-family="'Segoe UI',Arial,sans-serif" font-size="12" letter-spacing="3" fill="#9db9d6">SINCE 1903</text>
+  </svg>
+  <div class="ldr-txt">QGrid · Quality Inspections</div>
+  <div class="ldr-bar"><i></i></div>
+</div>
+
+<!-- ---------------- sign in ---------------- -->
+<div class="gate hidden" id="gateSignIn">
+  <div class="gatebox">
+    <div class="tile" style="width:56px;height:56px;border-radius:12px">
+      <svg width="38" height="21" viewBox="0 0 300 96" fill="none" aria-label="ACTOM">
+        <text x="4" y="54" font-family="'Segoe UI',Arial,sans-serif" font-size="54" letter-spacing="1" fill="#fff">ACTOM</text>
+        <path d="M4 70 H140 L160 50 H182 L198 70 H288" stroke="#fff" stroke-width="5" fill="none" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h1>ACTOM QGrid</h1>
+    <p id="gateDivision">Quality inspections</p>
+    <div class="err hidden" id="signInErr"></div>
+    <button class="btn pri" id="btnSignIn">
+      <svg width="15" height="15" viewBox="0 0 23 23" aria-hidden="true"><path fill="#f25022" d="M0 0h11v11H0z"/><path fill="#7fba00" d="M12 0h11v11H12z"/><path fill="#00a4ef" d="M0 12h11v11H0z"/><path fill="#ffb900" d="M12 12h11v11H12z"/></svg>
+      Sign in with your ACTOM account
+    </button>
+    <div class="foot">Powering South Africa since 1903</div>
+  </div>
+</div>
+
+<!-- ---------------- awaiting activation ---------------- -->
+<div class="gate hidden" id="gatePending">
+  <div class="gatebox">
+    <h1>Almost there</h1>
+    <p>Your account has been created but is not active yet. A Quality administrator
+       needs to activate it and assign your role and department.</p>
+    <p style="font-size:12.5px;color:var(--muted)" id="pendingWho"></p>
+    <button class="btn pri" id="btnRecheck">Check again</button>
+    <div class="foot" id="pendingAuto">Checking automatically every 20 seconds…</div>
+    <div style="margin-top:14px"><button class="btn sm" id="btnSignOut2">Sign out</button></div>
+  </div>
+</div>
+
+<!-- ---------------- application ---------------- -->
+<div class="shell hidden" id="app">
+  <aside class="side">
+    <div class="brandbox">
+      <div class="tile">
+        <svg width="30" height="17" viewBox="0 0 300 96" fill="none" aria-label="ACTOM">
+          <text x="4" y="54" font-family="'Segoe UI',Arial,sans-serif" font-size="54" letter-spacing="1" fill="#fff">ACTOM</text>
+          <path d="M4 70 H140 L160 50 H182 L198 70 H288" stroke="#fff" stroke-width="5" fill="none" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div>
+        <div class="nm">QGrid</div>
+        <div class="sub" id="sideDivision">Inspections</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidefoot">
+      <div id="whatsNew" style="cursor:pointer;font-weight:600;color:var(--brand-dk)">What's new</div>
+      <div class="buildtag" id="buildTag"></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="top">
+      <div class="srch">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#46587a" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="search" placeholder="Search inspections, works orders, panel serials…">
+      </div>
+      <div class="topright">
+        <span class="chip r hidden" id="chipOverdue"></span>
+        <span class="chip g hidden" id="chipYield"></span>
+        <button class="iconbtn" id="btnRefresh" title="Refresh">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg></button>
+        <div class="who"><div class="n" id="whoName"></div><div class="e" id="whoEmail"></div></div>
+        <div class="avatar" id="whoInitials"></div>
+        <button class="btn sm" id="btnSignOut">Sign out</button>
+      </div>
+    </header>
+    <div class="page" id="page"></div>
+  </div>
+</div>
+
+<div class="modal" id="modal"><div class="mbox">
+  <div class="mhead"><h2 id="mTitle"></h2><span class="clausetag hidden" id="mClause"></span><button class="x" id="mClose">&times;</button></div>
+  <div class="mbody" id="mBody"></div><div class="mfoot" id="mFoot"></div>
+</div></div>
+
+<div class="busy hidden" id="busy"><div class="sp"></div></div>
+
+<script type="module" src="app.js?v=1"></script>
+</body>
+</html>

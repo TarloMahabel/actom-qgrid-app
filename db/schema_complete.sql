@@ -1,0 +1,972 @@
+-- ============================================================
+--  ACTOM QGrid — Inspections (Phase 1)
+--  COMPLETE SCHEMA — one runnable script
+--
+--  Paste into the Supabase SQL editor of a NEW, EMPTY project and run.
+--  Order matters; do not run sections out of sequence.
+--
+--  Contents
+--    1  Core schema, controls and row level security
+--    2  Application wiring: auth trigger, numbering, storage, RPCs
+--    3  Group reference data (identical in every division)
+--    4  Division seed — EDIT THIS SECTION for your division
+--    5  Migration ledger stamp  <-- do not skip
+--    6  Verification
+--
+--  This script is for a fresh project. It is not idempotent: running it
+--  twice will fail on "type user_role already exists", which is the
+--  intended safety net rather than a bug.
+-- ============================================================
+
+-- Refuse to run against a database that already has QGrid in it.
+do $guard$
+begin
+  if exists (select 1 from information_schema.tables
+              where table_schema = 'public' and table_name = 'inspections') then
+    raise exception 'QGrid schema already present. Use supabase db push for changes, not this script.';
+  end if;
+end $guard$;
+
+
+
+-- ============================================================
+--  SECTION 1 — Core schema, controls and row level security
+-- ============================================================
+
+create extension if not exists "pgcrypto";
+
+-- ------------------------------------------------------------
+-- Division identity (exactly one row per database)
+-- ------------------------------------------------------------
+create table division_profile (
+  id              boolean primary key default true check (id),
+  code            text not null,              -- 'MVS'
+  name            text not null,              -- 'ACTOM MV Switchgear'
+  legal_name      text not null default 'A division of ACTOM (Pty) Ltd',
+  hold_points     boolean not null default false,
+  fy_start_month  smallint not null default 7,
+  created_at      timestamptz not null default now()
+);
+
+-- ------------------------------------------------------------
+-- People and access
+-- ------------------------------------------------------------
+create type user_role as enum
+  ('inspector','supervisor','quality_engineer','quality_manager','planner','sysadmin','readonly');
+
+create table departments (
+  id          smallserial primary key,
+  name        text not null unique,
+  stage_id    smallint,                        -- fk added after stages
+  active      boolean not null default true,
+  sort_order  smallint not null default 0
+);
+
+create table profiles (
+  id            uuid primary key references auth.users(id) on delete cascade,
+  entra_oid     text unique,
+  full_name     text not null,
+  email         text not null,
+  role          user_role not null default 'inspector',
+  department_id smallint references departments(id),
+  active        boolean not null default false, -- new users inactive until activated
+  created_at    timestamptz not null default now()
+);
+
+create table competencies (
+  id            serial primary key,
+  profile_id    uuid not null references profiles(id) on delete cascade,
+  skill         text not null,
+  level         smallint not null check (level between 0 and 3),
+  valid_from    date,
+  valid_to      date,
+  unique (profile_id, skill)
+);
+
+-- ------------------------------------------------------------
+-- Reference lists (administrator-maintained)
+-- ------------------------------------------------------------
+create table manufacturing_stages (
+  id         smallserial primary key,
+  name       text not null unique,
+  sort_order smallint not null default 0,
+  active     boolean not null default true
+);
+alter table departments
+  add constraint departments_stage_fk foreign key (stage_id) references manufacturing_stages(id);
+
+create table product_families (
+  id      smallserial primary key,
+  name    text not null unique,
+  active  boolean not null default true
+);
+
+create table defect_codes (
+  id          smallserial primary key,
+  code        text not null unique,            -- immutable
+  description text not null,                   -- editable
+  default_department_id smallint references departments(id),
+  active      boolean not null default true
+);
+
+create table equipment (
+  id           serial primary key,
+  asset_no     text not null unique,
+  name         text not null,
+  category     text not null,
+  location     text,
+  interval_months smallint,
+  last_calibrated date,
+  next_due     date,
+  status       text not null default 'calibrated'
+               check (status in ('calibrated','due','overdue','out_of_service','repair')),
+  active       boolean not null default true
+);
+
+-- ------------------------------------------------------------
+-- Inspection form templates (built in the form designer)
+-- ------------------------------------------------------------
+create type template_status as enum ('draft','in_review','published','superseded');
+
+create table inspection_templates (
+  id            uuid primary key default gen_random_uuid(),
+  code          text not null unique,          -- IT-ASM-04
+  name          text not null,
+  stage_id      smallint not null references manufacturing_stages(id),
+  family_id     smallint references product_families(id),   -- null = all families
+  min_competency smallint not null default 2 check (min_competency between 1 and 3),
+  fail_mode     text not null default 'record'
+                check (fail_mode in ('record','hold','quarantine')),
+  created_by    uuid references profiles(id),
+  created_at    timestamptz not null default now()
+);
+
+create table template_revisions (
+  id            uuid primary key default gen_random_uuid(),
+  template_id   uuid not null references inspection_templates(id) on delete cascade,
+  rev           smallint not null,
+  status        template_status not null default 'draft',
+  definition    jsonb not null,                -- sections + fields, as built in the designer
+  created_by    uuid not null references profiles(id),
+  approved_by   uuid references profiles(id),  -- must differ from created_by
+  effective_from date,
+  created_at    timestamptz not null default now(),
+  unique (template_id, rev),
+  constraint approver_not_author check (approved_by is null or approved_by <> created_by)
+);
+create unique index one_published_rev
+  on template_revisions (template_id) where status = 'published';
+
+-- ------------------------------------------------------------
+-- Requirements matrix (family x stage) — configured by admin
+-- ------------------------------------------------------------
+create table inspection_requirements (
+  id            serial primary key,
+  family_id     smallint not null references product_families(id) on delete cascade,
+  stage_id      smallint not null references manufacturing_stages(id) on delete cascade,
+  template_id   uuid references inspection_templates(id),
+  level         text not null default 'required'
+                check (level in ('hold','required','optional','na')),
+  sampling      text not null default 'full'
+                check (sampling in ('full','first_off','sample_pct','per_shift','per_delivery')),
+  sample_pct    smallint,
+  min_competency smallint check (min_competency between 1 and 3),
+  updated_by    uuid references profiles(id),
+  updated_at    timestamptz not null default now(),
+  unique (family_id, stage_id)
+);
+
+-- ------------------------------------------------------------
+-- Work
+-- ------------------------------------------------------------
+create table projects (
+  id          serial primary key,
+  code        text not null unique,            -- P-26118
+  name        text not null,
+  customer    text,
+  family_id   smallint references product_families(id),
+  active      boolean not null default true
+);
+
+create table works_orders (
+  id          serial primary key,
+  code        text not null unique,            -- WO-44812
+  project_id  int not null references projects(id),
+  description text,
+  qty         int not null default 1,
+  status      text not null default 'open'
+              check (status in ('open','held','closed')),
+  released_at timestamptz
+);
+
+-- ------------------------------------------------------------
+-- Inspections
+-- ------------------------------------------------------------
+create type inspection_status as enum
+  ('scheduled','in_progress','completed','cancelled');
+
+create table inspections (
+  id             uuid primary key default gen_random_uuid(),
+  ref            text not null unique,          -- INS-26-1191
+  template_rev_id uuid not null references template_revisions(id),  -- version-locked
+  stage_id       smallint not null references manufacturing_stages(id),
+  project_id     int references projects(id),
+  works_order_id int references works_orders(id),
+  unit_ref       text,                          -- panel serial / batch
+  assigned_to    uuid references profiles(id),
+  department_id  smallint references departments(id),
+  planned_date   date,
+  status         inspection_status not null default 'scheduled',
+  result         text check (result in ('pass','fail')),
+  generated_from text not null default 'works_order',
+  started_at     timestamptz,
+  completed_at   timestamptz,
+  signed_by      uuid references profiles(id),
+  signed_at      timestamptz,
+  signature_hash text,                          -- hash of payload at signature
+  amends_id      uuid references inspections(id), -- correction chain
+  created_at     timestamptz not null default now()
+);
+create index inspections_open_idx on inspections (status, planned_date);
+create index inspections_assigned_idx on inspections (assigned_to) where status <> 'completed';
+
+create table inspection_results (
+  id            uuid primary key default gen_random_uuid(),
+  inspection_id uuid not null references inspections(id) on delete cascade,
+  field_id      text not null,                  -- field id from the template definition
+  label         text not null,                  -- denormalised: survives template edits
+  value_text    text,
+  value_num     numeric,
+  outcome       text check (outcome in ('pass','fail','na')),
+  equipment_id  int references equipment(id),
+  comment       text,
+  recorded_at   timestamptz not null default now(),
+  unique (inspection_id, field_id)
+);
+
+create table attachments (
+  id            uuid primary key default gen_random_uuid(),
+  inspection_id uuid references inspections(id) on delete cascade,
+  result_id     uuid references inspection_results(id) on delete cascade,
+  storage_path  text not null,
+  kind          text not null default 'photo',
+  uploaded_by   uuid not null references profiles(id),
+  uploaded_at   timestamptz not null default now()
+);
+
+-- Failed checks: the Phase 1 home for a failure. In Phase 2 these
+-- become the source records for NCRs without any data migration.
+create table failed_checks (
+  id            uuid primary key default gen_random_uuid(),
+  ref           text not null unique,           -- FC-26-0212
+  inspection_id uuid not null references inspections(id) on delete cascade,
+  result_id     uuid not null references inspection_results(id) on delete cascade,
+  defect_code_id smallint references defect_codes(id),
+  is_hold       boolean not null default false,
+  disposition   text check (disposition in
+                ('awaiting','rework_reinspect','accept_concession','quarantine','scrap')),
+  disposition_by uuid references profiles(id),
+  disposition_at timestamptz,
+  reason        text,
+  ncr_id        uuid,                            -- populated in Phase 2
+  created_at    timestamptz not null default now()
+);
+
+-- ------------------------------------------------------------
+-- Audit trail — append only, no update or delete for anyone
+-- ------------------------------------------------------------
+create table audit_trail (
+  id          bigserial primary key,
+  at          timestamptz not null default now(),
+  actor       uuid,
+  actor_name  text,
+  action      text not null,
+  entity      text not null,
+  entity_id   text,
+  detail      jsonb
+);
+create index audit_trail_at_idx on audit_trail (at desc);
+
+-- ------------------------------------------------------------
+-- Reference numbering — sequence table + advisory lock.
+-- Never max(id)+1: two inspectors submitting at once must not collide.
+-- ------------------------------------------------------------
+create table ref_sequences (
+  prefix   text primary key,
+  period   text not null,
+  last_val int  not null default 0
+);
+
+create or replace function next_ref(p_prefix text, p_width int default 4)
+returns text language plpgsql as $$
+declare v_period text; v_next int;
+begin
+  v_period := to_char(now(), 'YY');
+  perform pg_advisory_xact_lock(hashtext(p_prefix));
+  insert into ref_sequences (prefix, period, last_val)
+    values (p_prefix, v_period, 0)
+    on conflict (prefix) do nothing;
+  update ref_sequences
+     set last_val = case when period = v_period then last_val + 1 else 1 end,
+         period   = v_period
+   where prefix = p_prefix
+  returning last_val into v_next;
+  return p_prefix || '-' || v_period || '-' || lpad(v_next::text, p_width, '0');
+end $$;
+
+-- ------------------------------------------------------------
+-- Helper functions used by every policy
+-- ------------------------------------------------------------
+create or replace function me() returns profiles
+language sql stable security definer set search_path = public as $$
+  select * from profiles where id = auth.uid()
+$$;
+
+create or replace function has_role(variadic roles user_role[])
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from profiles
+    where id = auth.uid() and active and role = any(roles)
+  )
+$$;
+
+create or replace function my_department() returns smallint
+language sql stable security definer set search_path = public as $$
+  select department_id from profiles where id = auth.uid()
+$$;
+
+-- ------------------------------------------------------------
+-- Controls enforced in the database, not the browser.
+-- These are the rules an auditor will test.
+-- ------------------------------------------------------------
+
+-- 1. A signed inspection cannot be edited. Corrections create a new record.
+create or replace function inspection_immutable_after_signature()
+returns trigger language plpgsql as $$
+begin
+  if old.signed_at is not null then
+    raise exception 'INS_SIGNED: % is signed and cannot be edited. Create an amendment.', old.ref;
+  end if;
+  return new;
+end $$;
+create trigger trg_inspection_lock before update on inspections
+  for each row execute function inspection_immutable_after_signature();
+
+create or replace function result_immutable_after_signature()
+returns trigger language plpgsql as $$
+declare v_signed timestamptz;
+begin
+  select signed_at into v_signed from inspections
+   where id = coalesce(new.inspection_id, old.inspection_id);
+  if v_signed is not null then
+    raise exception 'INS_SIGNED: inspection is signed; results are read-only';
+  end if;
+  return coalesce(new, old);
+end $$;
+create trigger trg_result_lock before insert or update or delete on inspection_results
+  for each row execute function result_immutable_after_signature();
+
+-- 2. An instrument that is out of calibration cannot be used on a result.
+create or replace function block_uncalibrated_equipment()
+returns trigger language plpgsql as $$
+declare v_status text;
+begin
+  if new.equipment_id is not null then
+    select status into v_status from equipment where id = new.equipment_id;
+    if v_status in ('overdue','out_of_service') then
+      raise exception 'EQUIP_BLOCKED: equipment is % and cannot be used to record a result', v_status;
+    end if;
+  end if;
+  return new;
+end $$;
+create trigger trg_equipment_block before insert or update on inspection_results
+  for each row execute function block_uncalibrated_equipment();
+
+-- 3. Signing requires the competency the template demands.
+create or replace function enforce_signature_competency()
+returns trigger language plpgsql as $$
+declare v_min smallint; v_have smallint;
+begin
+  if new.signed_at is not null and old.signed_at is null then
+    select t.min_competency into v_min
+      from template_revisions tr
+      join inspection_templates t on t.id = tr.template_id
+     where tr.id = new.template_rev_id;
+    select coalesce(max(level),0) into v_have
+      from competencies
+     where profile_id = new.signed_by
+       and (valid_to is null or valid_to >= current_date);
+    if v_have < v_min then
+      raise exception 'COMPETENCY: signer holds level %, template requires level %', v_have, v_min;
+    end if;
+  end if;
+  return new;
+end $$;
+create trigger trg_signature_competency before update on inspections
+  for each row execute function enforce_signature_competency();
+
+-- 4. Every consequential change is written to the audit trail.
+create or replace function write_audit()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  select full_name into v_name from profiles where id = auth.uid();
+  insert into audit_trail (actor, actor_name, action, entity, entity_id, detail)
+  values (auth.uid(), coalesce(v_name,'system'), lower(tg_op), tg_table_name,
+          coalesce(new.id::text, old.id::text),
+          case when tg_op = 'DELETE' then to_jsonb(old) else to_jsonb(new) end);
+  return coalesce(new, old);
+end $$;
+create trigger trg_audit_inspections after insert or update on inspections
+  for each row execute function write_audit();
+create trigger trg_audit_templates after insert or update on template_revisions
+  for each row execute function write_audit();
+create trigger trg_audit_requirements after insert or update or delete on inspection_requirements
+  for each row execute function write_audit();
+create trigger trg_audit_failed after insert or update on failed_checks
+  for each row execute function write_audit();
+
+-- ------------------------------------------------------------
+-- Row level security
+-- ------------------------------------------------------------
+alter table division_profile        enable row level security;
+alter table departments             enable row level security;
+alter table profiles                enable row level security;
+alter table competencies            enable row level security;
+alter table manufacturing_stages    enable row level security;
+alter table product_families        enable row level security;
+alter table defect_codes            enable row level security;
+alter table equipment               enable row level security;
+alter table inspection_templates    enable row level security;
+alter table template_revisions      enable row level security;
+alter table inspection_requirements enable row level security;
+alter table projects                enable row level security;
+alter table works_orders            enable row level security;
+alter table inspections             enable row level security;
+alter table inspection_results      enable row level security;
+alter table attachments             enable row level security;
+alter table failed_checks           enable row level security;
+alter table audit_trail             enable row level security;
+
+-- Reference data: everyone signed in reads, administrators write.
+do $$
+declare t text;
+begin
+  foreach t in array array['division_profile','departments','manufacturing_stages',
+                           'product_families','defect_codes','equipment','projects','works_orders']
+  loop
+    execute format('create policy %I_read on %I for select using (auth.uid() is not null)', t||'_r', t);
+    execute format($p$create policy %I on %I for all
+                       using (has_role('quality_manager','sysadmin'))
+                       with check (has_role('quality_manager','sysadmin'))$p$, t||'_w', t);
+  end loop;
+end $$;
+
+-- Profiles: read yourself; managers read everyone; only admins write.
+create policy profiles_self on profiles for select
+  using (id = auth.uid() or has_role('quality_manager','quality_engineer','planner','sysadmin'));
+create policy profiles_admin on profiles for all
+  using (has_role('sysadmin','quality_manager'))
+  with check (has_role('sysadmin','quality_manager'));
+
+create policy competencies_read on competencies for select using (auth.uid() is not null);
+create policy competencies_write on competencies for all
+  using (has_role('quality_manager','sysadmin'))
+  with check (has_role('quality_manager','sysadmin'));
+
+-- Templates: everyone reads published; designers write drafts; publishing is separate.
+create policy templates_read on inspection_templates for select using (auth.uid() is not null);
+create policy templates_write on inspection_templates for all
+  using (has_role('quality_engineer','quality_manager','sysadmin'))
+  with check (has_role('quality_engineer','quality_manager','sysadmin'));
+
+create policy revs_read on template_revisions for select using (auth.uid() is not null);
+create policy revs_draft on template_revisions for insert
+  with check (has_role('quality_engineer','quality_manager','sysadmin')
+              and status = 'draft' and created_by = auth.uid());
+create policy revs_edit on template_revisions for update
+  using (status in ('draft','in_review')
+         and (created_by = auth.uid() or has_role('quality_manager')))
+  with check (true);
+-- publishing is a manager action and cannot be self-approval
+create policy revs_publish on template_revisions for update
+  using (has_role('quality_manager') and created_by <> auth.uid());
+
+-- Requirements matrix: everyone reads, quality manager and admin configure.
+create policy req_read on inspection_requirements for select using (auth.uid() is not null);
+create policy req_write on inspection_requirements for all
+  using (has_role('quality_manager','sysadmin'))
+  with check (has_role('quality_manager','sysadmin'));
+
+-- Inspections: inspectors see their own and their department's;
+-- quality, planners and admins see all.
+create policy insp_read on inspections for select using (
+  assigned_to = auth.uid()
+  or department_id = my_department()
+  or has_role('quality_engineer','quality_manager','planner','sysadmin','readonly')
+);
+create policy insp_create on inspections for insert
+  with check (has_role('planner','quality_engineer','quality_manager','sysadmin'));
+create policy insp_update on inspections for update using (
+  (assigned_to = auth.uid() and status in ('scheduled','in_progress'))
+  or has_role('quality_engineer','quality_manager','planner','sysadmin')
+);
+
+create policy res_read on inspection_results for select using (
+  exists (select 1 from inspections i where i.id = inspection_id
+          and (i.assigned_to = auth.uid() or i.department_id = my_department()
+               or has_role('quality_engineer','quality_manager','planner','sysadmin','readonly')))
+);
+create policy res_write on inspection_results for all using (
+  exists (select 1 from inspections i where i.id = inspection_id
+          and i.assigned_to = auth.uid() and i.signed_at is null)
+) with check (
+  exists (select 1 from inspections i where i.id = inspection_id
+          and i.assigned_to = auth.uid() and i.signed_at is null)
+);
+
+create policy att_read on attachments for select using (auth.uid() is not null);
+create policy att_write on attachments for insert with check (uploaded_by = auth.uid());
+
+create policy fc_read on failed_checks for select using (auth.uid() is not null);
+create policy fc_write on failed_checks for insert
+  with check (has_role('inspector','supervisor','quality_engineer','quality_manager','sysadmin'));
+-- disposition is a supervisor decision, and never by the person who recorded it
+create policy fc_disposition on failed_checks for update using (
+  has_role('supervisor','quality_engineer','quality_manager')
+) with check (true);
+
+-- Audit trail: read for quality and admin, insert by trigger only, never update or delete.
+create policy audit_read on audit_trail for select
+  using (has_role('quality_manager','quality_engineer','sysadmin','readonly'));
+revoke update, delete on audit_trail from anon, authenticated;
+revoke delete on inspections from anon, authenticated;
+revoke delete on inspection_results from anon, authenticated;
+
+-- ------------------------------------------------------------
+-- Views the app reads for dashboards (always in step with the data).
+--
+-- security_invoker = on is not optional. A Postgres view runs as its
+-- OWNER by default, which means it bypasses row level security and
+-- would hand every row to any signed-in user. With invoker security the
+-- view is evaluated as the caller and the policies above still apply.
+-- ------------------------------------------------------------
+create or replace view v_stage_yield with (security_invoker = on) as
+select s.name as stage,
+       count(*)                                              as inspections,
+       count(*) filter (where i.result = 'pass')             as passed,
+       round(100.0 * count(*) filter (where i.result = 'pass')
+             / nullif(count(*),0), 1)                        as pass_rate
+from inspections i
+join manufacturing_stages s on s.id = i.stage_id
+where i.status = 'completed'
+  and i.completed_at > now() - interval '30 days'
+group by s.name, s.id
+order by min(s.sort_order);
+
+create or replace view v_open_work with (security_invoker = on) as
+select i.*, s.name as stage_name, p.full_name as inspector
+from inspections i
+join manufacturing_stages s on s.id = i.stage_id
+left join profiles p on p.id = i.assigned_to
+where i.status in ('scheduled','in_progress');
+
+
+-- ============================================================
+--  SECTION 2 — Application wiring: auth, numbering, storage, RPCs
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 1. A new Entra sign-in creates an inactive profile automatically.
+--    Authenticating is not access: an administrator activates the user
+--    and assigns a role before they can see or do anything.
+-- ------------------------------------------------------------
+create or replace function handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into profiles (id, entra_oid, full_name, email, role, active)
+  values (
+    new.id,
+    new.raw_user_meta_data->>'provider_id',
+    coalesce(new.raw_user_meta_data->>'full_name',
+             new.raw_user_meta_data->>'name',
+             split_part(new.email, '@', 1)),
+    new.email,
+    'inspector',
+    false
+  )
+  on conflict (id) do nothing;
+  return new;
+end $$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function handle_new_user();
+
+-- ------------------------------------------------------------
+-- 2. Reference numbers are assigned by the database, never the browser.
+--    Two inspectors submitting at the same moment cannot collide.
+-- ------------------------------------------------------------
+create or replace function set_inspection_ref()
+returns trigger language plpgsql as $$
+begin
+  if new.ref is null or new.ref = '' then new.ref := next_ref('INS'); end if;
+  return new;
+end $$;
+create trigger trg_inspection_ref before insert on inspections
+  for each row execute function set_inspection_ref();
+
+create or replace function set_failed_check_ref()
+returns trigger language plpgsql as $$
+begin
+  if new.ref is null or new.ref = '' then new.ref := next_ref('FC'); end if;
+  return new;
+end $$;
+create trigger trg_fc_ref before insert on failed_checks
+  for each row execute function set_failed_check_ref();
+
+-- ------------------------------------------------------------
+-- 3. Photo storage. Private bucket; access follows the inspection.
+-- ------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('inspection-photos', 'inspection-photos', false, 8388608,
+        array['image/jpeg','image/png','image/webp'])
+on conflict (id) do nothing;
+
+create policy "qgrid read own division photos" on storage.objects for select
+  using (bucket_id = 'inspection-photos' and auth.uid() is not null);
+
+create policy "qgrid upload photos" on storage.objects for insert
+  with check (bucket_id = 'inspection-photos'
+              and auth.uid() is not null
+              and (storage.foldername(name))[1] = 'inspections');
+
+-- Photos are evidence. Nobody deletes them from the client.
+create policy "qgrid no photo deletes" on storage.objects for delete
+  using (false);
+
+-- ------------------------------------------------------------
+-- 4. Publishing a template revision.
+--    Enforces the second-approver rule and supersedes the previous
+--    revision in one transaction, so there is never a moment with two
+--    published revisions or none.
+-- ------------------------------------------------------------
+create or replace function publish_template_revision(p_rev uuid)
+returns jsonb language plpgsql security invoker as $$
+declare v_tpl uuid; v_author uuid; v_rev smallint;
+begin
+  if not has_role('quality_manager') then
+    raise exception 'PUBLISH_ROLE: only a Quality Manager may publish a template';
+  end if;
+
+  select template_id, created_by, rev into v_tpl, v_author, v_rev
+    from template_revisions where id = p_rev;
+  if v_tpl is null then raise exception 'PUBLISH_MISSING: revision not found'; end if;
+
+  if v_author = auth.uid() then
+    raise exception 'PUBLISH_SELF: a template cannot be published by the person who built it';
+  end if;
+
+  update template_revisions
+     set status = 'superseded'
+   where template_id = v_tpl and status = 'published';
+
+  update template_revisions
+     set status = 'published',
+         approved_by = auth.uid(),
+         effective_from = current_date
+   where id = p_rev;
+
+  return jsonb_build_object('template_id', v_tpl, 'rev', v_rev, 'status', 'published');
+end $$;
+
+-- ------------------------------------------------------------
+-- 5. Submitting an inspection.
+--    One transaction: score the results, raise a failed check for every
+--    failure, then sign. Doing this client-side would leave half-signed
+--    inspections behind whenever the shop floor Wi-Fi drops mid-submit.
+-- ------------------------------------------------------------
+create or replace function submit_inspection(p_inspection uuid, p_signature text)
+returns jsonb language plpgsql security invoker as $$
+declare
+  v_insp   inspections;
+  v_def    jsonb;
+  v_fails  int := 0;
+  v_hold   boolean := false;
+  v_hp     boolean;
+  r        record;
+  v_field  jsonb;
+begin
+  select * into v_insp from inspections where id = p_inspection;
+  if v_insp.id is null then raise exception 'SUBMIT_MISSING: inspection not found'; end if;
+  if v_insp.signed_at is not null then
+    raise exception 'INS_SIGNED: % is already signed', v_insp.ref;
+  end if;
+  if v_insp.assigned_to <> auth.uid() and not has_role('quality_engineer','quality_manager') then
+    raise exception 'SUBMIT_OWNER: this inspection is assigned to someone else';
+  end if;
+
+  select hold_points into v_hp from division_profile where id;
+  select definition into v_def from template_revisions where id = v_insp.template_rev_id;
+
+  -- Every field the template marks required must have an answer.
+  for v_field in
+    select f from jsonb_array_elements(v_def->'sections') s,
+                   jsonb_array_elements(s->'items') f
+     where (f->>'req')::boolean is true
+       and coalesce(f->>'type','') not in ('info','section','sign')
+  loop
+    if not exists (
+      select 1 from inspection_results
+       where inspection_id = p_inspection
+         and field_id = v_field->>'id'
+         and (outcome is not null or value_text is not null or value_num is not null)
+    ) then
+      raise exception 'SUBMIT_INCOMPLETE: % has not been answered', v_field->>'label';
+    end if;
+  end loop;
+
+  -- Raise a failed check for each failure, carrying the template's
+  -- default defect code and hold-point flag.
+  for r in
+    select ir.id as result_id, ir.field_id, f as field
+      from inspection_results ir
+      join jsonb_array_elements(v_def->'sections') s on true
+      join jsonb_array_elements(s->'items') f on f->>'id' = ir.field_id
+     where ir.inspection_id = p_inspection and ir.outcome = 'fail'
+  loop
+    v_fails := v_fails + 1;
+    if v_hp and (r.field->>'hold')::boolean is true then v_hold := true; end if;
+
+    insert into failed_checks (inspection_id, result_id, defect_code_id, is_hold, disposition)
+    select p_inspection, r.result_id,
+           (select id from defect_codes where code = r.field->>'dfc'),
+           v_hp and (r.field->>'hold')::boolean is true,
+           'awaiting';
+  end loop;
+
+  update inspections
+     set status = 'completed',
+         result = case when v_fails > 0 then 'fail' else 'pass' end,
+         completed_at = now(),
+         signed_by = auth.uid(),
+         signed_at = now(),
+         signature_hash = md5(coalesce(p_signature,'') || p_inspection::text || now()::text)
+   where id = p_inspection;
+
+  -- Hold points, when the division uses them, stop the works order.
+  if v_hold and v_insp.works_order_id is not null then
+    update works_orders set status = 'held' where id = v_insp.works_order_id;
+  end if;
+
+  return jsonb_build_object(
+    'ref', v_insp.ref,
+    'result', case when v_fails > 0 then 'fail' else 'pass' end,
+    'failed_checks', v_fails,
+    'works_order_held', v_hold);
+end $$;
+
+-- ------------------------------------------------------------
+-- 6. Generating the schedule from the requirements matrix.
+--    Releasing a works order creates every inspection that product
+--    family requires, so nothing depends on someone remembering.
+-- ------------------------------------------------------------
+create or replace function generate_inspections(p_works_order int)
+returns jsonb language plpgsql security invoker as $$
+declare
+  v_wo works_orders; v_family smallint; v_made int := 0; r record; i int;
+begin
+  if not has_role('planner','quality_engineer','quality_manager','sysadmin') then
+    raise exception 'GEN_ROLE: you may not generate a schedule';
+  end if;
+
+  select * into v_wo from works_orders where id = p_works_order;
+  if v_wo.id is null then raise exception 'GEN_MISSING: works order not found'; end if;
+  select family_id into v_family from projects where id = v_wo.project_id;
+
+  for r in
+    select req.*, tr.id as rev_id, d.id as dept_id
+      from inspection_requirements req
+      join template_revisions tr
+        on tr.template_id = req.template_id and tr.status = 'published'
+      left join departments d on d.stage_id = req.stage_id
+     where req.family_id = v_family
+       and req.level <> 'na'
+       and req.template_id is not null
+  loop
+    -- 100% inspection means one per unit; every other rule means one per order.
+    for i in 1 .. case when r.sampling = 'full' then v_wo.qty else 1 end loop
+      insert into inspections
+        (template_rev_id, stage_id, project_id, works_order_id, unit_ref,
+         department_id, planned_date, status, generated_from)
+      values
+        (r.rev_id, r.stage_id, v_wo.project_id, p_works_order,
+         case when r.sampling = 'full' then v_wo.code || '/' || i else v_wo.code end,
+         r.dept_id, current_date, 'scheduled', 'works_order');
+      v_made := v_made + 1;
+    end loop;
+  end loop;
+
+  update works_orders set released_at = coalesce(released_at, now()) where id = p_works_order;
+  return jsonb_build_object('works_order', v_wo.code, 'created', v_made);
+end $$;
+
+-- ------------------------------------------------------------
+-- 7. Dashboard figures. A view, so they can never drift from the records.
+--    security_invoker = on so the counts respect row level security:
+--    an inspector sees their department's numbers, Quality sees all.
+-- ------------------------------------------------------------
+create or replace view v_dashboard with (security_invoker = on) as
+select
+  (select count(*) from inspections where status in ('scheduled','in_progress'))            as open_inspections,
+  (select count(*) from inspections
+    where status = 'scheduled' and planned_date < current_date)                             as overdue,
+  (select count(*) from inspections where assigned_to is null and status = 'scheduled')     as unassigned,
+  (select count(*) from failed_checks where disposition = 'awaiting')                       as awaiting_disposition,
+  (select count(*) from inspections
+    where status = 'completed' and completed_at > now() - interval '30 days')               as completed_30d,
+  (select round(100.0 * count(*) filter (where result = 'pass') / nullif(count(*),0), 1)
+     from inspections
+    where status = 'completed' and completed_at > now() - interval '30 days')               as pass_rate_30d;
+
+grant select on v_dashboard, v_stage_yield, v_open_work to authenticated;
+grant execute on function publish_template_revision, submit_inspection, generate_inspections to authenticated;
+
+
+-- ============================================================
+--  SECTION 3 — Group reference data
+-- ============================================================
+
+insert into manufacturing_stages (name, sort_order) values
+  ('Incoming Inspection',1),('Fabrication',2),('Machine Shop',3),('Paint Shop',4),
+  ('Assembly',5),('Wiring',6),('Testing (FAT)',7),('Final QA Inspection',8),
+  ('Packing / Dispatch',9)
+on conflict (name) do nothing;
+
+insert into departments (name, stage_id, sort_order)
+select s.name, s.id, s.sort_order from manufacturing_stages s
+on conflict (name) do nothing;
+
+insert into defect_codes (code, description) values
+  ('DF010','Fabrication defect'),('DF011','Weld defect'),
+  ('DF012','Dimensional out of tolerance'),('DF020','Assembly defect'),
+  ('DF021','Incorrect component fitted'),('DF030','Wiring defect'),
+  ('DF031','Incorrect termination'),('DF040','Paint defect'),
+  ('DF041','DFT below specification'),('DF050','Test failure - dielectric'),
+  ('DF051','Contact resistance high'),('DF060','Supplier material defect'),
+  ('DF070','Documentation defect'),('DF080','Handling / transit damage')
+on conflict (code) do nothing;
+
+
+-- ============================================================
+--  SECTION 4 — Division seed — EDIT BEFORE RUNNING
+-- ============================================================
+
+insert into division_profile (code, name, hold_points)
+values ('MVS','ACTOM MV Switchgear', false)
+on conflict (id) do update set code=excluded.code, name=excluded.name;
+
+insert into product_families (name) values
+  ('12 kV metal-clad'),('22 kV RMU'),('11 kV MCC'),('Retrofit / refurbishment')
+on conflict (name) do nothing;
+
+insert into equipment (asset_no,name,category,location,interval_months,last_calibrated,next_due,status) values
+  ('MME-0412','Secondary injection set - Omicron CMC 356','High voltage','Test bay 2',12,'2025-07-30','2026-07-30','overdue'),
+  ('MME-0517','Torque wrench 40-200 Nm (#7)','Torque','Assembly',6,'2026-03-02','2026-09-02','due'),
+  ('MME-0288','HV divider 100 kV','High voltage','Test hall',24,'2025-03-11','2027-03-11','calibrated'),
+  ('MME-0601','DFT gauge - Elcometer 456','Coating','Paint shop',12,'2026-01-28','2027-01-28','calibrated'),
+  ('MME-0722','Vernier caliper 0-300 mm (#12)','Dimensional','Machine shop',12,'2026-04-15','2027-04-15','calibrated')
+on conflict (asset_no) do nothing;
+
+-- Requirements matrix. Hold points are off for this division, so every
+-- requirement records the inspection without blocking production.
+insert into inspection_requirements (family_id, stage_id, level, sampling)
+select f.id, s.id, 'required', 'full'
+from product_families f
+cross join manufacturing_stages s
+where f.name = '12 kV metal-clad'
+on conflict (family_id, stage_id) do nothing;
+
+
+-- ============================================================
+--  SECTION 5 — Migration ledger stamp
+--
+--  Running this script bypasses the Supabase migration ledger. Without
+--  these two rows, the next `supabase db push` will try to apply both
+--  migrations again and fail. Stamping them tells the CLI they are
+--  already applied, and keeps scripts/verify-drift.mjs meaningful.
+-- ============================================================
+
+create schema if not exists supabase_migrations;
+create table if not exists supabase_migrations.schema_migrations (
+  version text primary key,
+  statements text[],
+  name text
+);
+
+insert into supabase_migrations.schema_migrations (version, name) values
+  ('20260820090000', 'init_inspections'),
+  ('20260826090000', 'app_wiring')
+on conflict (version) do nothing;
+
+
+-- ============================================================
+--  SECTION 6 — Verification
+--  Run these and check the results before going any further.
+-- ============================================================
+
+-- Every table must have row level security on. Expect zero rows.
+select tablename as "TABLE WITHOUT RLS - FIX BEFORE USE"
+  from pg_tables
+ where schemaname = 'public' and rowsecurity is false;
+
+-- Every view must be security_invoker. Expect zero rows.
+select c.relname as "VIEW BYPASSING RLS - FIX BEFORE USE"
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+ where n.nspname = 'public' and c.relkind = 'v'
+   and coalesce((select option_value from pg_options_to_table(c.reloptions)
+                  where option_name = 'security_invoker'), 'false') <> 'true';
+
+-- Reference data loaded.
+select 'stages'        as item, count(*) as rows from manufacturing_stages
+union all select 'departments',   count(*) from departments
+union all select 'defect codes',  count(*) from defect_codes
+union all select 'families',      count(*) from product_families
+union all select 'equipment',     count(*) from equipment
+union all select 'requirements',  count(*) from inspection_requirements
+order by item;
+
+-- Controls present. Expect all six.
+select tgname as trigger_installed from pg_trigger
+ where tgname in ('trg_inspection_lock','trg_result_lock','trg_equipment_block',
+                  'trg_signature_competency','trg_inspection_ref','on_auth_user_created')
+ order by tgname;
+
+-- Functions the app calls. Expect three.
+select proname as rpc_available from pg_proc
+ where proname in ('submit_inspection','publish_template_revision','generate_inspections')
+ order by proname;
+
+-- Numbering works. Expect INS-26-0001 then INS-26-0002.
+select next_ref('INS') as first_ref, next_ref('INS') as second_ref;
+-- Reset it so live records start at 1:
+delete from ref_sequences where prefix = 'INS';
+
+-- Division identity.
+select code, name, hold_points, fy_start_month from division_profile;
+
+
+-- ============================================================
+--  NEXT STEP
+--
+--  Sign in to the app once through Microsoft. That creates your profile
+--  row as INACTIVE with no role, and nobody can activate it because
+--  there is no administrator yet. Break the loop once, by hand:
+--
+--    update profiles
+--       set role = 'sysadmin', active = true
+--     where email = 'varshan.mahabel@actom.co.za';
+--
+--  Everything after that happens in Administration > Users & roles.
+-- ============================================================

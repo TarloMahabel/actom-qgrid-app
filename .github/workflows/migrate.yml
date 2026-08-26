@@ -1,0 +1,45 @@
+name: Apply database migrations
+
+# Migrations run on merge to production, before Netlify finishes building.
+# Schema goes first: an app expecting a column that does not exist yet is
+# a worse outage than a schema with a column nothing uses yet.
+on:
+  push:
+    branches: [production]
+    paths: ["supabase/migrations/**"]
+  workflow_dispatch:
+    inputs:
+      division:
+        description: "Single division code, or blank for all live divisions"
+        required: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - uses: supabase/setup-cli@v1
+        with: { version: latest }
+
+      - name: Apply migrations
+        env:
+          DB_URL_MVS: ${{ secrets.DB_URL_MVS }}
+          DB_URL_DTX: ${{ secrets.DB_URL_DTX }}
+          DB_URL_RM:  ${{ secrets.DB_URL_RM }}
+        run: |
+          if [ -n "${{ inputs.division }}" ]; then
+            node scripts/migrate.mjs --division ${{ inputs.division }}
+          else
+            node scripts/migrate.mjs --all --status pilot,live
+          fi
+
+      - name: Check for drift
+        if: always()
+        env:
+          DB_URL_MVS: ${{ secrets.DB_URL_MVS }}
+          DB_URL_DTX: ${{ secrets.DB_URL_DTX }}
+          DB_URL_RM:  ${{ secrets.DB_URL_RM }}
+        run: node scripts/verify-drift.mjs

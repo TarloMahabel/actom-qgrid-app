@@ -1,0 +1,17 @@
+# Netlify and GitHub Actions build on Linux; developers are on Windows.
+# Normalise to LF in the repo so diffs stay clean and CI never sees CRLF.
+* text=auto eol=lf
+
+*.sql   text eol=lf
+*.mjs   text eol=lf
+*.js    text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.md    text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+
+*.png binary
+*.jpg binary
+*.zip binary
+*.woff2 binary

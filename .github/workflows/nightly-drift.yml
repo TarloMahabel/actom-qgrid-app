@@ -1,0 +1,19 @@
+name: Nightly schema drift check
+
+on:
+  schedule: [{ cron: "0 2 * * *" }]   # 04:00 SAST
+  workflow_dispatch:
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - env:
+          DB_URL_MVS: ${{ secrets.DB_URL_MVS }}
+          DB_URL_DTX: ${{ secrets.DB_URL_DTX }}
+          DB_URL_RM:  ${{ secrets.DB_URL_RM }}
+        run: node scripts/verify-drift.mjs

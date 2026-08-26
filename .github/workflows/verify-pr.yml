@@ -1,0 +1,43 @@
+name: Verify pull request
+
+# Every migration is proved against a throwaway Postgres before it is
+# allowed anywhere near a division database.
+on:
+  pull_request:
+    branches: [main, production]
+
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: supabase/postgres:15.1.0.117
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply every migration from scratch
+        run: |
+          export PGPASSWORD=postgres
+          psql -h localhost -U postgres -c "create schema if not exists auth;"
+          psql -h localhost -U postgres -c "create table if not exists auth.users(id uuid primary key);"
+          psql -h localhost -U postgres -c "create or replace function auth.uid() returns uuid language sql stable as \$\$ select null::uuid \$\$;"
+          for f in supabase/migrations/*.sql; do
+            echo "--- $f"
+            psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f "$f"
+          done
+      - name: Confirm RLS is on for every table
+        run: |
+          export PGPASSWORD=postgres
+          psql -h localhost -U postgres -tAc "
+            select string_agg(tablename, ', ')
+            from pg_tables t
+            where schemaname='public'
+              and not exists (
+                select 1 from pg_class c
+                join pg_namespace n on n.oid=c.relnamespace
+                where c.relname=t.tablename and n.nspname='public' and c.relrowsecurity)
+          " | grep -q '^$' || { echo "Tables without RLS - refusing to merge"; exit 1; }
