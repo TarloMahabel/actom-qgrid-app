@@ -52,6 +52,27 @@ const CONFIG = 'window.QGRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"e
   s.check('app.js keeps its declarations out of the global scope',
     /^\(function \(\)/m.test(read('app.js')) || !/^const \{[^}]*supabase/m.test(read('app.js')));
 
+  s.group('every class the app applies has a CSS rule');
+  /* .hidden was used twenty times and defined nowhere — lost when the mockup
+     stylesheet was split into tokens.css and styles.css, because it sat above
+     the :root block and fell outside both halves. The result: every screen
+     rendered at once with the busy overlay permanently on top, so the site
+     looked hung behind a grey sheet. .legend and .val went the same way. */
+  const css = read('tokens.css') + read('styles.css');
+  const defined = new Set(Array.from(css.matchAll(/\.([a-zA-Z][\w-]*)/g)).map(m => m[1]));
+  const applied = new Set();
+  for (const f of ['app.js', 'index.html']) {
+    const t = read(f);
+    for (const m of t.matchAll(/class="([^"$]+)"/g)) m[1].split(/\s+/).forEach(c => c && applied.add(c));
+    for (const m of t.matchAll(/classList\.(?:add|remove|toggle)\("([\w-]+)"/g)) applied.add(m[1]);
+  }
+  const undefinedClasses = [...applied].filter(c => !defined.has(c)).sort();
+  s.check('no class is applied without a rule', undefinedClasses.length === 0,
+    undefinedClasses.join(', '));
+  for (const critical of ['hidden', 'gate', 'busy', 'shell', 'legend', 'val']) {
+    s.check(`.${critical} is defined`, defined.has(critical));
+  }
+
   s.group('the vendored bundle is usable');
   const files = ['vendor/supabase.js', 'supabase.js', 'logo.js', 'changelog.js', 'app.js',
                  'tokens.css', 'styles.css', 'index.html'];
@@ -97,6 +118,12 @@ const CONFIG = 'window.QGRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"e
   s.check('sign-in screen shown', !el('gateSignIn').classList.contains('hidden'));
   s.check('dev password box hidden in a production build',
     el('devSignIn').classList.contains('hidden'));
+  /* Exactly one screen at a time. All three rendered together when .hidden
+     had no rule, stacked down the page, and the site looked broken. */
+  const screens = ['gateSignIn', 'gatePending', 'app']
+    .filter(id => !el(id).classList.contains('hidden'));
+  s.check('exactly one screen is visible', screens.length === 1, screens.join(', '));
+  s.check('the busy overlay is dismissed', el('busy').classList.contains('hidden'));
 
   s.group('a broken deploy says so instead of hanging');
   // vendor/supabase.js missing entirely — the exact failure that produced a

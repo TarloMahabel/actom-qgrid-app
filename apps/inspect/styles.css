@@ -1,6 +1,29 @@
 /* =====================================================================
    ACTOM QGrid — inspection app stylesheet.
-   Edit HERE, then run ./shared/sync.sh. Do not edit apps/*/styles.css.
+   Edit HERE, then run ./shared/sync.sh. Do not edit apps/*/
+
+/* ---------------------------------------------------------------------
+   Utilities.
+
+   .hidden was used 20 times across app.js and index.html and defined
+   nowhere. Without it every screen rendered at once — the sign-in card,
+   the pending screen and the app shell stacked down the page — with the
+   busy overlay permanently on top, so the site looked like it had hung
+   behind a grey sheet. It went missing when the mockup stylesheet was
+   split into tokens.css and this file: it sat above the :root block and
+   fell outside both halves.
+   --------------------------------------------------------------------- */
+.hidden { display: none !important; }
+
+/* Lost in the same stylesheet split as .hidden. .legend is the key under
+   the dashboard chart; .val is the read-only value display used through
+   every modal and detail panel. Both rendered as unstyled text. */
+.legend { display: flex; gap: 13px; flex-wrap: wrap; font-size: 11.5px;
+          color: var(--ink-2); margin-top: 9px; align-items: center; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block;
+            margin-right: 5px; vertical-align: -1px; }
+.fld .val, .val { font-size: 13.2px; color: var(--ink); }
+styles.css.
    ===================================================================== */
 *{box-sizing:border-box} html,body{margin:0;padding:0}
 body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;
