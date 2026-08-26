@@ -299,7 +299,9 @@ that exercises every wired control.
    database refuses self-approval. That is the second-approver rule working.
    Either add a second Quality Manager, or publish a template someone else built.
 4. **Requirements matrix** — click a cell, attach the template as Required.
-5. **Add a project and works order.** No screen for this in Phase 1, so:
+5. **Add a project and works order** under **Scheduling → Projects & works orders**.
+   The project needs a product family set, or the requirements matrix cannot be read for
+   it and Generate will create nothing. If you would rather do it in SQL:
 
        insert into projects (code, name, customer, family_id)
        values ('P-26118','Eskom 12 kV panels','Eskom Distribution',

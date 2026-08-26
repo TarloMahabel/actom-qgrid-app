@@ -221,7 +221,8 @@ const NAV = [
   { g: "Inspections" },
   { id: "dash",  n: 1, t: "Dashboard",               col: "--m1", tabs: ["Overview", "Yield by stage"] },
   { id: "work",  n: 2, t: "Inspection workbench",    col: "--m2", tabs: ["My queue", "Capture", "Register", "Failed checks"] },
-  { id: "sched", n: 3, t: "Scheduling",              col: "--m3", tabs: ["Schedule", "Unassigned"] },
+  { id: "sched", n: 3, t: "Scheduling",              col: "--m3",
+    tabs: ["Schedule", "Unassigned", "Projects & works orders"] },
   { g: "Setup" },
   { id: "dsn",   n: 4, t: "Form designer",           col: "--m4", tabs: [] },
   { id: "req",   n: 5, t: "Inspection requirements", col: "--m5", tabs: ["Requirements matrix"] },
@@ -475,7 +476,7 @@ function vSched(m) {
             i.assigned_to ? esc(byId(S.people, i.assigned_to)?.full_name || "—") : pill("Unassigned"),
             pill(i.planned_date < today() && i.status === "scheduled" ? "Overdue" : i.status)];
         }));
-  } else {
+  } else if (S.tab === 1) {
     const u = unassigned();
     body = u.length ? T(["Reference", "Inspection", "Stage", "Unit", "Planned", "Assign to"],
       u.map(i => {
@@ -486,7 +487,21 @@ function vSched(m) {
             S.people.filter(p => p.active).map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("")}</select>`];
       }))
       : `<div class="card"><div class="empty">Nothing unassigned. This list is the leading indicator of an overdue, so an empty one is the goal.</div></div>`;
+  } else {
+    const noPublished = publishedRevs().length === 0;
+    const noMatrix = S.requirements.filter(r => r.template_id && r.level !== "na").length === 0;
+    body = `<div class="note" style="margin-bottom:13px">A works order is what the schedule is
+        generated from: <b>Generate</b> reads the requirements matrix for that project's product
+        family and creates every inspection it calls for.</div>`
+      + (noPublished ? `<div class="note q" style="margin-bottom:13px"><b>No published template.</b>
+          Generating will create nothing until at least one template has a published revision —
+          drafts are skipped. Publish one in the Form designer first.</div>` : "")
+      + (noMatrix ? `<div class="note q" style="margin-bottom:13px"><b>The requirements matrix is
+          empty.</b> Nothing tells the scheduler what to inspect. Attach a template to at least one
+          family and stage under Inspection requirements.</div>` : "")
+      + WORK_LISTS.map(refGrid).join("");
   }
+
   return head(m, "Inspections are generated from the requirements matrix, then assigned.",
     `<button class="btn" data-act="refresh">Refresh</button>`) + tabbar(m) + body;
 }
@@ -818,6 +833,31 @@ const REF_LISTS = [
              options: () => S.departments.map(x => [x.id, x.name]) }] }
 ];
 
+/* Projects and works orders use the same editable grid. They were meant to
+   come from SYSPRO in Phase 2 and to be inserted by hand until then, which
+   left the Generate dialog with an empty dropdown and no way to fill it
+   without opening the SQL editor. */
+const WORK_LISTS = [
+  { table: "projects", title: "Projects", state: "projects",
+    order: "code",
+    note: "A contract or order. The product family decides which inspections the matrix calls for.",
+    cols: [{ f: "code", label: "Code", type: "text", w: "130px" },
+           { f: "name", label: "Name", type: "text" },
+           { f: "customer", label: "Customer", type: "text", w: "190px" },
+           { f: "family_id", label: "Product family", type: "select", w: "190px",
+             options: () => S.families.map(x => [x.id, x.name]) }] },
+
+  { table: "works_orders", title: "Works orders", state: "worksOrders",
+    order: "code", noRetire: true,
+    note: "What is actually being built. Quantity decides how many inspections a 100% rule generates.",
+    cols: [{ f: "code", label: "Code", type: "text", w: "130px" },
+           { f: "project_id", label: "Project", type: "select", w: "200px",
+             options: () => S.projects.map(x => [x.id, x.code]) },
+           { f: "description", label: "Description", type: "text" },
+           { f: "qty", label: "Qty", type: "number", w: "80px" }] }
+];
+const ALL_LISTS = () => REF_LISTS.concat(WORK_LISTS);
+
 const draftKey = (table, id, field) => `${table}|${id}|${field}`;
 const draftCount = () => Object.keys(S.refDraft).length;
 
@@ -864,9 +904,12 @@ function refGrid(list) {
             align-items:center;padding:4px 2px;${r.active === false ? "opacity:.6" : ""}">
         ${cols.map(c => `<div>${refCell(list, r, c)}</div>`).join("")}
         <div style="text-align:right;display:flex;gap:5px;justify-content:flex-end">
-          <button class="btn sm" data-ref-toggle="${list.table}|${r.id}"
-            title="${r.active === false ? "Bring back into use" : "Hide from new forms, keep history"}"
-          >${r.active === false ? "Restore" : "Retire"}</button>
+          ${list.noRetire
+            ? `<button class="btn sm pri" data-generate-wo="${r.id}"
+                 title="Create the inspections the requirements matrix calls for">Generate</button>`
+            : `<button class="btn sm" data-ref-toggle="${list.table}|${r.id}"
+                 title="${r.active === false ? "Bring back into use" : "Hide from new forms, keep history"}"
+               >${r.active === false ? "Restore" : "Retire"}</button>`}
           <button class="btn sm danger" data-ref-del="${list.table}|${r.id}"
             title="Only possible if nothing references it">×</button>
         </div></div>`).join("")}
@@ -928,7 +971,7 @@ async function saveRefList(table) {
 }
 
 async function addRefRow(table) {
-  const list = REF_LISTS.find(l => l.table === table);
+  const list = ALL_LISTS().find(l => l.table === table);
   const row = {};
   for (const c of list.cols) {
     const el = document.querySelector(`[data-new="${table}|${c.f}"]`);
@@ -949,7 +992,7 @@ async function addRefRow(table) {
 }
 
 async function toggleRefActive(table, id) {
-  const list = REF_LISTS.find(l => l.table === table);
+  const list = ALL_LISTS().find(l => l.table === table);
   const row = (S[list.state] || []).find(r => String(r.id) === String(id));
   busy(true);
   try {
@@ -961,7 +1004,7 @@ async function toggleRefActive(table, id) {
 }
 
 async function deleteRefRow(table, id) {
-  const list = REF_LISTS.find(l => l.table === table);
+  const list = ALL_LISTS().find(l => l.table === table);
   const row = (S[list.state] || []).find(r => String(r.id) === String(id));
   const label = row[list.cols[0].f];
   if (!confirm(`Delete "${label}" permanently?\n\nRetiring is usually better — it keeps historic records readable. Delete only works if nothing references this entry.`)) return;
@@ -1238,14 +1281,48 @@ async function saveTemplate() {
 }
 
 function generateSchedule() {
+  const open = S.worksOrders.filter(w => w.status === "open");
+  /* An empty dropdown with no explanation is the same failure as a hidden
+     button: it looks broken rather than unconfigured. Say what is missing and
+     where to go and fix it. */
+  if (!open.length) {
+    openModal("Generate inspections", `
+      <div class="note q"><b>There are no open works orders.</b> A works order is what
+        inspections are generated from — it names what is being built, and its project
+        decides which product family the requirements matrix is read for.</div>
+      <p style="font-size:13px;color:var(--ink-2);margin:14px 0 0">Add one under
+        <b>Scheduling → Projects &amp; works orders</b>. You will need a project first,
+        with a product family set.</p>`,
+      [["Close", "close"], ["Take me there", "goto-works-orders", "pri"]], {});
+    return;
+  }
   openModal("Generate inspections", `
     <div class="fld"><label>Works order</label><select id="gWo">
-      ${S.worksOrders.filter(w => w.status === "open").map(w => {
+      ${open.map(w => {
         const p = byId(S.projects, w.project_id);
-        return `<option value="${w.id}">${esc(w.code)} — ${esc(p?.code || "")} × ${w.qty}</option>`;
-      }).join("")}</select></div>
-    <div class="note">Reads the requirements matrix for that product family and creates every inspection it calls for. Templates without a published revision are skipped.</div>`,
+        const fam = p ? byId(S.families, p.family_id) : null;
+        return `<option value="${w.id}">${esc(w.code)} — ${esc(p?.code || "no project")}` +
+               ` · ${esc(fam?.name || "no family")} · qty ${w.qty}</option>`;
+      }).join("")}</select>
+      <div class="hint">The product family comes from the project. Without one, the matrix
+        cannot be read and nothing is generated.</div></div>
+    <div class="note">Reads the requirements matrix for that product family and creates every
+      inspection it calls for. Templates without a published revision are skipped.</div>`,
     [["Cancel", "close"], ["Generate", "save-generate", "pri"]], {});
+}
+
+async function generateForWorksOrder(id) {
+  busy(true);
+  try {
+    const { data, error } = await supabase.rpc("generate_inspections", { p_works_order: Number(id) });
+    if (error) throw error;
+    toast(data.created
+      ? `${data.created} inspection(s) created for ${data.works_order}.`
+      : `Nothing generated for ${data.works_order} — check the requirements matrix has a published template for that product family.`,
+      data.created ? "ok" : "bad");
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
 }
 async function saveGenerate() {
   busy(true);
@@ -1294,7 +1371,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-tpl]");
+  const t = e.target.closest("[data-go],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-generate-wo],[data-tpl]");
   if (!t) return;
   const d = t.dataset;
 
@@ -1311,6 +1388,7 @@ document.addEventListener("click", async e => {
   if (d.refAdd) return addRefRow(d.refAdd);
   if (d.refToggle) { const [tb, id] = d.refToggle.split("|"); return toggleRefActive(tb, id); }
   if (d.refDel) { const [tb, id] = d.refDel.split("|"); return deleteRefRow(tb, id); }
+  if (d.generateWo) return generateForWorksOrder(d.generateWo);
   if (d.refCancel) {
     for (const k of Object.keys(S.refDraft)) if (k.startsWith(d.refCancel + "|")) delete S.refDraft[k];
     return render();
@@ -1376,6 +1454,8 @@ document.addEventListener("click", async e => {
     case "toggle-2nd": return toggleSecondApprover();
     case "generate": return generateSchedule();
     case "save-generate": return saveGenerate();
+    case "goto-works-orders":
+      closeModal(); S.view = "sched"; S.tab = 2; buildNav(); return render();
     case "save-cell": return saveCell();
     case "clear-cell": { const { existingId } = modalCtx;
       if (existingId) { await supabase.from("inspection_requirements").delete().eq("id", existingId); }
@@ -1392,7 +1472,7 @@ document.addEventListener("change", e => {
        re-render: repainting the grid mid-edit moves the caret and loses focus.
        The field is outlined and the Save button enabled by hand instead. */
     const [table, id, field] = d.ref.split("|");
-    const row = (S[REF_LISTS.find(l => l.table === table).state] || [])
+    const row = (S[ALL_LISTS().find(l => l.table === table).state] || [])
       .find(r => String(r.id) === String(id));
     const original = row ? String(row[field] ?? "") : "";
     if (String(e.target.value) === original) delete S.refDraft[d.ref];

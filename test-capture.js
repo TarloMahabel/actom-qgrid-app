@@ -47,5 +47,44 @@ const { loadApp, suite } = require('./test/harness');
   d.querySelector('[data-act="submit-inspection"]').click(); await sleep(300);
   s.check('submit goes through the RPC, not client-side writes',
     CALLS.some(c => c[0] === 'rpc' && c[1] === 'submit_inspection'));
+  s.group('works orders can be created and generated from');
+  d.querySelector('#nav button[data-go="sched"]').click(); await sleep(80);
+  const woTab = d.querySelector('.tabs button[data-tab="2"]');
+  s.check('scheduling has a projects and works orders tab', !!woTab);
+  woTab.click(); await sleep(140);
+  s.check('projects grid shown', $('page').innerHTML.includes('Projects'));
+  s.check('works orders grid shown', $('page').innerHTML.includes('Works orders'));
+  s.check('projects are editable', !!d.querySelector('[data-ref^="projects|"]'));
+  s.check('works orders are editable', !!d.querySelector('[data-ref^="works_orders|"]'));
+  s.check('a works order can be added', !!d.querySelector('[data-ref-add="works_orders"]'));
+  s.check('generate offered on the works order row', !!d.querySelector('[data-generate-wo]'));
+
+  d.querySelector('[data-generate-wo]').click(); await sleep(280);
+  s.check('generate calls the RPC with the works order',
+    CALLS.some(c => c[0] === 'rpc' && c[1] === 'generate_inspections'));
+
+  const newCode = d.querySelector('[data-new="projects|code"]');
+  newCode.value = 'P-26999';
+  d.querySelector('[data-ref-add="projects"]').click(); await sleep(220);
+  const ins = CALLS.filter(c => c[0] === 'insert' && c[1] === 'projects').pop();
+  s.check('adding a project inserts it', ins && ins[2].code === 'P-26999',
+    ins ? JSON.stringify(ins[2]) : 'no call');
+
+  s.group('the generate dialog explains an empty list');
+  /* Booted with no works orders: the dropdown used to render empty with no
+     explanation, which reads as broken rather than unconfigured. */
+  const bare = await loadApp('inspect', {
+    afterMock: win => { win.GRID_TEST_DATA.works_orders = []; }
+  });
+  const bd = bare.window.document;
+  bd.querySelector('#nav button[data-go="sched"]').click(); await bare.sleep(80);
+  bd.querySelector('[data-act="generate"]').click(); await bare.sleep(140);
+  s.check('it says there are no works orders',
+    bare.$('mBody').innerHTML.includes('no open works orders'));
+  s.check('it says where to add one',
+    bare.$('mBody').innerHTML.includes('Projects'));
+  s.check('it offers to take you there',
+    !!bd.querySelector('[data-act="goto-works-orders"]'));
+
   s.done();
 })();
