@@ -24,6 +24,34 @@ const CONFIG = 'window.QGRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"e
   'division:{code:"MVS",name:"ACTOM MV Switchgear"},build:{commit:"x",context:"production"}};';
 
 (async () => {
+  s.group('top-level declarations do not collide');
+  /* THE BUG THIS EXISTS FOR.
+     vendor/supabase.js declares a global `var supabase`. app.js declared a
+     top-level `const supabase`. In a classic script those share one global
+     lexical scope, so the browser refused to parse app.js at all:
+
+       Uncaught SyntaxError: Identifier 'supabase' has already been declared
+
+     Nothing ran and the splash screen hung. Neither eval() nor jsdom
+     reproduces it — both give each script its own scope, so nine suites
+     reported green against a site that could not boot.
+
+     Compiling the scripts CONCATENATED is faithful for this purpose: a
+     browser shares the global lexical environment across classic scripts,
+     so a clash between them is a clash within the concatenation too. */
+  const vm = require('vm');
+  const order = Array.from(read('index.html').matchAll(/<script src="([^"]+)"/g))
+    .map(m => m[1].split('?')[0]);
+  const combined = order.map(f =>
+    f === 'config.js' ? CONFIG : fs.readFileSync(app(f), 'utf8')).join('\n;\n');
+  let compileErr = null;
+  try { new vm.Script(combined, { filename: 'combined.js' }); }
+  catch (e) { compileErr = e.message; }
+  s.check('all scripts compile together without a redeclaration',
+    compileErr === null, compileErr || '');
+  s.check('app.js keeps its declarations out of the global scope',
+    /^\(function \(\)/m.test(read('app.js')) || !/^const \{[^}]*supabase/m.test(read('app.js')));
+
   s.group('the vendored bundle is usable');
   const files = ['vendor/supabase.js', 'supabase.js', 'logo.js', 'changelog.js', 'app.js',
                  'tokens.css', 'styles.css', 'index.html'];

@@ -1,6 +1,19 @@
 /* ============================================================
    ACTOM QGrid — Inspections (Phase 1)
-   Wired application. Vanilla ES modules, no build step.
+   Wired application. Plain script, no build step.
+
+   WRAPPED IN A FUNCTION, DELIBERATELY.
+
+   vendor/supabase.js declares a global `var supabase`. This file needs a
+   local binding of the same name. At the top level of a classic script a
+   `const supabase` collides with that existing global and the browser
+   refuses to parse the WHOLE FILE:
+
+     Uncaught SyntaxError: Identifier 'supabase' has already been declared
+
+   Nothing runs, nothing is logged beyond that one line, and the splash
+   screen sits there forever. A function scope keeps the binding local and
+   the clash cannot happen.
 
    Reading order:
      1. state and helpers
@@ -10,6 +23,8 @@
      5. actions (writes)
      6. boot
    ============================================================ */
+(function () {
+"use strict";
 
 /* No imports: this is a plain script. The Supabase client is set up by
    supabase.js, which runs first and exposes window.QG. That keeps the
@@ -1158,3 +1173,5 @@ console.info("QGrid app.js loaded — build",
 start().catch(bootFailed);
 console.info("QGrid app.js loaded — build",
   (window.QGRID_CONFIG && window.QGRID_CONFIG.build && window.QGRID_CONFIG.build.commit) || "?");
+
+})();

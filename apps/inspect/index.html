@@ -31,9 +31,14 @@
     </button>
     <div class="hidden" id="devSignIn" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line);text-align:left">
       <div class="eyebrow" style="margin-bottom:9px">Local development only</div>
-      <div class="fld"><label>Email</label><input id="devEmail" type="email" autocomplete="username"></div>
-      <div class="fld"><label>Password</label><input id="devPassword" type="password" autocomplete="current-password"></div>
-      <button class="btn" id="btnDevSignIn" style="width:100%;justify-content:center">Sign in with a password</button>
+      <!-- Wrapped in a form so the browser stops warning that a password field
+           is not in one. onsubmit is prevented: the CSP sets form-action 'none'
+           and sign-in is handled in JavaScript. -->
+      <form onsubmit="return false" autocomplete="on">
+        <div class="fld"><label>Email</label><input id="devEmail" type="email" autocomplete="username"></div>
+        <div class="fld"><label>Password</label><input id="devPassword" type="password" autocomplete="current-password"></div>
+        <button class="btn" type="submit" id="btnDevSignIn" style="width:100%;justify-content:center">Sign in with a password</button>
+      </form>
       <div class="hint" style="margin-top:7px">Create this user in Supabase → Authentication → Users. This block never renders on a deployed site.</div>
     </div>
     <div class="foot">Powering South Africa since 1903</div>

@@ -166,6 +166,15 @@ this repository tested a rewritten copy of `app.js` that had to be regenerated b
 hand; a suite passing against a stale copy is worse than no suite, because it
 reports green while the deployed code is untested.
 
+**Suites run scripts as real `<script>` elements, never through `eval()`.** A
+`const` at the top level of a classic script shares the global lexical scope and
+clashes with an existing `var` of the same name; inside `eval()` it does not.
+`app.js` shipped with exactly that clash — the vendored bundle declares a global
+`var supabase` — and the browser refused to parse the entire file while every
+suite reported green. `app.js` is now wrapped in a function scope, and
+`test-boot.js` compiles the scripts concatenated, which is how a browser shares
+that scope, so the fault is caught in the repository rather than on a live site.
+
 `test-boot.js` is the exception to the mocking: it loads the actual
 `vendor/supabase.js`, builds a real client and boots the app through to the
 sign-in screen. Everything else substitutes the client, so nothing was checking

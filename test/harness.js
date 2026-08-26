@@ -15,6 +15,21 @@
    and a suite passing against a stale copy is worse than no suite at
    all: it reports green while the deployed code is untested. Resolving
    through this file removes the copy, so there is nothing to drift.
+
+   SCRIPTS ARE RUN AS <script> ELEMENTS, NOT THROUGH eval().
+
+   This matters more than it looks. `const` at the top level of a classic
+   script goes into the global lexical scope and clashes with an existing
+   `var` of the same name; inside eval() it is scoped to the eval call and
+   cannot clash. app.js shipped with exactly that collision — the
+   vendored bundle declares a global `var supabase` and app.js declared a
+   `const supabase` — and the browser refused to parse the entire file:
+
+     Uncaught SyntaxError: Identifier 'supabase' has already been declared
+
+   Every suite passed, because eval() gave the file a scope the browser
+   never would. Injecting real script elements reproduces browser scoping,
+   so that class of fault is now caught here instead of on a live site.
    ===================================================================== */
 const path = require('path');
 const fs   = require('fs');
@@ -49,10 +64,16 @@ async function loadApp(app, opts) {
   const resolve = resolver(app);
   const html = fs.readFileSync(resolve('index.html'), 'utf8');
 
+  /* 'dangerously' is required for injected <script> elements to execute at
+     all. jsdom does not fetch the external src attributes in index.html
+     because no resource loader is configured, so those tags are inert and
+     the files below are what actually run — read from disk, in document
+     order, through the resolver. */
   const dom = new JSDOM(html, {
     url: opts.url || 'https://qgrid-mvs.test/',
     pretendToBeVisual: true,
-    runScripts: 'outside-only'
+    runScripts: 'dangerously',
+    resources: undefined
   });
   const w = dom.window;
 
@@ -65,20 +86,34 @@ async function loadApp(app, opts) {
   const srcs = Array.from(w.document.querySelectorAll('script[src]'))
     .map(s => s.getAttribute('src'));
 
+  const scriptErrors = [];
+  w.addEventListener('error', e => scriptErrors.push(e.message || String(e.error)));
+
   for (const src of srcs) {
     const file = resolve(src);
     if (!fs.existsSync(file)) throw new Error(`index.html references a missing file: ${src}`);
-    try {
-      w.eval(fs.readFileSync(file, 'utf8'));
-    } catch (e) {
-      throw new Error(`${src} threw while loading: ${e.message}`);
-    }
+    runScript(w, fs.readFileSync(file, 'utf8'), src);
   }
+  if (scriptErrors.length) throw new Error(scriptErrors.join('; '));
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   await sleep(opts.settle || 300);
 
-  return { dom, window: w, $: id => w.document.getElementById(id), sleep, srcs };
+  return { dom, window: w, $: id => w.document.getElementById(id), sleep, srcs, scriptErrors };
+}
+
+/**
+ * Executes source in the window the way a browser would: as a classic
+ * <script> element, with top-level declarations landing in the global
+ * scope. Never use eval() for this — see the note at the top of the file.
+ * A parse error surfaces on window 'error' rather than as a throw, so the
+ * caller checks scriptErrors.
+ */
+function runScript(w, source, label) {
+  const el = w.document.createElement('script');
+  el.textContent = source;
+  el.setAttribute('data-test-src', label || '');
+  w.document.head.appendChild(el);
 }
 
 /* Tiny assertion helper. Each suite prints one line per check and a
@@ -99,4 +134,4 @@ function suite(name) {
   };
 }
 
-module.exports = { resolver, loadApp, suite, REPO };
+module.exports = { resolver, loadApp, suite, runScript, REPO };
