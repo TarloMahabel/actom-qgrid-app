@@ -18,6 +18,16 @@
  * per-division deployment.
  */
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/* Resolve everything from the repository root, not from process.cwd().
+   Netlify runs the build from the base directory when one is set in the
+   site UI, and this script used to write to the relative path
+   "apps/inspect/config.js" — which from inside apps/inspect produces
+   apps/inspect/apps/inspect/config.js and a site that 404s. */
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const APP_DIR = join(ROOT, "apps", "inspect");
 
 const need = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "DIVISION_CODE", "DIVISION_NAME"];
 const missing = need.filter(k => !process.env[k]);
@@ -48,8 +58,7 @@ const cfg = {
   }
 };
 
-const APP = "apps/inspect";
-writeFileSync(`${APP}/config.js`,
+writeFileSync(join(APP_DIR, "config.js"),
 `/* Generated at deploy time by scripts/gen-config.mjs. Do not edit, and do
    not commit: the next build overwrites it, and each division needs its
    own. The anon key below is public by design - RLS is the control. */
@@ -58,7 +67,7 @@ window.QGRID_CONFIG = ${JSON.stringify(cfg, null, 2)};
 
 // Realtime needs the wss origin as well as https, or the subscription
 // silently fails and the app looks stale rather than broken.
-writeFileSync(`${APP}/_headers`,
+writeFileSync(join(APP_DIR, "_headers"),
 `# Generated at deploy time. connect-src is pinned to this division's
 # Supabase project only.
 /*
@@ -68,10 +77,11 @@ writeFileSync(`${APP}/_headers`,
 console.log(`config.js + _headers written for ${cfg.division.code} ` +
             `(${cfg.build.context}, ${cfg.build.commit})`);
 console.log(`  connect-src pinned to ${url}`);
+console.log(`  written to ${APP_DIR}`);
 
 // A stale vendored client is a silent problem: the app works, and then one
 // day a Supabase change breaks it and nobody remembers the file is pinned.
-const vendored = `${APP}/vendor/supabase.js`;
+const vendored = join(APP_DIR, "vendor", "supabase.js");
 if (existsSync(vendored)) {
   const v = readFileSync(vendored, "utf8").match(/supabase-js\/(\d+\.\d+\.\d+)/);
   if (v) console.log(`  vendored supabase-js ${v[1]}`);

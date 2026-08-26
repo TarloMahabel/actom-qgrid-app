@@ -8,6 +8,7 @@ Supabase backend, Netlify hosting — and on the same repository conventions as 
 Apprenticeship Application Portal.
 
 ```
+netlify.toml           MUST be at the root — Netlify reads it nowhere else
 apps/inspect/          the inspection app → one Netlify site PER DIVISION
 shared/                source of truth for tokens.css, the client, logo, changelog
 shared/sync.sh         copies shared assets into every app — run after editing shared/
@@ -17,15 +18,17 @@ db/seed-division-*.sql per-division data: product families, equipment, requireme
 db/test/               local PostgreSQL harness — RLS, triggers and RPCs
 test/harness.js        loads the REAL app from apps/, mocking only the backend
 test-*.js              front-end suites (jsdom)
-run-all-tests.sh       every suite in one command
+run-tests.mjs          every suite in one command — `npm test`, works on Windows
+run-all-tests.sh       the same, for CI on Linux
 scripts/               config generation, migrations, drift check, provisioning
 divisions/registry.json which divisions exist — metadata only, no secrets
 .githooks/pre-commit   blocks secrets, out-of-sync shared assets, CDN imports
 test-hook.js           proves the hook fires on real leaks and not on placeholders
+test-deploy.js         proves the Netlify config and build produce a working site
 DEPLOYMENT.md          step-by-step runbook — start here
 ```
 
-Before anything else: `npm install && npm test`. Seven suites, ~103 checks, no network
+Before anything else: `npm install && npm test`. Eight suites, ~127 checks, no network
 needed. If they pass, the local copy is sound, and anything that breaks afterwards
 is a console problem rather than a code problem.
 
@@ -61,7 +64,22 @@ whose password is not obviously a placeholder. `test-hook.js` proves both
 directions — that it fires on six real faults, and stays quiet on four
 placeholder forms and on this repository as it stands.
 
-### 3. The Supabase client is vendored, not fetched
+### 3. netlify.toml lives at the repository root
+
+Netlify reads `netlify.toml` from the root of the repository and nowhere else,
+unless a base directory is set in the site UI. The Apprenticeship Portal keeps one
+inside each app, which works because its sites have that field filled in by hand.
+
+The first QGrid deploy served a 404 for exactly this reason: the file was in
+`apps/inspect/`, Netlify never read it, published the repository root, found no
+`index.html` there and 404'd. One app, one root file, nothing to remember in the UI.
+
+`scripts/gen-config.mjs` now resolves paths from the repository root rather than
+`process.cwd()`, so setting a base directory later cannot silently write
+`apps/inspect/apps/inspect/config.js` and leave the site unconfigured.
+`test-deploy.js` covers both.
+
+### 4. The Supabase client is vendored, not fetched
 
 `apps/inspect/vendor/supabase.js` is supabase-js 2.112.3, committed. Nothing loads
 code from the internet at runtime, which buys two things:
@@ -137,8 +155,9 @@ layout means a second app can be added later without restructuring anything.
 
 ## Testing
 
-    npm test              every suite
-    node test-capture.js  one suite
+    npm test                        every suite
+    node run-tests.mjs --only nav   one suite
+    node test-capture.js            or call it directly
 
 The front-end suites run the real files from `apps/inspect/`, substituting only
 `config.js` and `vendor/supabase.js` from `test/fixtures/`. An earlier version of

@@ -29,11 +29,41 @@ If this repo is ever cloned onto a profile where Documents *is* synced, move it
 out. OneDrive locks files while `npm install` is writing them, and the symptom is
 an install that half-succeeds plus a git index reporting phantom changes.
 
+## PowerShell blocks npm
+
+Windows ships with an execution policy that refuses to run `npm.ps1`:
+
+    npm : File C:\Program Files\nodejs\npm.ps1 cannot be loaded because
+    running scripts is disabled on this system.
+
+Two ways round it. The first changes nothing on the machine:
+
+    npm.cmd install          # .cmd is not a PowerShell script, so the policy does not apply
+
+Or allow signed scripts for your user only — no admin needed, machine policy untouched:
+
+    Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+
+Check what you are under first:
+
+    Get-ExecutionPolicy -List
+
+If `MachinePolicy` or `UserPolicy` is anything other than `Undefined`, it is set by
+Group Policy — use `npm.cmd` rather than carving out an exception for one laptop.
+Never `Unrestricted` or `Bypass`.
+
 ## First run
 
     cd C:\Users\vmahabel.HQ\Documents\actom-qgrid
     npm install
-    npm test            # 6 suites, 92 checks, no network needed
+    npm test            # 7 suites, 103 checks, no network needed
+
+`npm test` runs `run-tests.mjs`, which is plain Node and works here.
+`run-all-tests.sh` does the same thing and is kept for CI, which runs on Linux —
+calling it from PowerShell fails with "'.' is not recognized".
+
+One suite self-skips on Windows: `test-hook.js` exercises the bash pre-commit
+hook. The hook itself still runs on commit, because Git for Windows ships bash.
 
 `npm test` exercises the real app files against a mocked Supabase. If it passes,
 the local copy is sound before you touch any console.

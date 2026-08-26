@@ -1,13 +1,41 @@
-# One Netlify site per division. Same repo, same branch, different env vars.
-# Site environment variables (set per site, never committed):
+# =====================================================================
+# ACTOM QGrid — Netlify configuration
+#
+# THIS FILE MUST LIVE AT THE REPOSITORY ROOT.
+#
+# Netlify reads netlify.toml from the root of the repository, and nowhere
+# else, unless a base directory is set in the site UI. The Apprenticeship
+# Portal keeps a netlify.toml inside each app, which works because its
+# sites have the base directory set by hand — an extra manual step, and
+# the reason the first QGrid deploy served a 404: the file sat in
+# apps/inspect/, Netlify never read it, published the repo root, found no
+# index.html there and 404'd.
+#
+# One app, one root file, no UI configuration to forget. If a second app
+# is ever added, that one takes the base-directory-in-UI route and this
+# file keeps serving apps/inspect.
+#
+# ---------------------------------------------------------------------
+# ONE SITE PER DIVISION. All deploy the same commit from the production
+# branch. What differs is four environment variables:
+#
 #   SUPABASE_URL        https://<project-ref>.supabase.co
-#   SUPABASE_ANON_KEY   public anon key (safe in the browser - RLS is the control)
+#   SUPABASE_ANON_KEY   public anon key — RLS is the control, not secrecy
 #   DIVISION_CODE       MVS
 #   DIVISION_NAME       ACTOM MV Switchgear
+#
+# WHY THERE IS A BUILD COMMAND IN A NO-BUILD-STEP PROJECT
+#
+# The app needs no compilation. The command writes two files that cannot
+# be committed because they differ per division: config.js, and _headers
+# carrying a CSP whose connect-src names that division's Supabase project.
+# See scripts/gen-config.mjs. The generated _headers is applied on top of
+# the policies below and takes precedence for Content-Security-Policy.
+# =====================================================================
 
 [build]
   command = "node scripts/gen-config.mjs"
-  publish = "."
+  publish = "apps/inspect"
 
 [build.environment]
   NODE_VERSION = "20"
@@ -15,20 +43,49 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    X-Frame-Options = "DENY"
-    X-Content-Type-Options = "nosniff"
-    Referrer-Policy = "strict-origin-when-cross-origin"
-    Permissions-Policy = "camera=(self), geolocation=()"
+    # Baseline. The generated _headers replaces the CSP with one that pins
+    # connect-src to this division's project. If generation ever fails,
+    # this policy leaves the app unable to reach any backend at all —
+    # which is the safe way to fail.
+    Content-Security-Policy = """
+      default-src 'none';
+      script-src 'self';
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data: blob:;
+      connect-src 'self';
+      form-action 'none';
+      frame-ancestors 'none';
+      base-uri 'none';
+      object-src 'none';
+      upgrade-insecure-requests
+    """
+    Strict-Transport-Security    = "max-age=31536000; includeSubDomains; preload"
+    X-Content-Type-Options       = "nosniff"
+    X-Frame-Options              = "DENY"
+    Referrer-Policy              = "no-referrer"
+    Cross-Origin-Opener-Policy   = "same-origin"
+    Cross-Origin-Resource-Policy = "same-origin"
+    # The camera is needed: inspectors photograph defects on a tablet.
+    Permissions-Policy = "camera=(self), microphone=(), geolocation=(), payment=(), usb=()"
+    X-Robots-Tag = "noindex, nofollow, noarchive, nosnippet"
 
+# Inspection records are quality evidence. Nothing is cached.
 [[headers]]
   for = "/index.html"
   [headers.values]
-    Cache-Control = "no-cache, no-store, must-revalidate"
+    Cache-Control = "no-store, no-cache, must-revalidate, private"
 
 [[headers]]
   for = "/config.js"
   [headers.values]
-    Cache-Control = "no-cache, no-store, must-revalidate"
+    Cache-Control = "no-store, no-cache, must-revalidate, private"
+
+# The vendored client is pinned and changes only by commit, so it can be
+# cached hard. It is most of the payload on a slow shop-floor link.
+[[headers]]
+  for = "/vendor/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
 
 [[redirects]]
   from = "/*"

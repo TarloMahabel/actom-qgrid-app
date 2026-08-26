@@ -24,6 +24,7 @@ run_suite() {
 echo "=== Static checks ==="
 run_suite test-security
 run_suite test-hook
+run_suite test-deploy
 
 echo
 echo "=== Front-end suites (jsdom, real app files, mock backend) ==="

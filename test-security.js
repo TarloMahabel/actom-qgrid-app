@@ -33,9 +33,19 @@ for (const f of code) {
   }
 }
 s.check('no service_role key anywhere in the tree', leaked.length === 0, leaked.join(', '));
-s.check('config.js is not committed',
-  !fs.existsSync(path.join(REPO, 'apps/inspect/config.js')));
-s.check('gitignore excludes config.js', read('.gitignore').includes('config.js'));
+/* A local config.js is normal and expected — it is how anyone runs the app
+   on their machine. The thing that must never happen is it being TRACKED,
+   because it names one division's project and every division deploys the
+   same commit. Asserting the file is absent failed for every developer who
+   had set the app up locally, which is the wrong signal entirely. */
+s.check('gitignore excludes config.js', /apps\/\*\/config\.js/.test(read('.gitignore')));
+let tracked = '';
+try {
+  tracked = require('child_process')
+    .execFileSync('git', ['ls-files', 'apps/*/config.js', 'apps/*/_headers'],
+      { cwd: REPO, encoding: 'utf8' }).trim();
+} catch { tracked = ''; }   // not a git checkout — nothing to assert
+s.check('config.js and _headers are not tracked by git', tracked === '', tracked);
 
 s.group('no code loaded from the internet');
 const html = read('apps/inspect/index.html');
@@ -50,7 +60,7 @@ const cdnRefs = shipped.filter(f => /esm\.sh|unpkg\.com|cdn\.jsdelivr|skypack/.t
 s.check('no CDN import in shipped app code', cdnRefs.length === 0, cdnRefs.join(', '));
 
 s.group('content security policy');
-const toml = read('apps/inspect/netlify.toml');
+const toml = read('netlify.toml');
 for (const rule of ["default-src 'none'", "script-src 'self'", "frame-ancestors 'none'",
                     "object-src 'none'", "base-uri 'none'"]) {
   s.check(`CSP sets ${rule}`, toml.includes(rule));
