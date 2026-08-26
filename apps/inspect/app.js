@@ -59,7 +59,7 @@ const S = {
   projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [],
   dash: {},
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
-  designer: { tplId: null, revId: null, def: null, sel: null, preview: false, dirty: false },
+  designer: { open: false, tplId: null, revId: null, def: null, sel: null, preview: false, dirty: false },
   capture: { id: null, results: {} }
 };
 
@@ -494,13 +494,75 @@ const TYPES = {
   sign:{n:"Signature",c:"#d93025",ic:"✍",d:"Electronic signature — locks the record"}
 };
 function vDsn(m) {
-  if (!S.templates.length)
-    return head(m, "Build the inspection form. Quality owns this screen.",
-      `<button class="btn pri" data-act="new-template">New template</button>`) +
-      `<div class="card"><div class="empty">No templates yet. Create one to get started.</div></div>`;
+  /* Library first, designer second. Landing straight in whichever template
+     happened to be first made it look as though there was only one, and gave
+     no view of what exists, what is published and what is still a draft —
+     which is the question a Quality Manager actually opens this screen to ask. */
+  return S.designer.open ? designerView(m) : libraryView(m);
+}
 
-  if (!S.designer.tplId) S.designer.tplId = S.templates[0].id;
+function libraryView(m) {
+  const rows = S.templates.map(t => {
+    const revs = S.revisions.filter(r => r.template_id === t.id);
+    const pub = revs.find(r => r.status === "published");
+    const draft = revs.find(r => ["draft", "in_review"].includes(r.status));
+    const fields = (rev) => rev ? (rev.definition?.sections || [])
+      .reduce((a, sec) => a + (sec.items || []).length, 0) : 0;
+    const inUse = S.requirements.filter(r => r.template_id === t.id).length;
+    return { t, pub, draft, revs, fields: fields(pub || draft), inUse };
+  });
+
+  const card = r => `<div class="card" style="margin-bottom:11px"><div class="bd">
+    <div style="display:flex;gap:13px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex:1;min-width:240px">
+        <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+          <span class="id" style="font-size:12.6px">${esc(r.t.code)}</span>
+          <b style="font-size:13.5px">${esc(r.t.name)}</b>
+          ${r.pub ? pill(`Published rev ${r.pub.rev}`) : pill("Never published")}
+          ${r.draft ? pill(`Draft rev ${r.draft.rev}`) : ""}
+        </div>
+        <div class="sub" style="margin-top:4px">
+          ${esc(stageName(r.t.stage_id))} ·
+          ${esc(byId(S.families, r.t.family_id)?.name || "all families")} ·
+          ${r.fields} field${r.fields === 1 ? "" : "s"} ·
+          competency level ${r.t.min_competency} ·
+          ${r.revs.length} revision${r.revs.length === 1 ? "" : "s"}
+        </div>
+        <div class="sub" style="margin-top:3px">
+          ${r.inUse
+            ? `Used by ${r.inUse} requirement${r.inUse === 1 ? "" : "s"} in the matrix`
+            : `<span style="color:var(--warn)">Not referenced by the requirements matrix — nothing will be scheduled from it</span>`}
+        </div>
+      </div>
+      <div style="display:flex;gap:7px;align-items:center">
+        <button class="btn sm" data-act="open-preview" data-tpl="${r.t.id}">Preview</button>
+        <button class="btn sm pri" data-act="open-designer" data-tpl="${r.t.id}">Design</button>
+      </div>
+    </div>
+    ${!r.pub && r.draft ? `<div class="note q" style="margin-top:11px">This template is a draft.
+      It can be attached to the requirements matrix, but the scheduler skips it until a
+      revision is published.</div>` : ""}
+  </div></div>`;
+
+  const drafts = rows.filter(r => r.draft).length;
+  const unused = rows.filter(r => !r.inUse).length;
+
+  return head(m, "The inspection forms this division uses. Open one to change it, or create a new one.",
+    `<button class="btn pri" data-act="new-template">New template</button>`)
+    + `<div class="four" style="margin-bottom:14px">
+        <div class="card kpi"><div class="k">Templates</div><div class="v">${S.templates.length}</div><div class="d">across ${new Set(S.templates.map(t => t.stage_id)).size} stages</div></div>
+        <div class="card kpi ${rows.filter(r => r.pub).length === S.templates.length ? "good" : "warn"}"><div class="k">Published</div><div class="v">${rows.filter(r => r.pub).length}</div><div class="d">usable by the scheduler</div></div>
+        <div class="card kpi ${drafts ? "warn" : "good"}"><div class="k">Open drafts</div><div class="v">${drafts}</div><div class="d">awaiting a second approver</div></div>
+        <div class="card kpi ${unused ? "warn" : "good"}"><div class="k">Not in the matrix</div><div class="v">${unused}</div><div class="d">nothing scheduled from them</div></div>
+      </div>`
+    + (S.templates.length
+        ? rows.sort((a, b) => a.t.code.localeCompare(b.t.code)).map(card).join("")
+        : `<div class="card"><div class="empty">No templates yet. Create one to get started.</div></div>`);
+}
+
+function designerView(m) {
   const tpl = byId(S.templates, S.designer.tplId);
+  if (!tpl) { S.designer.open = false; return libraryView(m); }
   const revs = S.revisions.filter(r => r.template_id === tpl.id);
   const draft = revs.find(r => ["draft", "in_review"].includes(r.status));
   const pub = revs.find(r => r.status === "published");
@@ -511,17 +573,17 @@ function vDsn(m) {
     S.designer.dirty = false;
   }
   const def = S.designer.def;
-  const nFields = def.sections.reduce((a, s) => a + s.items.length, 0);
+  const nFields = def.sections.reduce((a, sec) => a + sec.items.length, 0);
 
   const pal = (g, list) => `<div class="gh">${g}</div>${list.map(k =>
     `<button class="pi" data-add="${k}"><span class="ic" style="background:${TYPES[k].c}">${TYPES[k].ic}</span>${TYPES[k].n}</button>`).join("")}`;
 
-  const canvas = def.sections.map((s, si) => `<div class="sec">
-    <div class="sh"><input value="${esc(s.title)}" data-sec-title="${si}"
+  const canvas = def.sections.map((sec, si) => `<div class="sec">
+    <div class="sh"><input value="${esc(sec.title)}" data-sec-title="${si}"
       style="font-weight:700;font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;border:0;background:none;outline:0;color:var(--ink-2);width:60%">
-      <span class="sc">${s.items.length} field${s.items.length === 1 ? "" : "s"}</span>
+      <span class="sc">${sec.items.length} field${sec.items.length === 1 ? "" : "s"}</span>
       <button class="btn sm danger" data-del-sec="${si}" style="margin-left:auto">Remove section</button></div>
-    ${s.items.map(it => `<div class="it ${S.designer.sel === it.id ? "sel" : ""}" data-sel="${it.id}">
+    ${sec.items.map(it => `<div class="it ${S.designer.sel === it.id ? "sel" : ""}" data-sel="${it.id}">
       <span class="tb" style="background:${TYPES[it.type]?.c || "#8593a9"}">${TYPES[it.type]?.ic || "?"}</span>
       <div><div class="lb">${esc(it.label)}
         ${it.req ? '<span class="tag req">Required</span>' : ""}
@@ -535,19 +597,35 @@ function vDsn(m) {
     </div>`).join("") || `<div class="empt">No fields yet — choose a type on the left.</div>`}
   </div>`).join("");
 
+  /* Publishing. The button is always shown, and says why it cannot be used,
+     because a control that silently hides itself is indistinguishable from a
+     missing feature — which is how this was first reported. */
+  const canPublishRole = isRole("quality_manager", "sysadmin");
+  const isAuthor = draft && draft.created_by === S.profile.id;
+  const publishBlock = !draft
+    ? { label: "Publish", why: "There is no draft to publish. Change something and save a draft first." }
+    : !canPublishRole
+      ? { label: `Publish rev ${draft.rev}`, why: "Only a Quality Manager or System Administrator may publish." }
+      : isAuthor
+        ? { label: `Publish rev ${draft.rev}`, why: "You built this draft. A template is a controlled document, so a second Quality Manager has to approve it." }
+        : null;
+
   const act = `
+    <button class="btn" data-act="back-to-library">← Library</button>
     <button class="btn" data-act="toggle-preview">${S.designer.preview ? "Back to designer" : "Preview as inspector"}</button>
     <button class="btn" data-act="save-draft"${S.designer.dirty ? "" : " disabled"}>Save draft</button>
-    ${draft && isRole("quality_manager") ? `<button class="btn pri" data-act="publish">Publish rev ${draft.rev}</button>` : ""}`;
+    ${publishBlock
+      ? `<button class="btn" disabled title="${esc(publishBlock.why)}">${publishBlock.label}</button>`
+      : `<button class="btn pri" data-act="publish">Publish rev ${draft.rev}</button>`}`;
 
-  return head(m, "Build the inspection form itself. Adding a checkpoint does not need a developer.", act)
+  return head(m, `${esc(tpl.code)} — ${esc(tpl.name)}`, act)
     + `<div class="filters">
-        <select id="tplPick">${S.templates.map(t => `<option value="${t.id}" ${t.id === tpl.id ? "selected" : ""}>${esc(t.code)} — ${esc(t.name)}</option>`).join("")}</select>
-        <button class="btn sm" data-act="new-template">New template</button>
-        <span class="spacer"></span>
-        <span class="cnt">rev ${rev?.rev ?? "—"} · ${pill(rev?.status || "none")} · ${nFields} fields
-        ${S.designer.dirty ? ' · <b style="color:var(--warn)">unsaved changes</b>' : ""}</span>
+        <span class="cnt">rev ${rev?.rev ?? "—"} · ${pill(rev?.status || "none")} ·
+          ${nFields} fields · ${esc(stageName(tpl.stage_id))} ·
+          ${esc(byId(S.families, tpl.family_id)?.name || "all families")}
+          ${S.designer.dirty ? ' · <b style="color:var(--warn)">unsaved changes</b>' : ""}</span>
       </div>`
+    + (publishBlock && draft ? `<div class="note q" style="margin-bottom:13px"><b>Cannot publish yet.</b> ${publishBlock.why}</div>` : "")
     + (S.designer.preview
       ? `<div class="card"><h3>Preview <span class="cl">${esc(tpl.code)} rev ${rev?.rev}</span></h3><div class="bd">${previewHtml(def)}</div></div>`
       : `<div class="dsn">
@@ -562,6 +640,7 @@ function vDsn(m) {
           <div class="props"><div class="ph">Field settings</div><div class="pb">${propsHtml()}</div></div>
         </div>`);
 }
+
 function findItem(id) {
   for (const s of S.designer.def.sections) { const it = s.items.find(x => x.id === id); if (it) return { s, it }; }
   return null;
@@ -1117,7 +1196,8 @@ async function saveTemplate() {
     });
     if (e2) throw e2;
     closeModal();
-    S.designer = { tplId: data.id, revId: null, def: null, sel: null, preview: false, dirty: false };
+    S.designer = { open: true, tplId: data.id, revId: null, def: null,
+                   sel: null, preview: false, dirty: false };
     S.view = "dsn"; buildNav(); await reload();
   } catch (e) { toast(explain(e), "bad"); }
   finally { busy(false); }
@@ -1180,7 +1260,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del]");
+  const t = e.target.closest("[data-go],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-tpl]");
   if (!t) return;
   const d = t.dataset;
 
@@ -1238,6 +1318,20 @@ document.addEventListener("click", async e => {
 
   switch (d.act) {
     case "refresh": return reload();
+    case "open-designer":
+      S.designer = { open: true, tplId: t.dataset.tpl, revId: null, def: null,
+                     sel: null, preview: false, dirty: false };
+      return render();
+    case "open-preview":
+      S.designer = { open: true, tplId: t.dataset.tpl, revId: null, def: null,
+                     sel: null, preview: true, dirty: false };
+      return render();
+    case "back-to-library":
+      if (S.designer.dirty &&
+          !confirm("You have unsaved changes to this template. Leave without saving?")) return;
+      S.designer = { open: false, tplId: null, revId: null, def: null,
+                     sel: null, preview: false, dirty: false };
+      return render();
     case "toggle-preview": S.designer.preview = !S.designer.preview; return render();
     case "save-draft": return saveDraft();
     case "publish": return publishDraft();
@@ -1285,10 +1379,7 @@ document.addEventListener("change", e => {
     S.designer.dirty = true; return render();
   }
   if (d.secTitle !== undefined) { S.designer.def.sections[+d.secTitle].title = e.target.value; S.designer.dirty = true; return; }
-  if (e.target.id === "tplPick") {
-    S.designer = { tplId: e.target.value, revId: null, def: null, sel: null, preview: false, dirty: false };
-    return render();
-  }
+
   if (d.num !== undefined) return saveAnswer(d.num, { value_num: e.target.value === "" ? null : Number(e.target.value) });
   if (d.txt !== undefined) return saveAnswer(d.txt, { value_text: e.target.value });
   if (d.equip !== undefined) return saveAnswer(d.equip, { equipment_id: e.target.value ? Number(e.target.value) : null });
