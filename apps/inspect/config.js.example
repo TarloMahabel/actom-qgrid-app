@@ -7,7 +7,7 @@
 
    Leave build.context as "local" — that is what reveals the password
    sign-in box, and Netlify always overrides it. */
-window.QGRID_CONFIG = {
+window.GRID_CONFIG = {
   url: "https://YOUR_PROJECT_REF.supabase.co",
   key: "YOUR_ANON_KEY",
   division: { code: "MVS", name: "ACTOM MV Switchgear" },

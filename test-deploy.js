@@ -60,7 +60,7 @@ for (const cwd of [REPO, path.join(REPO, 'apps/inspect')]) {
 }
 
 const cfg = fs.readFileSync(cfgPath, 'utf8');
-s.check('config.js sets QGRID_CONFIG', cfg.includes('window.QGRID_CONFIG'));
+s.check('config.js sets GRID_CONFIG', cfg.includes('window.GRID_CONFIG'));
 s.check('config.js carries the division', cfg.includes('"TST"'));
 s.check('context comes from Netlify, so the dev sign-in stays hidden',
   cfg.includes('"context": "production"'));

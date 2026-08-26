@@ -1,4 +1,4 @@
-# ACTOM QGrid — Inspections
+# ACTOM Grid — Inspections
 
 Quality inspections for ACTOM. Phase 1 of the quality management system:
 capture, scheduling, a configurable form designer and the requirements matrix.
@@ -34,6 +34,18 @@ needed. If they pass, the local copy is sound, and anything that breaks afterwar
 is a console problem rather than a code problem.
 
 ---
+
+## A note on the name
+
+The product is **ACTOM Grid**. Everything a user reads says that, and the code
+namespace matches: `window.GRID`, `GRID_CONFIG`.
+
+The infrastructure keeps its original identifiers on purpose — the GitHub repo
+`actom-qgrid-app`, the Netlify sites `actom-qgrid-<code>`, the Supabase projects,
+the `qgrid-<code>.actom.co.za` domains and the `public.qgrid_migrations` ledger.
+Renaming those means recreating the Netlify site and the Supabase project, moving
+CI secrets and re-pointing DNS, for no functional gain. They are names in a
+console, not names a user sees. Leave them.
 
 ## Two conventions worth understanding before you change anything
 
@@ -71,7 +83,7 @@ Netlify reads `netlify.toml` from the root of the repository and nowhere else,
 unless a base directory is set in the site UI. The Apprenticeship Portal keeps one
 inside each app, which works because its sites have that field filled in by hand.
 
-The first QGrid deploy served a 404 for exactly this reason: the file was in
+The first Grid deploy served a 404 for exactly this reason: the file was in
 `apps/inspect/`, Netlify never read it, published the repository root, found no
 `index.html` there and 404'd. One app, one root file, nothing to remember in the UI.
 
@@ -98,12 +110,12 @@ To upgrade it, replace `shared/vendor-supabase.js`, run sync, run the suites.
 Both follow the same template. One convention is deliberately inverted, and the
 reason is the deployment model.
 
-**The Portal commits `apps/*/config.js`. QGrid generates it.**
+**The Portal commits `apps/*/config.js`. Grid generates it.**
 
 The Portal has one Supabase project, so its configuration is a fact about the
 repository and committing it is the only thing that works without a build step.
 
-QGrid has **one database and one Netlify site per division**, all running the same
+Grid has **one database and one Netlify site per division**, all running the same
 commit. A committed `config.js` could only ever name one division's project. So it
 is generated per site by `scripts/gen-config.mjs` from four environment variables —
 and that is why there is a build command in an otherwise no-build-step project.
@@ -144,7 +156,7 @@ that has to reach all of them in the right order — which is why
 
 The Portal splits into `apps/applicant` and `apps/admin` because a public app and
 an internal console on the same origin share localStorage and a single XSS reaches
-both. QGrid has the same shape available: a lean tablet app for inspectors, a
+both. Grid has the same shape available: a lean tablet app for inspectors, a
 desktop console for the designer, matrix and administration.
 
 It is not split, for one reason: **two apps per division is 54 Netlify sites, 54

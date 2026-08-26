@@ -1,5 +1,5 @@
 -- ============================================================
--- ACTOM QGrid — Phase 1 Inspections
+-- ACTOM Grid — Phase 1 Inspections
 -- 0002 application wiring: auth, numbering, storage, RPCs
 --
 -- Everything the browser needs to do that must be atomic or must be

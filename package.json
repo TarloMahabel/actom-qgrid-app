@@ -1,7 +1,7 @@
 {
   "name": "actom-qgrid",
   "private": true,
-  "description": "ACTOM QGrid \u2014 quality inspections. Vanilla JS, no build step, Supabase backend, one database and one Netlify site per division.",
+  "description": "ACTOM Grid — quality inspections. Vanilla JS, no build step, Supabase backend, one database and one Netlify site per division.",
   "scripts": {
     "test": "node run-tests.mjs",
     "sync": "bash shared/sync.sh",
@@ -13,5 +13,8 @@
   },
   "devDependencies": {
     "jsdom": "^24.0.0"
+  },
+  "dependencies": {
+    "puppeteer": "^25.9.0"
   }
 }

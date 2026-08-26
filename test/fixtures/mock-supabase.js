@@ -4,7 +4,7 @@
    Exposes the same surface the real bundle does — window.supabase with a
    createClient factory — so shared/supabase.js and app.js load unchanged
    and the suites exercise the deployed code paths, not a special test
-   build. Every call is recorded on window.QG_CALLS so a suite can assert
+   build. Every call is recorded on window.GRID_CALLS so a suite can assert
    what the app actually asked the database to do.
    ===================================================================== */
 (function () {
@@ -146,6 +146,6 @@
   window.supabase = {
     createClient: function () { return client; }
   };
-  window.QG_TEST_DATA = DATA;
-  window.QG_CALLS = CALLS;
+  window.GRID_TEST_DATA = DATA;
+  window.GRID_CALLS = CALLS;
 })();

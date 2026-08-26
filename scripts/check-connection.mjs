@@ -1,5 +1,5 @@
 /**
- * Checks a QGrid Supabase project from the outside, using only the anon key.
+ * Checks a Grid Supabase project from the outside, using only the anon key.
  *
  *   node scripts/check-connection.mjs
  *   node scripts/check-connection.mjs --url https://xxx.supabase.co --key eyJ...
@@ -19,7 +19,7 @@ let key = arg("--key") || process.env.SUPABASE_ANON_KEY;
 // Fall back to the generated config.js so a local dev setup needs no arguments.
 if ((!url || !key) && existsSync("apps/inspect/config.js")) {
   const src = readFileSync("apps/inspect/config.js", "utf8");
-  const m = src.match(/window\.QGRID_CONFIG\s*=\s*(\{[\s\S]*\});?\s*$/);
+  const m = src.match(/window\.GRID_CONFIG\s*=\s*(\{[\s\S]*\});?\s*$/);
   if (m) { try { const c = JSON.parse(m[1]); url ||= c.url; key ||= c.key; } catch {} }
 }
 if (!url || !key) {

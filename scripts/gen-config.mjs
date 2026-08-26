@@ -8,7 +8,7 @@
  *   _headers    a Content-Security-Policy whose connect-src names THIS
  *               division's project and nothing else
  *
- * The LMS commits config.js because it has one backend. QGrid has one per
+ * The LMS commits config.js because it has one backend. Grid has one per
  * division running the same commit, so the configuration cannot live in
  * the repository. That in turn means the CSP cannot be hardcoded in
  * netlify.toml either: pinning connect-src to one project ref there would
@@ -62,7 +62,7 @@ writeFileSync(join(APP_DIR, "config.js"),
 `/* Generated at deploy time by scripts/gen-config.mjs. Do not edit, and do
    not commit: the next build overwrites it, and each division needs its
    own. The anon key below is public by design - RLS is the control. */
-window.QGRID_CONFIG = ${JSON.stringify(cfg, null, 2)};
+window.GRID_CONFIG = ${JSON.stringify(cfg, null, 2)};
 `);
 
 // Realtime needs the wss origin as well as https, or the subscription

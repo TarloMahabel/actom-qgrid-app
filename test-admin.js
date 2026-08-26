@@ -5,7 +5,7 @@ const { loadApp, suite } = require('./test/harness');
   const s = suite('test-admin — administration');
   const { window: w, $, sleep } = await loadApp('inspect');
   const d = w.document;
-  const CALLS = w.QG_CALLS;
+  const CALLS = w.GRID_CALLS;
 
   d.querySelector('#nav button[data-go="adm"]').click(); await sleep(80);
   s.check('inactive user shows an Activate action', $('page').innerHTML.includes('Activate'));
@@ -23,7 +23,7 @@ const { loadApp, suite } = require('./test/harness');
   /* Derive the expected counts from the fixture rather than hard-coding a
      threshold: the mock holds a handful of rows and a fixed number would
      either fail here or pass trivially against real data. */
-  const D = w.QG_TEST_DATA;
+  const D = w.GRID_TEST_DATA;
   const expectFields = D.manufacturing_stages.length * 2   // name, sort_order
                      + D.departments.length * 3            // name, stage, sort_order
                      + D.product_families.length * 1       // name

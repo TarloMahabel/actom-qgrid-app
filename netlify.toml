@@ -1,5 +1,5 @@
 # =====================================================================
-# ACTOM QGrid — Netlify configuration
+# ACTOM Grid — Netlify configuration
 #
 # THIS FILE MUST LIVE AT THE REPOSITORY ROOT.
 #
@@ -7,7 +7,7 @@
 # else, unless a base directory is set in the site UI. The Apprenticeship
 # Portal keeps a netlify.toml inside each app, which works because its
 # sites have the base directory set by hand — an extra manual step, and
-# the reason the first QGrid deploy served a 404: the file sat in
+# the reason the first Grid deploy served a 404: the file sat in
 # apps/inspect/, Netlify never read it, published the repo root, found no
 # index.html there and 404'd.
 #

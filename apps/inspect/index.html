@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0063AF">
-<title>ACTOM QGrid — Inspections</title>
+<title>ACTOM Grid — Inspections</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="tokens.css?v=1">
 <link rel="stylesheet" href="styles.css?v=1">
@@ -14,15 +14,15 @@
 <!-- ---------------- loading ---------------- -->
 <div id="loader">
   <div id="loaderMark"></div>
-  <div class="ldr-txt">QGrid · Quality Inspections</div>
+  <div class="ldr-txt">Grid · Quality Inspections</div>
   <div class="ldr-bar"><i></i></div>
 </div>
 
 <!-- ---------------- sign in ---------------- -->
 <div class="gate hidden" id="gateSignIn">
   <div class="gatebox">
-    <div class="tile" id="gateTile" style="width:56px;height:56px;border-radius:12px"></div>
-    <h1>ACTOM QGrid</h1>
+    <div id="gateMark" style="margin:0 auto 16px;display:flex;justify-content:center"></div>
+    <h1>ACTOM Grid</h1>
     <p id="gateDivision">Quality inspections</p>
     <div class="err hidden" id="signInErr"></div>
     <button class="btn pri" id="btnSignIn">
@@ -64,7 +64,7 @@
     <div class="brandbox">
       <div class="tile" id="sideTile"></div>
       <div>
-        <div class="nm">QGrid</div>
+        <div class="nm">Grid</div>
         <div class="sub" id="sideDivision">Inspections</div>
       </div>
     </div>
@@ -106,7 +106,7 @@
      vendored client is not present yet:
        vendor/supabase.js  the pinned client, committed to the repo
        config.js           generated at deploy time by scripts/gen-config.mjs
-       supabase.js         wrapper — exposes window.QG
+       supabase.js         wrapper — exposes window.GRID
        logo.js             ACTOM wordmark
        changelog.js        release notes for "What's new"
        app.js              the application -->

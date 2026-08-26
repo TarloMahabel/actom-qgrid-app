@@ -1,12 +1,12 @@
 # =====================================================================
-# ACTOM QGrid — Inspections
+# ACTOM Grid — Inspections
 #
 # NOTE ON config.js — read before changing this.
 #
 # The Apprenticeship Portal commits apps/*/config.js deliberately, because
 # it has ONE Supabase project and no build step to inject the file.
 #
-# QGrid is different, and the difference is the whole deployment model:
+# Grid is different, and the difference is the whole deployment model:
 # one database and one Netlify site PER DIVISION, all running the same
 # commit. A committed config.js could only ever name one division's
 # project, so it must be generated per site instead. That is what

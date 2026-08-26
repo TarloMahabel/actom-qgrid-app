@@ -5,12 +5,12 @@ const { loadApp, suite } = require('./test/harness');
   const s = suite('test-requirements — matrix and hold points');
   const { window: w, $, sleep } = await loadApp('inspect');
   const d = w.document;
-  const CALLS = w.QG_CALLS;
+  const CALLS = w.GRID_CALLS;
 
   d.querySelector('#nav button[data-go="req"]').click(); await sleep(80);
   s.check('a row per product family', d.querySelectorAll('.mx tbody tr').length === 2);
   s.check('a column per stage',
-    d.querySelectorAll('.mx thead th').length === w.QG_TEST_DATA.manufacturing_stages.length + 1);
+    d.querySelectorAll('.mx thead th').length === w.GRID_TEST_DATA.manufacturing_stages.length + 1);
 
   s.group('hold points are off for this division');
   s.check('no hold-point legend shown', !$('page').innerHTML.includes('blocks the works order'));

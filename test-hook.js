@@ -60,7 +60,7 @@ const cases = [
   ['service_role JWT',        t => fs.writeFileSync(path.join(t, 'x.js'), `const K="${jwt}";`),          'SERVICE_ROLE JWT'],
   ['secret key prefix',       t => fs.writeFileSync(path.join(t, 'x.js'), `const k="${SECRET_PREFIX}Ab3xY9zQ1mN7pR";`), 'SECRET key'],
   ['live connection string',  t => fs.writeFileSync(path.join(t, 'x.env'), liveUri), 'real password'],
-  ['committed config.js',     t => fs.writeFileSync(path.join(t, 'apps/inspect/config.js'), 'window.QGRID_CONFIG={};'),
+  ['committed config.js',     t => fs.writeFileSync(path.join(t, 'apps/inspect/config.js'), 'window.GRID_CONFIG={};'),
      'must not be committed', 'apps/inspect/config.js'],
   ['CDN import in app code',  t => fs.writeFileSync(path.join(t, 'apps/inspect/x.js'), 'import a from "https://esm.sh/a";'), 'CDN'],
   ['shared/ out of step',     t => fs.appendFileSync(path.join(t, 'shared/tokens.css'), 'body{color:red}'), 'sync.sh']

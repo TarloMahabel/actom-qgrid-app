@@ -1,5 +1,5 @@
 /* =====================================================================
-   ACTOM QGrid — Supabase client.
+   ACTOM Grid — Supabase client.
 
    A plain script, not an ES module, and it uses the client vendored at
    vendor/supabase.js rather than fetching one from a CDN. Two reasons
@@ -16,18 +16,18 @@
 (function () {
   'use strict';
 
-  var cfg = window.QGRID_CONFIG;
+  var cfg = window.GRID_CONFIG;
 
   if (!cfg || !cfg.url || !cfg.key) {
     document.addEventListener('DOMContentLoaded', function () {
       document.body.innerHTML =
         '<div style="font:15px system-ui;padding:40px;max-width:560px;margin:0 auto">' +
-        '<h2>This site is not configured</h2><p>config.js is missing or incomplete, so QGrid ' +
+        '<h2>This site is not configured</h2><p>config.js is missing or incomplete, so Grid ' +
         'cannot reach its database. The Netlify build generates that file from the site ' +
         'environment variables — check SUPABASE_URL and SUPABASE_ANON_KEY are set, then ' +
         'redeploy.</p></div>';
     });
-    throw new Error('QGRID_CONFIG missing');
+    throw new Error('GRID_CONFIG missing');
   }
   if (!window.supabase || !window.supabase.createClient) {
     throw new Error('vendor/supabase.js did not load before supabase.js');
@@ -107,7 +107,7 @@
     return m || 'Something went wrong. Try again, and tell IT if it keeps happening.';
   }
 
-  window.QG = {
+  window.GRID = {
     supabase: client,
     DIVISION: cfg.division || { code: '', name: '' },
     BUILD: cfg.build || { commit: 'local', context: 'local' },

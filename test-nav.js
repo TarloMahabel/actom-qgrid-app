@@ -8,7 +8,7 @@ const { loadApp, suite } = require('./test/harness');
 
   s.group('load order');
   s.check('vendored client loaded, not a CDN', typeof w.supabase === 'object');
-  s.check('wrapper exposed window.QG', !!w.QG && !!w.QG.supabase);
+  s.check('wrapper exposed window.GRID', !!w.GRID && !!w.GRID.supabase);
   s.check('logo module loaded', !!w.ACTOM_LOGO);
   s.check('changelog loaded', Array.isArray(w.CHANGELOG) && w.CHANGELOG.length > 0);
   s.check('no script tag points at a remote origin',
@@ -20,7 +20,12 @@ const { loadApp, suite } = require('./test/harness');
   s.check('user rendered', $('whoName').textContent.includes('Varshan'));
   s.check('division rendered', $('sideDivision').textContent.includes('MV Switchgear'));
   s.check('build tag rendered', $('buildTag').textContent.includes('test0000'));
-  s.check('ACTOM mark painted into the sidebar', $('sideTile').innerHTML.includes('svg'));
+  /* The mark is the supplied badge artwork, embedded as base64, so this
+     asserts an <img> with a data URI rather than an inline <svg>. */
+  s.check('ACTOM badge painted into the sidebar',
+    /<img[^>]+src="data:image\/png;base64,/.test($('sideTile').innerHTML));
+  s.check('the badge is embedded, not fetched',
+    !/src="[^"]*\.(png|svg)"/.test($('sideTile').innerHTML));
   s.check('password sign-in offered locally only',
     !$('devSignIn').classList.contains('hidden'));
 

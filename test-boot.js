@@ -1,7 +1,7 @@
 /* Boots the app with the REAL vendored Supabase client — no mock.
    The other suites substitute vendor/supabase.js, so nothing was checking
    that the actual bundle loads, exposes window.supabase, and lets the
-   wrapper build window.QG. A deploy where that file is missing or served
+   wrapper build window.GRID. A deploy where that file is missing or served
    as HTML looks identical to a hung splash screen, which is how the first
    deploy failed with nothing useful on screen. */
 const { suite, REPO } = require('./test/harness');
@@ -20,7 +20,7 @@ function makeDom() {
   dom.window.scrollTo = () => {};
   return dom;
 }
-const CONFIG = 'window.QGRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"eyJfake",' +
+const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"eyJfake",' +
   'division:{code:"MVS",name:"ACTOM MV Switchgear"},build:{commit:"x",context:"production"}};';
 
 (async () => {
@@ -90,15 +90,15 @@ const CONFIG = 'window.QGRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"e
   s.check('bundle exposes window.supabase', typeof w.supabase === 'object');
   s.check('bundle exposes createClient', typeof w.supabase.createClient === 'function');
 
-  s.group('the wrapper builds window.QG');
+  s.group('the wrapper builds window.GRID');
   w.eval(CONFIG);
   w.eval(read('supabase.js'));
-  s.check('window.QG created', typeof w.QG === 'object');
+  s.check('window.GRID created', typeof w.GRID === 'object');
   for (const k of ['supabase', 'DIVISION', 'BUILD', 'signIn', 'signInWithPassword',
                    'signOutNow', 'currentProfile', 'explain']) {
-    s.check(`QG.${k} exported`, w.QG[k] !== undefined);
+    s.check(`QG.${k} exported`, w.GRID[k] !== undefined);
   }
-  s.check('a real client was constructed', typeof w.QG.supabase.from === 'function');
+  s.check('a real client was constructed', typeof w.GRID.supabase.from === 'function');
 
   s.group('a full boot with no session reaches the sign-in screen');
   const dom = makeDom(); w = dom.window;
@@ -114,7 +114,12 @@ const CONFIG = 'window.QGRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"e
   const el = id => w.document.getElementById(id);
   s.check('no uncaught errors during boot', errors.length === 0, errors.join('; '));
   s.check('loader was dismissed', !el('loader') || el('loader').className.includes('gone'));
-  s.check('ACTOM mark painted', !el('loaderMark') || el('loaderMark').innerHTML.includes('svg'));
+  const mark = el('loaderMark') ? el('loaderMark').innerHTML : '';
+  s.check('ACTOM badge painted on the loading screen',
+    !el('loaderMark') || /src="data:image\/png;base64,/.test(mark));
+  s.check('the energising line is drawn', !el('loaderMark') || mark.includes('pyl-pulse'));
+  s.check('the loading screen fetches nothing',
+    !/src="(?!data:)/.test(mark) && !/url\((?!#)/.test(mark));
   s.check('sign-in screen shown', !el('gateSignIn').classList.contains('hidden'));
   s.check('dev password box hidden in a production build',
     el('devSignIn').classList.contains('hidden'));
@@ -151,7 +156,7 @@ const CONFIG = 'window.QGRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"e
      from onAuthStateChange on page load. The second run re-used the existing
      realtime channel and Supabase threw
        cannot add `postgres_changes` callbacks for realtime:qgrid after `subscribe()`
-     which surfaced to the user as "QGrid could not start". */
+     which surfaced to the user as "Grid could not start". */
   s.check('a repeat subscribe tears the old channel down first',
     read('app.js').includes('removeChannel'));
   s.check('boot is guarded against re-entry', read('app.js').includes('if (booting) return'));
@@ -182,7 +187,7 @@ const CONFIG = 'window.QGRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"e
   w4.eval(CONFIG);
   w4.eval(read('supabase.js'));
   // Replace getSession with a promise that never resolves.
-  w4.QG.supabase.auth.getSession = () => new Promise(() => {});
+  w4.GRID.supabase.auth.getSession = () => new Promise(() => {});
   w4.eval(read('logo.js'));
   w4.eval(read('changelog.js'));
   w4.eval(read('app.js'));
@@ -193,7 +198,7 @@ const CONFIG = 'window.QGRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"e
   s.check('a missing logo.js is warned about, not silently ignored',
     read('app.js').includes('logo.js did not load'));
   s.check('app.js announces itself in the console',
-    read('app.js').includes('QGrid app.js loaded'));
+    read('app.js').includes('Grid app.js loaded'));
 
   s.done();
 })();

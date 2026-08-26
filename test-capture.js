@@ -6,7 +6,7 @@ const { loadApp, suite } = require('./test/harness');
   const s = suite('test-capture — inspection capture');
   const { window: w, $, sleep } = await loadApp('inspect');
   const d = w.document;
-  const CALLS = w.QG_CALLS;
+  const CALLS = w.GRID_CALLS;
 
   d.querySelector('#nav button[data-go="work"]').click(); await sleep(60);
   const start = d.querySelector('[data-open-capture]');

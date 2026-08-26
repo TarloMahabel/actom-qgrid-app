@@ -1,4 +1,4 @@
-# Working on QGrid from Windows
+# Working on Grid from Windows
 
 ## Prerequisites
 

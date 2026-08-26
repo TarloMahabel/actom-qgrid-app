@@ -5,7 +5,7 @@ const { loadApp, suite } = require('./test/harness');
   const s = suite('test-designer — inspection form designer');
   const { window: w, $, sleep } = await loadApp('inspect');
   const d = w.document;
-  const CALLS = w.QG_CALLS;
+  const CALLS = w.GRID_CALLS;
 
   d.querySelector('#nav button[data-go="dsn"]').click(); await sleep(80);
 

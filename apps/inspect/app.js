@@ -1,5 +1,5 @@
 /* ============================================================
-   ACTOM QGrid — Inspections (Phase 1)
+   ACTOM Grid — Inspections (Phase 1)
    Wired application. Plain script, no build step.
 
    WRAPPED IN A FUNCTION, DELIBERATELY.
@@ -27,25 +27,25 @@
 "use strict";
 
 /* No imports: this is a plain script. The Supabase client is set up by
-   supabase.js, which runs first and exposes window.QG. That keeps the
+   supabase.js, which runs first and exposes window.GRID. That keeps the
    Content-Security-Policy at script-src 'self' with no CDN origins. */
-if (!window.QG) {
-  /* supabase.js sets window.QG. If it is absent, either vendor/supabase.js did
+if (!window.GRID) {
+  /* supabase.js sets window.GRID. If it is absent, either vendor/supabase.js did
      not execute — a missing file served as index.html by the SPA redirect looks
      exactly like this — or config.js is absent. Say which. */
   const why = !window.supabase
     ? "vendor/supabase.js did not load. The deploy is missing that file, or it was served as HTML by the catch-all redirect."
-    : !window.QGRID_CONFIG
+    : !window.GRID_CONFIG
       ? "config.js did not load. The build generates it from the site environment variables."
       : "supabase.js did not run.";
   document.getElementById("loader")?.remove();
   document.body.insertAdjacentHTML("afterbegin",
     `<div style="font:15px system-ui;padding:40px;max-width:620px;margin:0 auto">
-       <h2>QGrid could not start</h2><p>${why}</p></div>`);
-  throw new Error("QGrid: " + why);
+       <h2>Grid could not start</h2><p>${why}</p></div>`);
+  throw new Error("ACTOM Grid: " + why);
 }
 const { supabase, DIVISION, BUILD, signIn, signOutNow, signInWithPassword,
-        currentProfile, explain } = window.QG;
+        currentProfile, explain } = window.GRID;
 
 /* ------------------------------------------------------------
    1. State and helpers
@@ -251,7 +251,7 @@ function tabbar(m) {
 function head(m, desc, act) {
   return `<div class="phead"><div>
     <h1>${m.t}</h1><div class="accent"></div>
-    <div class="eyebrow">Module ${m.n} · ACTOM QGrid</div>
+    <div class="eyebrow">Module ${m.n} · ACTOM Grid</div>
     <p>${desc}</p></div><div class="pact">${act || ""}</div></div>`;
 }
 const foot = () => `<div class="foot">
@@ -259,7 +259,7 @@ const foot = () => `<div class="foot">
        <span class="b">${S.failedChecks.filter(f => f.disposition === "awaiting").length} awaiting disposition</span> ·
        <span class="b">${publishedRevs().length} of ${S.templates.length} templates published</span></div>
   <div>${esc(S.division?.name || DIVISION.name)} · hold points ${HP() ? "enabled" : "disabled"}</div>
-  <div>ACTOM QGrid · a division of ACTOM (Pty) Ltd · Since 1903</div></div>`;
+  <div>ACTOM Grid · a division of ACTOM (Pty) Ltd · Since 1903</div></div>`;
 
 const publishedRevs = () => S.revisions.filter(r => r.status === "published");
 const revFor = tplId => publishedRevs().find(r => r.template_id === tplId);
@@ -1425,8 +1425,9 @@ function paintLogos() {
   if (!L) return;
   const set = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
   set("loaderMark", L.full());
-  set("gateTile", L.tile(38));
-  set("sideTile", L.tile(30));
+  // The sign-in card is white, so the badge goes on it as-supplied.
+  set("gateMark", L.onLight(58));
+  set("sideTile", L.tile(22));
 }
 
 /* Shows a readable failure instead of a splash screen that hangs.
@@ -1434,18 +1435,18 @@ function paintLogos() {
    message, which gave nobody anything to act on: the cause was a script that
    had not executed, and a stuck loader looks identical whatever the reason. */
 function bootFailed(err) {
-  console.error("QGrid failed to start", err);
+  console.error("Grid failed to start", err);
   const l = $("loader");
   if (l) l.remove();
   document.body.insertAdjacentHTML("afterbegin", `
     <div class="gate"><div class="gatebox" style="max-width:560px;text-align:left">
-      <h1 style="text-align:center">QGrid could not start</h1>
+      <h1 style="text-align:center">Grid could not start</h1>
       <div class="err" style="display:block">${String(err && err.message || err)
         .replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</div>
       <p>This is a configuration or deployment problem, not something you did.
          Send this message to Group IT along with what you were doing.</p>
       <ul style="font-size:12.5px;color:var(--ink-2);line-height:1.8;padding-left:20px">
-        <li>If it mentions <b>QG</b> or <b>vendor/supabase.js</b>, a script did not load —
+        <li>If it mentions <b>GRID</b> or <b>vendor/supabase.js</b>, a script did not load —
             check the deploy included <code>vendor/supabase.js</code>.</li>
         <li>If it mentions <b>config</b>, the site environment variables are not set.</li>
         <li>If it mentions <b>did not respond</b>, the browser could not reach Supabase:
@@ -1454,8 +1455,8 @@ function bootFailed(err) {
         <li>Otherwise open the browser console for the full error.</li>
       </ul>
       <div class="buildtag" style="margin:10px 0 14px">build ${
-        (window.QGRID_CONFIG && window.QGRID_CONFIG.build &&
-         window.QGRID_CONFIG.build.commit) || "unknown"}</div>
+        (window.GRID_CONFIG && window.GRID_CONFIG.build &&
+         window.GRID_CONFIG.build.commit) || "unknown"}</div>
       <button class="btn pri" style="width:100%;justify-content:center"
               onclick="location.reload()">Try again</button>
     </div></div>`);
@@ -1525,8 +1526,8 @@ supabase.auth.onAuthStateChange((event, session) => {
   start().catch(bootFailed);
 });
 
-console.info("QGrid app.js loaded — build",
-  (window.QGRID_CONFIG && window.QGRID_CONFIG.build && window.QGRID_CONFIG.build.commit) || "?");
+console.info("Grid app.js loaded — build",
+  (window.GRID_CONFIG && window.GRID_CONFIG.build && window.GRID_CONFIG.build.commit) || "?");
 
 start().catch(bootFailed);
 

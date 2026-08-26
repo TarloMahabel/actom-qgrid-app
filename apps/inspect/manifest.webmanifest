@@ -1,6 +1,6 @@
 {
-  "name": "ACTOM QGrid — Inspections",
-  "short_name": "QGrid",
+  "name": "ACTOM Grid \u2014 Inspections",
+  "short_name": "Grid",
   "description": "Quality inspections for ACTOM. Capture, schedule and configure inspections on the shop floor.",
   "start_url": "/",
   "scope": "/",
@@ -8,5 +8,8 @@
   "orientation": "any",
   "background_color": "#eef1f6",
   "theme_color": "#0063AF",
-  "categories": ["business", "productivity"]
+  "categories": [
+    "business",
+    "productivity"
+  ]
 }

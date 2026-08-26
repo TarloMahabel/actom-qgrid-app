@@ -1,5 +1,5 @@
 -- ============================================================
---  ACTOM QGrid — Inspections (Phase 1)
+--  ACTOM Grid — Inspections (Phase 1)
 --  COMPLETE SCHEMA — one runnable script
 --
 --  Paste into the Supabase SQL editor of a NEW, EMPTY project and run.
@@ -18,12 +18,12 @@
 --  intended safety net rather than a bug.
 -- ============================================================
 
--- Refuse to run against a database that already has QGrid in it.
+-- Refuse to run against a database that already has Grid in it.
 do $guard$
 begin
   if exists (select 1 from information_schema.tables
               where table_schema = 'public' and table_name = 'inspections') then
-    raise exception 'QGrid schema already present. Use node scripts/migrate.mjs for changes, not this script.';
+    raise exception 'Grid schema already present. Use node scripts/migrate.mjs for changes, not this script.';
   end if;
 end $guard$;
 

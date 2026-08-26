@@ -1,5 +1,5 @@
 -- ============================================================
---  ACTOM QGrid — 003 publishing roles
+--  ACTOM Grid — 003 publishing roles
 --
 --  Two changes to publish_template_revision, both learned from setting
 --  the pilot up for real.

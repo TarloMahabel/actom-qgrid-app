@@ -1,4 +1,4 @@
-# Deploying QGrid
+# Deploying Grid
 
 Supabase, Microsoft Entra, GitHub, Netlify. Do these in order; step 9 repeats the
 whole thing for each further division with one command.
@@ -20,7 +20,7 @@ The repository is `TarloMahabel/actom-qgrid-app`.
 git init
 git branch -M main
 git add -A
-git commit -m "ACTOM QGrid Inspections - Phase 1"
+git commit -m "ACTOM Grid Inspections - Phase 1"
 git remote add origin https://github.com/TarloMahabel/actom-qgrid-app.git
 git push -u origin main
 git branch production
@@ -72,7 +72,7 @@ public by design — it goes in the browser and RLS is what protects the data. T
 
 **App registration** (Entra admin centre → App registrations → New):
 
-- Name: `ACTOM QGrid`
+- Name: `ACTOM Grid`
 - Accounts in this organizational directory only
 - Redirect URI, type *Web*: `https://<ref>.supabase.co/auth/v1/callback`
 

@@ -1,5 +1,5 @@
 -- ============================================================
--- ACTOM QGrid — Phase 1 Inspections
+-- ACTOM Grid — Phase 1 Inspections
 -- 0001 initial schema
 --
 -- This migration runs identically against EVERY division database.
