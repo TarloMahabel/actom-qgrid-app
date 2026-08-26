@@ -27,6 +27,10 @@ run_suite test-hook
 run_suite test-deploy
 
 echo
+echo "=== Boot path (real vendored client) ==="
+run_suite test-boot
+
+echo
 echo "=== Front-end suites (jsdom, real app files, mock backend) ==="
 for t in test-nav test-capture test-designer test-requirements test-admin; do
   run_suite "$t"

@@ -25,6 +25,7 @@ const isWindows = process.platform === "win32";
 
 const GROUPS = [
   ["Static checks", ["test-security", "test-hook", "test-deploy"]],
+  ["Boot path (real vendored client, no mock)", ["test-boot"]],
   ["Front-end suites (jsdom, real app files, mock backend)",
    ["test-nav", "test-capture", "test-designer", "test-requirements", "test-admin"]]
 ];

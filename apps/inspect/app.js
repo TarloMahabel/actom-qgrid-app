@@ -14,6 +14,21 @@
 /* No imports: this is a plain script. The Supabase client is set up by
    supabase.js, which runs first and exposes window.QG. That keeps the
    Content-Security-Policy at script-src 'self' with no CDN origins. */
+if (!window.QG) {
+  /* supabase.js sets window.QG. If it is absent, either vendor/supabase.js did
+     not execute — a missing file served as index.html by the SPA redirect looks
+     exactly like this — or config.js is absent. Say which. */
+  const why = !window.supabase
+    ? "vendor/supabase.js did not load. The deploy is missing that file, or it was served as HTML by the catch-all redirect."
+    : !window.QGRID_CONFIG
+      ? "config.js did not load. The build generates it from the site environment variables."
+      : "supabase.js did not run.";
+  document.getElementById("loader")?.remove();
+  document.body.insertAdjacentHTML("afterbegin",
+    `<div style="font:15px system-ui;padding:40px;max-width:620px;margin:0 auto">
+       <h2>QGrid could not start</h2><p>${why}</p></div>`);
+  throw new Error("QGrid: " + why);
+}
 const { supabase, DIVISION, BUILD, signIn, signOutNow, signInWithPassword,
         currentProfile, explain } = window.QG;
 
@@ -1072,6 +1087,32 @@ function paintLogos() {
   set("sideTile", L.tile(30));
 }
 
+/* Shows a readable failure instead of a splash screen that hangs.
+   The first deploy of this app sat on the loading screen with no logo and no
+   message, which gave nobody anything to act on: the cause was a script that
+   had not executed, and a stuck loader looks identical whatever the reason. */
+function bootFailed(err) {
+  console.error("QGrid failed to start", err);
+  const l = $("loader");
+  if (l) l.remove();
+  document.body.insertAdjacentHTML("afterbegin", `
+    <div class="gate"><div class="gatebox" style="max-width:560px;text-align:left">
+      <h1 style="text-align:center">QGrid could not start</h1>
+      <div class="err" style="display:block">${String(err && err.message || err)
+        .replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</div>
+      <p>This is a configuration or deployment problem, not something you did.
+         Send this message to Group IT along with what you were doing.</p>
+      <ul style="font-size:12.5px;color:var(--ink-2);line-height:1.8;padding-left:20px">
+        <li>If it mentions <b>QG</b> or <b>vendor/supabase.js</b>, a script did not load —
+            check the deploy included <code>vendor/supabase.js</code>.</li>
+        <li>If it mentions <b>config</b>, the site environment variables are not set.</li>
+        <li>Otherwise open the browser console for the full error.</li>
+      </ul>
+      <button class="btn pri" style="width:100%;justify-content:center"
+              onclick="location.reload()">Try again</button>
+    </div></div>`);
+}
+
 async function start() {
   paintLogos();
   $("gateDivision").textContent = DIVISION.name || "Inspections";
@@ -1086,6 +1127,6 @@ async function start() {
   setTimeout(() => $("loader")?.remove(), 600);
 }
 supabase.auth.onAuthStateChange((event) => {
-  if (event === "SIGNED_IN" || event === "SIGNED_OUT") start();
+  if (event === "SIGNED_IN" || event === "SIGNED_OUT") start().catch(bootFailed);
 });
-start();
+start().catch(bootFailed);
