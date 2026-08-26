@@ -58,6 +58,7 @@ const S = {
   templates: [], revisions: [], requirements: [],
   projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [],
   dash: {},
+  refDraft: {},                   // pending reference-list edits, keyed table|id|field
   designer: { tplId: null, revId: null, def: null, sel: null, preview: false, dirty: false },
   capture: { id: null, results: {} }
 };
@@ -651,13 +652,14 @@ function vAdm(m) {
         `<button class="btn sm ${p.active ? "" : "pri"}" data-toggle-active="${p.id}">${p.active ? "Deactivate" : "Activate"}</button>`]));
   }
   else if (S.tab === 1) {
-    body = `<div class="two">
-      ${refCard("Manufacturing stages", S.stages.map(s => s.name))}
-      ${refCard("Product families", S.families.map(f => f.name))}
-      ${refCard("Departments", S.departments.map(d => d.name))}
-      ${refCard("Defect codes", S.defects.map(d => `${d.code} — ${d.description}`))}
-    </div>
-    <div class="note" style="margin-top:13px">Codes are permanent, descriptions are editable. Retiring a code hides it from new forms and keeps every historic record intact.</div>`;
+    body = REF_LISTS.map(refGrid).join("") + `
+      <div class="note" style="margin-top:13px">Changes are held until you press Save, so a
+        list can be reworked in one pass. <b>Retiring</b> hides an entry from new forms and
+        keeps every historic record intact — that is almost always what you want.
+        <b>Deleting</b> is refused by the database while anything still references the entry.</div>
+      <div class="note q" style="margin-top:11px">Defect <b>codes</b> are permanent once records
+        exist against them: every trend, Pareto and count is grouped by the code, not the wording.
+        Reword the description freely; do not repurpose a code for a different defect.</div>`;
   }
   else if (S.tab === 2) {
     body = `<div class="card" style="max-width:640px"><h3>Optional features</h3><div class="bd">
@@ -674,8 +676,203 @@ function vAdm(m) {
   return head(m, "Users, roles, reference lists and division options.",
     `<button class="btn" data-act="refresh">Refresh</button>`) + tabbar(m) + body;
 }
-const refCard = (title, items) => `<div class="card"><h3>${title} <span class="cl">${items.length}</span></h3><div class="bd">
-  <div style="font-size:12.5px;line-height:1.9">${items.map(i => esc(i)).join("<br>") || "—"}</div></div></div>`;
+/* ---------------------------------------------------------------
+   Editable reference lists.
+
+   One generic grid rather than four bespoke ones: the tables differ only
+   in their columns, so a shared renderer keeps the save path, the retire
+   semantics and the error handling identical everywhere.
+
+   Edits are held in S.refDraft and written on Save (the draft-then-save
+   pattern used for the other admin grids), because renaming nine stages
+   one round-trip at a time is slow and half-applies if the connection
+   drops mid-way.
+   --------------------------------------------------------------- */
+const REF_LISTS = [
+  { table: "manufacturing_stages", title: "Manufacturing stages", state: "stages",
+    order: "sort_order",
+    note: "The sequence work moves through. Drives which checklist loads and the pass-rate-by-stage chart.",
+    cols: [{ f: "name", label: "Stage", type: "text" },
+           { f: "sort_order", label: "Order", type: "number", w: "90px" }] },
+
+  { table: "departments", title: "Departments", state: "departments",
+    order: "sort_order",
+    note: "Who owns the work. An inspector sees their own department's inspections and no others.",
+    cols: [{ f: "name", label: "Department", type: "text" },
+           { f: "stage_id", label: "Stage", type: "select", w: "190px",
+             options: () => S.stages.map(x => [x.id, x.name]) },
+           { f: "sort_order", label: "Order", type: "number", w: "90px" }] },
+
+  { table: "product_families", title: "Product families", state: "families",
+    order: "name",
+    note: "The rows of the requirements matrix. Adding one here adds a row there.",
+    cols: [{ f: "name", label: "Family", type: "text" }] },
+
+  { table: "defect_codes", title: "Defect codes", state: "defects",
+    order: "code",
+    note: "What a failure is called. Analytics group by the code, so codes are permanent and descriptions are not.",
+    cols: [{ f: "code", label: "Code", type: "text", w: "110px", lockIfUsed: true },
+           { f: "description", label: "Description", type: "text" },
+           { f: "default_department_id", label: "Default department", type: "select", w: "190px",
+             options: () => S.departments.map(x => [x.id, x.name]) }] }
+];
+
+const draftKey = (table, id, field) => `${table}|${id}|${field}`;
+const draftCount = () => Object.keys(S.refDraft).length;
+
+function refValue(table, row, field) {
+  const k = draftKey(table, row.id, field);
+  return k in S.refDraft ? S.refDraft[k] : row[field];
+}
+
+function refCell(list, row, col) {
+  const v = refValue(list.table, row, col.f);
+  const key = draftKey(list.table, row.id, col.f);
+  const dirty = key in S.refDraft;
+  const style = `width:100%;padding:6px 8px;border:1px solid ${dirty ? "var(--brand)" : "var(--line)"};border-radius:7px;background:${row.active === false ? "#f4f6f9" : "#fff"}`;
+  if (col.type === "select") {
+    return `<select data-ref="${key}" style="${style}">
+      <option value="">—</option>
+      ${col.options().map(([id, label]) =>
+        `<option value="${id}" ${String(v) === String(id) ? "selected" : ""}>${esc(label)}</option>`).join("")}
+    </select>`;
+  }
+  return `<input data-ref="${key}" type="${col.type === "number" ? "number" : "text"}"
+    value="${esc(v ?? "")}" style="${style}">`;
+}
+
+function refGrid(list) {
+  const rows = [...(S[list.state] || [])].sort((a, b) => {
+    const av = a[list.order], bv = b[list.order];
+    return typeof av === "number" ? av - bv : String(av).localeCompare(String(bv));
+  });
+  const dirty = Object.keys(S.refDraft).filter(k => k.startsWith(list.table + "|")).length;
+  const cols = list.cols;
+  const grid = `${cols.map(c => c.w || "1fr").join(" ")} 150px`;
+
+  return `<div class="card" style="margin-bottom:13px"><h3>${list.title}
+      <span class="cl">${rows.length} entries${dirty ? ` · ${dirty} unsaved` : ""}</span></h3>
+    <div class="bd">
+      <div class="note" style="margin-bottom:12px">${list.note}</div>
+      <div style="display:grid;grid-template-columns:${grid};gap:8px;align-items:center;
+                  font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);
+                  font-weight:700;padding:0 2px 6px">
+        ${cols.map(c => `<div>${c.label}</div>`).join("")}<div style="text-align:right">Status</div>
+      </div>
+      ${rows.map(r => `<div style="display:grid;grid-template-columns:${grid};gap:8px;
+            align-items:center;padding:4px 2px;${r.active === false ? "opacity:.6" : ""}">
+        ${cols.map(c => `<div>${refCell(list, r, c)}</div>`).join("")}
+        <div style="text-align:right;display:flex;gap:5px;justify-content:flex-end">
+          <button class="btn sm" data-ref-toggle="${list.table}|${r.id}"
+            title="${r.active === false ? "Bring back into use" : "Hide from new forms, keep history"}"
+          >${r.active === false ? "Restore" : "Retire"}</button>
+          <button class="btn sm danger" data-ref-del="${list.table}|${r.id}"
+            title="Only possible if nothing references it">×</button>
+        </div></div>`).join("")}
+      ${rows.length ? "" : `<div class="empty">Nothing here yet.</div>`}
+
+      <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px">
+        <div style="display:grid;grid-template-columns:${grid};gap:8px;align-items:center">
+          ${cols.map(c => c.type === "select"
+            ? `<select data-new="${list.table}|${c.f}" style="width:100%;padding:6px 8px;border:1px dashed #c8d6e3;border-radius:7px">
+                 <option value="">—</option>
+                 ${c.options().map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join("")}
+               </select>`
+            : `<input data-new="${list.table}|${c.f}" placeholder="new ${c.label.toLowerCase()}"
+                 type="${c.type === "number" ? "number" : "text"}"
+                 style="width:100%;padding:6px 8px;border:1px dashed #c8d6e3;border-radius:7px">`).join("")}
+          <div style="text-align:right">
+            <button class="btn sm pri" data-ref-add="${list.table}">Add</button></div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center;margin-top:14px">
+        <span class="cnt">${dirty ? `${dirty} unsaved change${dirty === 1 ? "" : "s"}` : "No unsaved changes"}</span>
+        <span style="flex:1"></span>
+        <button class="btn" data-ref-cancel="${list.table}" ${dirty ? "" : "disabled"}>Discard</button>
+        <button class="btn pri" data-ref-save="${list.table}" ${dirty ? "" : "disabled"}>Save changes</button>
+      </div>
+    </div></div>`;
+}
+
+async function saveRefList(table) {
+  const keys = Object.keys(S.refDraft).filter(k => k.startsWith(table + "|"));
+  if (!keys.length) return;
+  // Group by row: one UPDATE per record rather than one per field.
+  const byRow = {};
+  for (const k of keys) {
+    const [, id, field] = k.split("|");
+    (byRow[id] ||= {})[field] = S.refDraft[k];
+  }
+  busy(true);
+  try {
+    for (const [id, patch] of Object.entries(byRow)) {
+      // Empty select means "no link", not the string "".
+      for (const f of Object.keys(patch)) {
+        if (patch[f] === "") patch[f] = null;
+        else if (/(_id|sort_order)$/.test(f)) patch[f] = Number(patch[f]);
+      }
+      const { error } = await supabase.from(table).update(patch).eq("id", id);
+      if (error) throw error;
+    }
+    for (const k of keys) delete S.refDraft[k];
+    toast(`${Object.keys(byRow).length} entr${Object.keys(byRow).length === 1 ? "y" : "ies"} saved.`, "ok");
+    await reload();
+  } catch (e) {
+    /* Leave the draft intact so nothing typed is lost, and reload so the
+       grid shows what the database actually holds rather than a mix. */
+    toast(explain(e), "bad");
+    await reload();
+  } finally { busy(false); }
+}
+
+async function addRefRow(table) {
+  const list = REF_LISTS.find(l => l.table === table);
+  const row = {};
+  for (const c of list.cols) {
+    const el = document.querySelector(`[data-new="${table}|${c.f}"]`);
+    let v = el ? el.value.trim() : "";
+    if (v === "") { if (c.f === "sort_order") v = 0; else continue; }
+    row[c.f] = /(_id|sort_order)$/.test(c.f) ? Number(v) : v;
+  }
+  const first = list.cols[0].f;
+  if (!row[first]) { toast(`${list.cols[0].label} is required.`, "bad"); return; }
+  busy(true);
+  try {
+    const { error } = await supabase.from(table).insert(row);
+    if (error) throw error;
+    toast("Added.", "ok");
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function toggleRefActive(table, id) {
+  const list = REF_LISTS.find(l => l.table === table);
+  const row = (S[list.state] || []).find(r => String(r.id) === String(id));
+  busy(true);
+  try {
+    const { error } = await supabase.from(table).update({ active: row.active === false }).eq("id", id);
+    if (error) throw error;
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function deleteRefRow(table, id) {
+  const list = REF_LISTS.find(l => l.table === table);
+  const row = (S[list.state] || []).find(r => String(r.id) === String(id));
+  const label = row[list.cols[0].f];
+  if (!confirm(`Delete "${label}" permanently?\n\nRetiring is usually better — it keeps historic records readable. Delete only works if nothing references this entry.`)) return;
+  busy(true);
+  try {
+    const { error } = await supabase.from(table).delete().eq("id", id);
+    if (error) throw error;
+    toast(`"${label}" deleted.`, "ok");
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
 
 async function loadAudit() {
   const { data, error } = await supabase.from("audit_trail")
@@ -983,7 +1180,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome]");
+  const t = e.target.closest("[data-go],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del]");
   if (!t) return;
   const d = t.dataset;
 
@@ -996,6 +1193,14 @@ document.addEventListener("click", async e => {
     return setProfileField(p.id, { active: !p.active });
   }
   if (d.dispose) return disposeFailedCheck(d.dispose);
+  if (d.refSave) return saveRefList(d.refSave);
+  if (d.refAdd) return addRefRow(d.refAdd);
+  if (d.refToggle) { const [tb, id] = d.refToggle.split("|"); return toggleRefActive(tb, id); }
+  if (d.refDel) { const [tb, id] = d.refDel.split("|"); return deleteRefRow(tb, id); }
+  if (d.refCancel) {
+    for (const k of Object.keys(S.refDraft)) if (k.startsWith(d.refCancel + "|")) delete S.refDraft[k];
+    return render();
+  }
   if (d.cell) { const [f, s] = d.cell.split(":").map(Number); return editCell(f, s); }
   if (d.outcome) {
     const fid = t.closest("[data-field]").dataset.field;
@@ -1053,6 +1258,27 @@ document.addEventListener("click", async e => {
 
 document.addEventListener("change", e => {
   const d = e.target.dataset;
+  if (d.ref) {
+    /* Recorded on change (blur), not on input, and deliberately WITHOUT a
+       re-render: repainting the grid mid-edit moves the caret and loses focus.
+       The field is outlined and the Save button enabled by hand instead. */
+    const [table, id, field] = d.ref.split("|");
+    const row = (S[REF_LISTS.find(l => l.table === table).state] || [])
+      .find(r => String(r.id) === String(id));
+    const original = row ? String(row[field] ?? "") : "";
+    if (String(e.target.value) === original) delete S.refDraft[d.ref];
+    else S.refDraft[d.ref] = e.target.value;
+    e.target.style.borderColor = d.ref in S.refDraft ? "var(--brand)" : "var(--line)";
+    const n = Object.keys(S.refDraft).filter(k => k.startsWith(table + "|")).length;
+    const save = document.querySelector(`[data-ref-save="${table}"]`);
+    const cancel = document.querySelector(`[data-ref-cancel="${table}"]`);
+    if (save) save.disabled = !n;
+    if (cancel) cancel.disabled = !n;
+    const counter = save && save.closest("div").querySelector(".cnt");
+    if (counter) counter.textContent = n
+      ? `${n} unsaved change${n === 1 ? "" : "s"}` : "No unsaved changes";
+    return;
+  }
   if (d.p) {
     const f = findItem(S.designer.sel); if (!f) return;
     f.it[d.p] = d.p === "opts" ? e.target.value.split("\n").filter(Boolean) : e.target.value;

@@ -97,7 +97,13 @@
       return 'You do not have permission to generate a schedule.';
     if ((error && error.code) === '42501' || m.indexOf('row-level security') > -1)
       return 'You do not have access to that record.';
-    if ((error && error.code) === '23505') return 'That record already exists.';
+    if ((error && error.code) === '23505')
+      return 'That already exists — the code or name has to be unique.';
+    if ((error && error.code) === '23503')
+      return 'Still in use. Something references this entry, so it cannot be deleted. ' +
+             'Retire it instead: that hides it from new forms and keeps historic records readable.';
+    if ((error && error.code) === '23502')
+      return 'A required field is empty.';
     return m || 'Something went wrong. Try again, and tell IT if it keeps happening.';
   }
 
