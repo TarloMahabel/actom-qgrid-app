@@ -6,18 +6,21 @@
    ./shared/sync.sh — every copy under apps/ is overwritten by that script.
    ===================================================================== */
 :root{
-  /* Palette matched to ACTOM Sales CRM (actomcrm.netlify.app) */
-  --brand:#0063AF; --brand-dk:#014e8c; --brand-lt:#e9f1fa; --brand-tint:#f3f7fc;
-  --tile-a:#2b6099; --tile-b:#1b4478;
-  --ink:#16294a; --ink-2:#46587a; --muted:#8593a9;
-  --line:#e2e7f0; --line-2:#edf0f6; --bg:#eef1f6; --card:#ffffff;
-  --ok:#1e8e5a; --ok-bg:#e9f6ef;
-  --warn:#9a6b12; --warn-bg:#f7f1e3;
+  /* Palette matched to ACTOM HC Analytics — the lightest of the estate:
+     white cards on a near-white page, blue reserved for active state and
+     primary action, semantic colour carried on a card's left edge only. */
+  --brand:#0063AF; --brand-dk:#014e8c; --brand-lt:#e9f1fa; --brand-tint:#f4f8fc;
+  --tile-a:#1f4f7d; --tile-b:#14304d;
+  --ink:#16304f; --ink-2:#4a5f7a; --muted:#8697ab;
+  --line:#e4e9f0; --line-2:#eff3f8; --bg:#f8fafc; --card:#ffffff;
+  --sel:#eef3f9;                        /* selected nav item, selected cell */
+  --ok:#1c8a5b; --ok-bg:#e9f6ef;
+  --warn:#b5751a; --warn-bg:#fbf3e6;
   --bad:#c0392b; --bad-bg:#fcecea;
   --info:#4a52a8; --info-bg:#eeeffa;
   --attn:#f6f1e5; --attn-line:#e8dcc4;
   --m1:#2b6099; --m2:#b5651d; --m3:#b03a30; --m4:#0f7878; --m5:#5f4a9c; --m6:#5a6672;
-  --r:10px; --sh:0 1px 2px rgba(22,41,74,.05);
+  --r:10px; --sh:0 1px 2px rgba(22,48,79,.05);
   --sans:"Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif;
   --display:"Segoe UI Semibold","Segoe UI",Arial,sans-serif;
   --mono:"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace;
