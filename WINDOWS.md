@@ -13,27 +13,43 @@ Close and reopen the terminal so PATH picks them up, then check:
     node -v; git --version; supabase --version; psql --version
 
 `scripts/migrate.mjs`, `verify-drift.mjs` and `new-division.mjs` shell out to
-`supabase` and `psql`. If either is missing from PATH those scripts fail with
-ENOENT rather than a useful message.
+`psql`, and `new-division.mjs` also needs `supabase`. If either is missing from
+PATH those scripts fail with ENOENT rather than a useful message.
+
+You can skip both if you apply `db/schema-complete.sql` through the Supabase SQL
+editor instead — see DEPLOYMENT.md step 2.
 
 ## Where to put it
 
-Prefer `C:\dev\actom-qgrid-app` over anywhere under `Documents`. On a domain
-profile Documents is usually OneDrive-synced, and OneDrive locks files while
-`npm install` is writing them — the symptom is an install that half-succeeds and
-a git index that reports phantom changes.
+Anywhere not synced by OneDrive. The repo lives at
+`C:\Users\vmahabel.HQ\Documents\actom-qgrid`, which is fine — Documents on this
+machine is local.
 
-If it must live in Documents: right-click the folder, "Always keep on this
-device", and exclude it from sync.
+If this repo is ever cloned onto a profile where Documents *is* synced, move it
+out. OneDrive locks files while `npm install` is writing them, and the symptom is
+an install that half-succeeds plus a git index reporting phantom changes.
 
 ## First run
 
-    cd C:\dev\actom-qgrid-app
+    cd C:\Users\vmahabel.HQ\Documents\actom-qgrid
     npm install
-    npm test            # 45 checks, no network needed
+    npm test            # 6 suites, 92 checks, no network needed
 
-`npm test` exercises the whole app against a mocked Supabase. If it passes, the
-local copy is sound before you touch any console.
+`npm test` exercises the real app files against a mocked Supabase. If it passes,
+the local copy is sound before you touch any console.
+
+It does NOT cover RLS, the triggers or the RPCs — those need PostgreSQL. On Windows
+the simplest route is the Supabase smoke test in DEPLOYMENT.md rather than a local
+PostgreSQL install; see db/test/README.md if you want the full suite.
+
+## Git hooks
+
+Install once per clone, or the pre-commit guards do nothing:
+
+    git config core.hooksPath .githooks
+
+It blocks a service_role key, a connection string, a committed config.js, a CDN
+import, and a commit where `shared/` and `apps/` have drifted apart.
 
 ## Line endings
 
@@ -53,7 +69,7 @@ The scripts read connection strings from the environment. PowerShell syntax
 differs from the bash examples in SETUP.md:
 
     $env:DB_URL_MVS = "postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres"
-    node scripts/migrate.mjs --division MVS
+    npm run migrate -- --division MVS
 
 These last for the session only. Do not put them in a committed file — that is
 what GitHub Actions secrets are for.

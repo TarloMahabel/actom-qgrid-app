@@ -15,7 +15,7 @@ for (const d of live) {
   const url = process.env[`DB_URL_${d.code}`];
   if (!url) { console.log(`${d.code}: skipped, no connection string`); continue; }
   const out = execFileSync("psql", [url, "-tAc",
-    "select version from supabase_migrations.schema_migrations order by version"],
+    "select filename from public.qgrid_migrations order by filename"],
     { encoding: "utf8" });
   seen[d.code] = out.trim().split("\n").filter(Boolean);
 }

@@ -1,0 +1,3 @@
+# Internal quality system. Not for indexing.
+User-agent: *
+Disallow: /

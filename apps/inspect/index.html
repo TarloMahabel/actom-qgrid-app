@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0063AF">
+<title>ACTOM QGrid — Inspections</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="tokens.css?v=1">
+<link rel="stylesheet" href="styles.css?v=1">
+</head>
+<body>
+
+<!-- ---------------- loading ---------------- -->
+<div id="loader">
+  <div id="loaderMark"></div>
+  <div class="ldr-txt">QGrid · Quality Inspections</div>
+  <div class="ldr-bar"><i></i></div>
+</div>
+
+<!-- ---------------- sign in ---------------- -->
+<div class="gate hidden" id="gateSignIn">
+  <div class="gatebox">
+    <div class="tile" id="gateTile" style="width:56px;height:56px;border-radius:12px"></div>
+    <h1>ACTOM QGrid</h1>
+    <p id="gateDivision">Quality inspections</p>
+    <div class="err hidden" id="signInErr"></div>
+    <button class="btn pri" id="btnSignIn">
+      <svg width="15" height="15" viewBox="0 0 23 23" aria-hidden="true"><path fill="#f25022" d="M0 0h11v11H0z"/><path fill="#7fba00" d="M12 0h11v11H12z"/><path fill="#00a4ef" d="M0 12h11v11H0z"/><path fill="#ffb900" d="M12 12h11v11H12z"/></svg>
+      Sign in with your ACTOM account
+    </button>
+    <div class="hidden" id="devSignIn" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line);text-align:left">
+      <div class="eyebrow" style="margin-bottom:9px">Local development only</div>
+      <div class="fld"><label>Email</label><input id="devEmail" type="email" autocomplete="username"></div>
+      <div class="fld"><label>Password</label><input id="devPassword" type="password" autocomplete="current-password"></div>
+      <button class="btn" id="btnDevSignIn" style="width:100%;justify-content:center">Sign in with a password</button>
+      <div class="hint" style="margin-top:7px">Create this user in Supabase → Authentication → Users. This block never renders on a deployed site.</div>
+    </div>
+    <div class="foot">Powering South Africa since 1903</div>
+  </div>
+</div>
+
+<!-- ---------------- awaiting activation ---------------- -->
+<div class="gate hidden" id="gatePending">
+  <div class="gatebox">
+    <h1>Almost there</h1>
+    <p>Your account has been created but is not active yet. A Quality administrator
+       needs to activate it and assign your role and department.</p>
+    <p style="font-size:12.5px;color:var(--muted)" id="pendingWho"></p>
+    <button class="btn pri" id="btnRecheck">Check again</button>
+    <div class="foot">Checking automatically every 20 seconds…</div>
+    <div style="margin-top:14px"><button class="btn sm" id="btnSignOut2">Sign out</button></div>
+  </div>
+</div>
+
+<!-- ---------------- application ---------------- -->
+<div class="shell hidden" id="app">
+  <aside class="side">
+    <div class="brandbox">
+      <div class="tile" id="sideTile"></div>
+      <div>
+        <div class="nm">QGrid</div>
+        <div class="sub" id="sideDivision">Inspections</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidefoot">
+      <div id="whatsNew" style="cursor:pointer;font-weight:600;color:var(--brand-dk)">What's new</div>
+      <div class="buildtag" id="buildTag"></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="top">
+      <div class="srch">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#46587a" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="search" placeholder="Search inspections, works orders, panel serials…">
+      </div>
+      <div class="topright">
+        <span class="chip r hidden" id="chipOverdue"></span>
+        <span class="chip g hidden" id="chipYield"></span>
+        <button class="iconbtn" id="btnRefresh" title="Refresh">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg></button>
+        <div class="who"><div class="n" id="whoName"></div><div class="e" id="whoEmail"></div></div>
+        <div class="avatar" id="whoInitials"></div>
+        <button class="btn sm" id="btnSignOut">Sign out</button>
+      </div>
+    </header>
+    <div class="page" id="page"></div>
+  </div>
+</div>
+
+<div class="modal" id="modal"><div class="mbox">
+  <div class="mhead"><h2 id="mTitle"></h2><span class="clausetag hidden" id="mClause"></span><button class="x" id="mClose">&times;</button></div>
+  <div class="mbody" id="mBody"></div><div class="mfoot" id="mFoot"></div>
+</div></div>
+
+<div class="busy hidden" id="busy"><div class="sp"></div></div>
+
+<!-- Load order matters and is enforced by supabase.js, which throws if the
+     vendored client is not present yet:
+       vendor/supabase.js  the pinned client, committed to the repo
+       config.js           generated at deploy time by scripts/gen-config.mjs
+       supabase.js         wrapper — exposes window.QG
+       logo.js             ACTOM wordmark
+       changelog.js        release notes for "What's new"
+       app.js              the application -->
+<script src="vendor/supabase.js"></script>
+<script src="config.js?v=1"></script>
+<script src="supabase.js?v=1"></script>
+<script src="logo.js?v=1"></script>
+<script src="changelog.js?v=1"></script>
+<script src="app.js?v=1"></script>
+</body>
+</html>

@@ -54,7 +54,7 @@ console.log("");
 console.log("Applying migrations...");
 execFileSync("supabase", ["db", "push", "--db-url", dbUrl, "--include-all"], { stdio: "inherit" });
 console.log("Loading reference seed...");
-execFileSync("psql", [dbUrl, "-v", "ON_ERROR_STOP=1", "-f", "db/seed/reference_data.sql"], { stdio: "inherit" });
+execFileSync("psql", [dbUrl, "-v", "ON_ERROR_STOP=1", "-f", "db/seed.sql"], { stdio: "inherit" });
 execFileSync("psql", [dbUrl, "-v", "ON_ERROR_STOP=1",
   "-c", `insert into division_profile (code,name) values ('${code}', $$${name}$$)
          on conflict (id) do update set code=excluded.code, name=excluded.name;`], { stdio: "inherit" });
@@ -90,7 +90,7 @@ const reg = JSON.parse(readFileSync("divisions/registry.json", "utf8"));
 const row = reg.divisions.find(d => d.code === code);
 const entry = { code, name, supabase_project_ref: ref,
   netlify_site_name: site.name, domain: `qgrid-${code.toLowerCase()}.actom.co.za`,
-  status: "staging", go_live: null, seed: "db/seed/division_generic.sql" };
+  status: "staging", go_live: null, seed: "db/seed-division-template.sql" };
 if (row) Object.assign(row, entry); else reg.divisions.push(entry);
 writeFileSync("divisions/registry.json", JSON.stringify(reg, null, 2) + "\n");
 

@@ -11,6 +11,7 @@
  */
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { readdirSync } from "node:fs";
 
 const args = process.argv.slice(2);
 const has = f => args.includes(f);
@@ -35,9 +36,27 @@ for (const d of targets) {
   if (has("--dry-run")) { console.log("dry run: would push migrations"); continue; }
 
   try {
-    execFileSync("supabase", ["db", "push", "--db-url", url, "--include-all"],
+    // Numbered files under db/, applied in order, with a ledger table so a
+    // re-run is a no-op. The Supabase CLI wants its own directory layout;
+    // keeping the SQL in db/ and applying it with psql means one obvious
+    // place to look and one obvious order to read it in.
+    execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-q", "-c", `
+      create table if not exists public.qgrid_migrations (
+        filename text primary key, applied_at timestamptz not null default now());`],
       { stdio: "inherit" });
-    console.log(`${d.code}: migrations applied`);
+
+    const files = readdirSync("db").filter(f => /^\d{3}-.*\.sql$/.test(f)).sort();
+    for (const f of files) {
+      const done = execFileSync("psql", [url, "-tAc",
+        `select 1 from public.qgrid_migrations where filename = '${f}'`],
+        { encoding: "utf8" }).trim();
+      if (done === "1") { console.log(`  ${f} already applied`); continue; }
+      console.log(`  applying ${f}`);
+      execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-q", "-f", `db/${f}`], { stdio: "inherit" });
+      execFileSync("psql", [url, "-q", "-c",
+        `insert into public.qgrid_migrations (filename) values ('${f}')`], { stdio: "inherit" });
+    }
+    console.log(`${d.code}: up to date (${files.length} migration file(s))`);
   } catch (e) {
     failures.push(`${d.code}: ${e.message}`);
     // Keep going. One division failing must not leave the rest unmigrated

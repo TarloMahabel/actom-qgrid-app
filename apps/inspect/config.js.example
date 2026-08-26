@@ -1,0 +1,15 @@
+/* Local development only. Copy to config.js in this directory and fill in
+   from Supabase > Settings > API.
+
+   config.js is gitignored: on Netlify it is generated at build time by
+   scripts/gen-config.mjs from the site environment variables, because each
+   division has its own Supabase project and they all deploy the same commit.
+
+   Leave build.context as "local" — that is what reveals the password
+   sign-in box, and Netlify always overrides it. */
+window.QGRID_CONFIG = {
+  url: "https://YOUR_PROJECT_REF.supabase.co",
+  key: "YOUR_ANON_KEY",
+  division: { code: "MVS", name: "ACTOM MV Switchgear" },
+  build: { commit: "local", deployedAt: "", context: "local" }
+};

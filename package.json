@@ -1,10 +1,13 @@
 {
-  "name": "actom-qgrid-inspections",
+  "name": "actom-qgrid",
   "private": true,
-  "type": "module",
+  "description": "ACTOM QGrid — quality inspections. Vanilla JS, no build step, Supabase backend, one database and one Netlify site per division.",
   "scripts": {
+    "test": "./run-all-tests.sh",
+    "sync": "./shared/sync.sh",
+    "check": "node scripts/check-connection.mjs",
+    "dev": "npx --yes serve -l 8888 apps/inspect",
     "build": "node scripts/gen-config.mjs",
-    "test": "node t/run.mjs",
     "migrate": "node scripts/migrate.mjs",
     "drift": "node scripts/verify-drift.mjs"
   },

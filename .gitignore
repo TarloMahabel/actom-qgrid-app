@@ -1,11 +1,59 @@
-config.js
+# =====================================================================
+# ACTOM QGrid — Inspections
+#
+# NOTE ON config.js — read before changing this.
+#
+# The Apprenticeship Portal commits apps/*/config.js deliberately, because
+# it has ONE Supabase project and no build step to inject the file.
+#
+# QGrid is different, and the difference is the whole deployment model:
+# one database and one Netlify site PER DIVISION, all running the same
+# commit. A committed config.js could only ever name one division's
+# project, so it must be generated per site instead. That is what
+# scripts/gen-config.mjs does, and it is why there IS a build command in
+# an otherwise no-build-step project.
+#
+# The anon key it writes is public by design and appears in every browser
+# that loads the app. Every access decision is made by RLS and the
+# triggers in db/, not by keeping that key secret.
+#
+# What must NEVER be committed is the service_role key, the database
+# password, and any connection string. Those live in the ACTOM password
+# vault and in GitHub Actions secrets. The pre-commit hook in .githooks/
+# blocks them, and test-security.js fails the build if one lands anyway.
+# =====================================================================
+
+# Generated per site at deploy time
+apps/*/config.js
+apps/*/_headers
+
+# Secrets — never
 .env
 .env.*
 !.env.example
-node_modules/
-.netlify/
-.DS_Store
+*.pem
+*.key
+secrets.json
+service-role*
+**/service_role*
 
-# Windows
+# Local database harness
+/tmp/
+pgdata/
+*.log
+
+# Tooling
+node_modules/
+.DS_Store
 Thumbs.db
 desktop.ini
+.idea/
+.vscode/
+*.swp
+
+# Netlify
+.netlify/
+
+# Packaging
+*.zip
+dist/
