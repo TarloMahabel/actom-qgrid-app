@@ -91,5 +91,26 @@ const CONFIG = 'window.QGRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"e
     w3.document.body.textContent.includes('not configured') ||
     w3.document.body.textContent.includes('could not start'));
 
+  s.group('a hang is reported, not endured');
+  /* The real failure this covers: supabase.auth.getSession() never settling.
+     No exception, no console output, splash screen forever. */
+  const d4 = makeDom(); const w4 = d4.window;
+  w4.eval(read('vendor/supabase.js'));
+  w4.eval(CONFIG);
+  w4.eval(read('supabase.js'));
+  // Replace getSession with a promise that never resolves.
+  w4.QG.supabase.auth.getSession = () => new Promise(() => {});
+  w4.eval(read('logo.js'));
+  w4.eval(read('changelog.js'));
+  w4.eval(read('app.js'));
+  s.check('boot guards every await with a timeout',
+    read('app.js').includes('withTimeout(gate('));
+  s.check('the timeout message is actionable',
+    read('app.js').includes('did not respond within'));
+  s.check('a missing logo.js is warned about, not silently ignored',
+    read('app.js').includes('logo.js did not load'));
+  s.check('app.js announces itself in the console',
+    read('app.js').includes('QGrid app.js loaded'));
+
   s.done();
 })();

@@ -1106,20 +1106,44 @@ function bootFailed(err) {
         <li>If it mentions <b>QG</b> or <b>vendor/supabase.js</b>, a script did not load —
             check the deploy included <code>vendor/supabase.js</code>.</li>
         <li>If it mentions <b>config</b>, the site environment variables are not set.</li>
+        <li>If it mentions <b>did not respond</b>, the browser could not reach Supabase:
+            check the project is running and that the CSP allows
+            <code>connect-src</code> to it.</li>
         <li>Otherwise open the browser console for the full error.</li>
       </ul>
+      <div class="buildtag" style="margin:10px 0 14px">build ${
+        (window.QGRID_CONFIG && window.QGRID_CONFIG.build &&
+         window.QGRID_CONFIG.build.commit) || "unknown"}</div>
       <button class="btn pri" style="width:100%;justify-content:center"
               onclick="location.reload()">Try again</button>
     </div></div>`);
 }
 
+/* Rejects if the wrapped promise has not settled in time. A boot that hangs
+   is worse than a boot that fails: there is nothing on screen, nothing in the
+   console, and nothing for IT to act on. supabase.auth.getSession() acquires
+   an internal navigator lock and can sit there indefinitely, which is exactly
+   what this converts into a visible message. */
+function withTimeout(promise, ms, what) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(
+        `${what} did not respond within ${ms / 1000} seconds.`)), ms))
+  ]);
+}
+
 async function start() {
   paintLogos();
+  if (!window.ACTOM_LOGO) console.warn("logo.js did not load — check the deploy includes it.");
   $("gateDivision").textContent = DIVISION.name || "Inspections";
   // Password sign-in is a local convenience only; Netlify always sets CONTEXT.
   if (BUILD.context === "local") $("devSignIn").classList.remove("hidden");
-  if (!(await gate())) { $("loader")?.classList.add("gone"); return; }
-  await loadData();
+  if (!(await withTimeout(gate(), 15000, "Sign-in check"))) {
+    $("loader")?.classList.add("gone");
+    return;
+  }
+  await withTimeout(loadData(), 30000, "Loading data");
   buildNav();
   render();
   subscribe();
@@ -1128,5 +1152,9 @@ async function start() {
 }
 supabase.auth.onAuthStateChange((event) => {
   if (event === "SIGNED_IN" || event === "SIGNED_OUT") start().catch(bootFailed);
+console.info("QGrid app.js loaded — build",
+  (window.QGRID_CONFIG && window.QGRID_CONFIG.build && window.QGRID_CONFIG.build.commit) || "?");
 });
 start().catch(bootFailed);
+console.info("QGrid app.js loaded — build",
+  (window.QGRID_CONFIG && window.QGRID_CONFIG.build && window.QGRID_CONFIG.build.commit) || "?");
