@@ -55,11 +55,15 @@ const { loadApp, suite } = require('./test/harness');
     .filter(b => /Publish/.test(b.textContent));
   s.check('a publish button is always visible', anyPublish.length === 1,
     anyPublish.length + ' found');
+  /* The author CAN publish by default. Requiring a second approver is the
+     usual reading of ISO 9001 for a controlled document, but a division with
+     one Quality Manager could then never publish anything — so it is a
+     division setting, off by default, not a law. */
   const active = d.querySelector('[data-act="publish"]');
+  s.check('the author can publish while a second approver is not required', !!active);
   if (active) {
     active.click(); await sleep(250);
-    s.check('publish goes through the RPC that enforces a second approver',
-      CALLS.some(c => c[0] === 'rpc' && c[1] === 'publish_template_revision'));
+    s.check('publish goes through the RPC', CALLS.some(c => c[0] === 'rpc' && c[1] === 'publish_template_revision'));
   } else {
     s.check('a disabled publish button explains why', !!anyPublish[0].title,
       anyPublish[0].title || 'no title');
@@ -70,5 +74,31 @@ const { loadApp, suite } = require('./test/harness');
   s.group('leaving the designer');
   d.querySelector('[data-act="back-to-library"]').click(); await sleep(120);
   s.check('returns to the library', !!d.querySelector('[data-act="open-designer"]'));
+  s.group('the second-approver rule can be switched on');
+  /* Booted fresh with the setting ON, because the app reads division settings
+     once during boot — flipping the fixture on a running instance proves
+     nothing. */
+  const strict = await loadApp('inspect', {
+    afterMock: win => {
+      const D = win.GRID_TEST_DATA;
+      D.division_profile.require_second_approver = true;
+      /* And make the signed-in user the AUTHOR of the draft. Without this the
+         draft belongs to someone else and publishing is correctly allowed —
+         the first version of this test asserted a block that should not have
+         happened, and would have passed against broken code just as happily. */
+      D.template_revisions.find(r => r.status === 'draft').created_by = 'u1';
+    }
+  });
+  const sd = strict.window.document;
+  sd.querySelector('#nav button[data-go="dsn"]').click(); await strict.sleep(80);
+  sd.querySelector('[data-act="open-designer"]').click(); await strict.sleep(140);
+  s.check('the author is then blocked', !sd.querySelector('[data-act="publish"]'));
+  s.check('and told why on the page',
+    strict.$('page').innerHTML.includes('second approver'));
+  s.check('and pointed at the setting',
+    strict.$('page').innerHTML.includes('Administration'));
+  s.check('the button is still shown, disabled',
+    Array.from(sd.querySelectorAll('button')).some(b => /Publish/.test(b.textContent) && b.disabled));
+
   s.done();
 })();

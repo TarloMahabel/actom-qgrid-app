@@ -90,7 +90,9 @@
     if (m.indexOf('SUBMIT_OWNER') > -1)
       return 'This inspection is assigned to someone else.';
     if (m.indexOf('PUBLISH_SELF') > -1)
-      return 'A template cannot be published by the person who built it. Ask another Quality Manager to approve it.';
+      return 'This division requires a second approver on templates, so the person who ' +
+             'built one cannot publish it. Turn that off in Administration > Options, ' +
+             'or ask another Quality Manager to approve it.';
     if (m.indexOf('PUBLISH_ROLE') > -1)
       return 'Only a Quality Manager may publish a template.';
     if (m.indexOf('GEN_ROLE') > -1)

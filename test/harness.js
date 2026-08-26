@@ -93,6 +93,14 @@ async function loadApp(app, opts) {
     const file = resolve(src);
     if (!fs.existsSync(file)) throw new Error(`index.html references a missing file: ${src}`);
     runScript(w, fs.readFileSync(file, 'utf8'), src);
+    /* Hook after the mock client is in place but before app.js runs, so a
+       suite can set division settings, seed rows or stub a method and have
+       the app boot against them. Mutating them afterwards is no use: the
+       app reads settings once during boot, and not every view has a
+       refresh button to force a reload. */
+    if (src.replace(/\\/g, '/').split('?')[0] === 'vendor/supabase.js' && opts.afterMock) {
+      opts.afterMock(w);
+    }
   }
   if (scriptErrors.length) throw new Error(scriptErrors.join('; '));
 

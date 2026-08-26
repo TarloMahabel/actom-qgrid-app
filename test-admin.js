@@ -88,9 +88,14 @@ const { loadApp, suite } = require('./test/harness');
 
   d.querySelector('.tabs button[data-tab="2"]').click(); await sleep(80);
   s.check('hold point switch present', !!d.querySelector('[data-act="toggle-hp"]'));
+  s.check('second approver switch present', !!d.querySelector('[data-act="toggle-2nd"]'));
   d.querySelector('[data-act="toggle-hp"]').click(); await sleep(250);
-  s.check('switch writes to division_profile',
-    CALLS.some(c => c[0] === 'update' && c[1] === 'division_profile'));
+  s.check('hold point switch writes to division_profile',
+    CALLS.some(c => c[0] === 'update' && 'hold_points' in (c[2] || {})));
+  d.querySelector('.tabs button[data-tab="2"]').click(); await sleep(120);
+  d.querySelector('[data-act="toggle-2nd"]').click(); await sleep(250);
+  s.check('second approver switch writes to division_profile',
+    CALLS.some(c => c[0] === 'update' && 'require_second_approver' in (c[2] || {})));
 
   d.querySelector('.tabs button[data-tab="3"]').click(); await sleep(200);
   s.check('audit trail read', CALLS.length > 0 && $('page').innerHTML.includes('Audit trail'));

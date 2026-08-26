@@ -69,6 +69,9 @@ const S = {
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 const HP = () => !!S.division?.hold_points;
+/* Off by default: a division with one Quality Manager would otherwise be
+   unable to publish anything it had built. */
+const NEEDS_2ND = () => !!S.division?.require_second_approver;
 const isRole = (...r) => r.includes(S.profile?.role);
 const canConfigure = () => isRole("quality_manager", "sysadmin");
 const canPlan = () => isRole("planner", "quality_engineer", "quality_manager", "sysadmin");
@@ -616,8 +619,8 @@ function designerView(m) {
     ? { label: "Publish", why: "There is no draft to publish. Change something and save a draft first." }
     : !canPublishRole
       ? { label: `Publish rev ${draft.rev}`, why: "Only a Quality Manager or System Administrator may publish." }
-      : isAuthor
-        ? { label: `Publish rev ${draft.rev}`, why: "You built this draft. A template is a controlled document, so a second Quality Manager has to approve it." }
+      : (NEEDS_2ND() && isAuthor)
+        ? { label: `Publish rev ${draft.rev}`, why: "This division requires a second approver, so the person who built a template cannot publish it. Turn it off in Administration → Options if that is not how you work." }
         : null;
 
   const act = `
@@ -758,6 +761,15 @@ function vAdm(m) {
         ? "Hold points are <b>on</b>. The matrix, the designer and the workbench all show hold-point controls."
         : "Hold points are <b>off</b>. Inspections still record failures — they simply never block production."}</div>
       <div class="note q" style="margin-top:11px">One switch, one behaviour. A half-used hold-point setting is worse than none: inspectors learn that some failures stop the line and some do not, and the ones that do not get ignored.</div>
+
+      <div class="sw" style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
+        <div><div class="t">Require a second approver on templates</div>
+          <div class="d">The person who builds a template revision cannot publish it. Off by default.</div></div>
+        <button class="tg ${NEEDS_2ND() ? "on" : ""}" data-act="toggle-2nd"></button></div>
+      <div class="note" style="margin-top:12px">${NEEDS_2ND()
+        ? "On. A draft has to be published by someone other than its author, which means this division needs at least two people holding Quality Manager."
+        : "Off. Whoever designs a form can publish it. Every publish is still recorded in the audit trail with who approved it and when, so the evidence exists either way."}</div>
+      <div class="note q" style="margin-top:11px">Separating author from approver is the usual reading of ISO 9001 clause 7.5 for a controlled document. It is off because one Quality Manager builds the forms here and the rule would block every publish. Worth switching on once a second Quality Manager exists — and worth expecting a certification body to ask about it.</div>
     </div></div>`;
   }
   else { body = `<div class="card"><h3>Audit trail</h3><div class="bd" id="auditHost"><div class="empty">Loading…</div></div></div>`; loadAudit(); }
@@ -1078,7 +1090,7 @@ async function publishDraft() {
   try {
     const { data, error } = await supabase.rpc("publish_template_revision", { p_rev: draft.id });
     if (error) throw error;
-    toast(`Published rev ${data.rev}.`, "ok");
+    toast(`Published rev ${data.rev}.${data.self_approved ? " Recorded as self-approved." : ""}`, "ok");
     await reload();
   } catch (e) { toast(explain(e), "bad"); }
   finally { busy(false); }
@@ -1134,6 +1146,18 @@ async function toggleHoldPoints() {
     if (error) throw error;
     await reload();
     toast(`Hold points ${HP() ? "enabled" : "disabled"} for this division.`, "ok");
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function toggleSecondApprover() {
+  busy(true);
+  try {
+    const { error } = await supabase.from("division_profile")
+      .update({ require_second_approver: !NEEDS_2ND() }).eq("id", true);
+    if (error) throw error;
+    await reload();
+    toast(`Second approver ${NEEDS_2ND() ? "required" : "not required"} for templates.`, "ok");
   } catch (e) { toast(explain(e), "bad"); }
   finally { busy(false); }
 }
@@ -1349,6 +1373,7 @@ document.addEventListener("click", async e => {
     case "save-template": return saveTemplate();
     case "submit-inspection": return submitInspection();
     case "toggle-hp": return toggleHoldPoints();
+    case "toggle-2nd": return toggleSecondApprover();
     case "generate": return generateSchedule();
     case "save-generate": return saveGenerate();
     case "save-cell": return saveCell();

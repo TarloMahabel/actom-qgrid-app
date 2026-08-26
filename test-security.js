@@ -92,6 +92,15 @@ for (const [src, dest] of Object.entries(shared)) {
 
 s.group('database controls are present in the migrations');
 const sql = read('db/001-init-inspections.sql') + read('db/002-app-wiring.sql');
+const sql4 = read('db/004-publish-approval-optional.sql');
+/* The CHECK constraint enforced author != approver unconditionally, so it
+   would have overridden the division setting and failed the publish with a
+   constraint violation even after the function allowed it. Two things had to
+   change together; this asserts both are in the migration. */
+s.check('the unconditional approver constraint is dropped',
+  /drop constraint if exists approver_not_author/.test(sql4));
+s.check('the second-approver rule is a division setting',
+  /require_second_approver/.test(sql4));
 for (const [label, needle] of [
   ['signed inspections are immutable', 'INS_SIGNED'],
   ['overdue equipment is blocked', 'EQUIP_BLOCKED'],

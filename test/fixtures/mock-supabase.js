@@ -25,7 +25,7 @@
       { id:"i8", type:"sign", label:"Inspector signature", req:1 }]}]};
 
   const DATA = {
-    division_profile: { id:true, code:"MVS", name:"ACTOM MV Switchgear", hold_points:false },
+    division_profile: { id:true, code:"MVS", name:"ACTOM MV Switchgear", hold_points:false, require_second_approver:false },
     manufacturing_stages: [{id:1,name:"Assembly",sort_order:5,active:true},{id:2,name:"Wiring",sort_order:6,active:true}],
     departments: [{id:1,name:"Assembly",stage_id:1,sort_order:5},{id:2,name:"Wiring",stage_id:2,sort_order:6}],
     product_families: [{id:1,name:"12 kV metal-clad",active:true},{id:2,name:"22 kV RMU",active:true}],
