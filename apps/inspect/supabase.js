@@ -99,8 +99,17 @@
       return 'You do not have permission to generate a schedule.';
     if ((error && error.code) === '42501' || m.indexOf('row-level security') > -1)
       return 'You do not have access to that record.';
-    if ((error && error.code) === '23505')
+    if ((error && error.code) === '23505') {
+      /* Postgres puts the offending column and value in `details`, e.g.
+         "Key (code)=(A) already exists." Dropping it left the user — and
+         whoever they asked for help — guessing which field of which record
+         collided. Say it. */
+      var d = (error && error.details) || '';
+      var m2 = d.match(/Key \(([^)]+)\)=\(([^)]*)\)/);
+      if (m2) return 'That already exists: ' + m2[1] + ' "' + m2[2] + '" is already in use.';
+      if (d) return 'That already exists — ' + d;
       return 'That already exists — the code or name has to be unique.';
+    }
     if ((error && error.code) === '23503')
       return 'Still in use. Something references this entry, so it cannot be deleted. ' +
              'Retire it instead: that hides it from new forms and keeps historic records readable.';

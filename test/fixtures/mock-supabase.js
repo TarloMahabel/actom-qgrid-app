@@ -53,7 +53,11 @@
                {id:"u3",full_name:"New Starter",email:"new@actom.co.za",role:"inspector",department_id:null,active:false}],
     v_dashboard: { open_inspections:2, overdue:1, unassigned:1, awaiting_disposition:1, completed_30d:1, pass_rate_30d:0 },
     v_stage_yield: [{stage:"Assembly",inspections:1,passed:0,pass_rate:0}],
-    inspection_results: [],
+    competencies: [
+    { id:1, profile_id:"u1", skill:"Routine testing sign-off", level:3, valid_to:null },
+    { id:2, profile_id:"u2", skill:"Visual and dimensional inspection", level:2, valid_to:null }
+  ],
+  inspection_results: [],
     audit_trail: [{at:"2026-08-26T09:00:00Z",actor_name:"Varshan Mahabel",action:"insert",entity:"inspections",entity_id:"n1abcdef"}]
   };
 

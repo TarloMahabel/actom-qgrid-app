@@ -56,7 +56,7 @@ const S = {
   view: "dash", tab: 0,
   stages: [], departments: [], families: [], defects: [], equipment: [],
   templates: [], revisions: [], requirements: [],
-  projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [],
+  projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [], competencies: [],
   dash: {},
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
   designer: { open: false, tplId: null, revId: null, def: null, sel: null, preview: false, dirty: false },
@@ -167,7 +167,7 @@ async function loadData() {
     S.stages = st.data; S.departments = dp.data; S.families = fm.data;
     S.defects = df.data; S.equipment = eq.data;
 
-    const [tpl, rev, req, prj, wo, ins, fc, ppl, dash] = await Promise.all([
+    const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, dash] = await Promise.all([
       supabase.from("inspection_templates").select("*").order("code"),
       supabase.from("template_revisions").select("*").order("rev", { ascending: false }),
       supabase.from("inspection_requirements").select("*"),
@@ -176,13 +176,14 @@ async function loadData() {
       supabase.from("inspections").select("*").order("planned_date").limit(500),
       supabase.from("failed_checks").select("*").order("created_at", { ascending: false }).limit(200),
       supabase.from("profiles").select("id,full_name,email,role,department_id,active"),
+      supabase.from("competencies").select("*"),
       supabase.from("v_dashboard").select("*").maybeSingle()
     ]);
-    for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl]) if (r.error) throw r.error;
+    for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl, comp]) if (r.error) throw r.error;
     S.templates = tpl.data; S.revisions = rev.data; S.requirements = req.data;
     S.projects = prj.data; S.worksOrders = wo.data;
     S.inspections = ins.data; S.failedChecks = fc.data;
-    S.people = ppl.data || []; S.dash = dash.data || {};
+    S.people = ppl.data || []; S.competencies = comp.data || []; S.dash = dash.data || {};
   } catch (e) {
     console.error(e);
     toast(explain(e), "bad");
@@ -226,7 +227,8 @@ const NAV = [
   { g: "Setup" },
   { id: "dsn",   n: 4, t: "Form designer",           col: "--m4", tabs: [] },
   { id: "req",   n: 5, t: "Inspection requirements", col: "--m5", tabs: ["Requirements matrix"] },
-  { id: "adm",   n: 6, t: "Administration",          col: "--m6", tabs: ["Users & roles", "Reference lists", "Options", "Audit trail"] },
+  { id: "adm",   n: 6, t: "Administration",          col: "--m6",
+    tabs: ["Users & roles", "Competency", "Reference lists", "Options", "Audit trail"] },
   { g: "Later phases" },
   ...["NCR management","Calibration","Document control","Training & competency",
       "Supplier quality","Customer quality","Audits & compliance","Performance analytics"]
@@ -456,8 +458,21 @@ function renderCapture() {
         <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:6px"><span>${answered} of ${fields.length} answered</span><b>${Math.round(answered / fields.length * 100)}%</b></div>
         <div style="height:7px;background:#eef1f6;border-radius:4px;overflow:hidden;margin-bottom:13px"><i style="display:block;height:100%;width:${answered / fields.length * 100}%;background:var(--brand)"></i></div>
         ${fails.length ? `<div class="note q" style="margin-bottom:11px"><b>${fails.length} failure${fails.length > 1 ? "s" : ""} recorded.</b> A failed check will be raised for each on submit.</div>` : ""}
-        <button class="btn pri" style="width:100%;justify-content:center" data-act="submit-inspection">Sign and submit</button>
-        <div class="hint" style="margin-top:8px">Signing locks the record. Corrections create a linked amendment.</div>
+        ${(() => {
+          const req = tpl ? (tpl.min_competency || 0) : 0;
+          const have = topLevel(S.profile.id);
+          if (have >= req) return `
+            <button class="btn pri" style="width:100%;justify-content:center" data-act="submit-inspection">Sign and submit</button>
+            <div class="hint" style="margin-top:8px">Signing locks the record. Corrections create a linked amendment.</div>`;
+          /* Say it BEFORE the attempt. Letting someone fill in a form and only
+             then refusing the signature wastes the work and reads as a bug. */
+          return `<button class="btn" style="width:100%;justify-content:center" disabled
+              title="Requires competency level ${req}">Sign and submit</button>
+            <div class="note q" style="margin-top:10px"><b>You cannot sign this one.</b>
+              ${esc(tpl ? tpl.code : "This template")} requires competency level ${req} and you
+              hold ${have}. Either a colleague who holds it signs it, or an administrator records
+              your competency in Administration → Competency.</div>`;
+        })()}
       </div></div>
       <div class="card"><h3>Saving</h3><div class="bd">
         <div style="font-size:12.3px" id="saveState">Answers save as you go.</div>
@@ -765,7 +780,8 @@ function vAdm(m) {
         pill(p.active ? "Active" : "Awaiting activation"),
         `<button class="btn sm ${p.active ? "" : "pri"}" data-toggle-active="${p.id}">${p.active ? "Deactivate" : "Activate"}</button>`]));
   }
-  else if (S.tab === 1) {
+  else if (S.tab === 1) { body = competencyView(); }
+  else if (S.tab === 2) {
     body = REF_LISTS.map(refGrid).join("") + `
       <div class="note" style="margin-top:13px">Changes are held until you press Save, so a
         list can be reworked in one pass. <b>Retiring</b> hides an entry from new forms and
@@ -775,7 +791,7 @@ function vAdm(m) {
         exist against them: every trend, Pareto and count is grouped by the code, not the wording.
         Reword the description freely; do not repurpose a code for a different defect.</div>`;
   }
-  else if (S.tab === 2) {
+  else if (S.tab === 3) {
     body = `<div class="card" style="max-width:640px"><h3>Optional features</h3><div class="bd">
       <div class="sw"><div><div class="t">Hold points</div><div class="d">Let a failed checkpoint stop the works order until a named role releases it. Off by default.</div></div>
         <button class="tg ${HP() ? "on" : ""}" data-act="toggle-hp"></button></div>
@@ -834,10 +850,12 @@ const REF_LISTS = [
   { table: "defect_codes", title: "Defect codes", state: "defects",
     order: "code",
     note: "What a failure is called. Analytics group by the code, so codes are permanent and descriptions are not.",
-    cols: [{ f: "code", label: "Code", type: "text", w: "110px", lockIfUsed: true },
-           { f: "description", label: "Description", type: "text" },
-           { f: "default_department_id", label: "Default department", type: "select", w: "190px",
-             options: () => S.departments.map(x => [x.id, x.name]) }] }
+    /* No default department. It pre-filled a field on a record type that does
+       not exist yet — the failed check already knows its department from the
+       inspection that raised it, so the column added a decision with nothing
+       depending on it. The column stays in the schema; nothing writes to it. */
+    cols: [{ f: "code", label: "Code", type: "text", w: "110px" },
+           { f: "description", label: "Description", type: "text" }] }
 ];
 
 const ALL_LISTS = () => REF_LISTS;
@@ -1090,15 +1108,30 @@ async function saveDraft() {
   const d = S.designer;
   busy(true);
   try {
-    const rev = byId(S.revisions, d.revId);
-    if (rev && ["draft", "in_review"].includes(rev.status)) {
+    /* Find the draft by TEMPLATE, not by the revId held in designer state.
+       That id can be stale — it is captured when the designer opens and
+       survives a reload, a publish, or another user's edit — and when it no
+       longer matched a draft this fell through to the insert branch and tried
+       to create a revision number that already existed. */
+    const draft = S.revisions.find(r =>
+      r.template_id === d.tplId && ["draft", "in_review"].includes(r.status));
+
+    if (draft) {
       const { error } = await supabase.from("template_revisions")
-        .update({ definition: d.def }).eq("id", rev.id);
+        .update({ definition: d.def }).eq("id", draft.id);
       if (error) throw error;
+      d.revId = draft.id;
     } else {
-      // Editing a published revision starts a new draft rather than
-      // rewriting history under inspections already captured against it.
-      const nextRev = Math.max(0, ...S.revisions.filter(r => r.template_id === d.tplId).map(r => r.rev)) + 1;
+      /* Editing a published revision starts a new draft rather than rewriting
+         history under inspections already captured against it. The revision
+         number comes from the DATABASE, not from local state, because local
+         state can be behind — and a wrong number here is a unique violation
+         rather than a silent mistake. */
+      const { data: top, error: e1 } = await supabase.from("template_revisions")
+        .select("rev").eq("template_id", d.tplId)
+        .order("rev", { ascending: false }).limit(1).maybeSingle();
+      if (e1) throw e1;
+      const nextRev = ((top && top.rev) || 0) + 1;
       const { error } = await supabase.from("template_revisions").insert({
         template_id: d.tplId, rev: nextRev, status: "draft",
         definition: d.def, created_by: S.profile.id
@@ -1347,6 +1380,123 @@ function emptyBecause(whatIsEmpty, doneMessage) {
     <p style="color:var(--muted);font-size:12.5px;max-width:460px;margin:0 auto 18px">${esc(step.detail)}</p>
     <button class="btn pri" data-goto="${step.go[0]}${step.go[2] !== undefined ? ":" + step.go[2] : ""}">${esc(step.go[1])} →</button>
   </div></div>`;
+}
+
+
+/* ---------------------------------------------------------------
+   Competency.
+
+   The database refuses a signature when the signer does not hold the
+   level a template demands. That is a real ISO 9001 clause 7.2 control
+   and it stays. But there was nowhere to RECORD a competency, so the
+   table was empty, everyone held level 0, and no inspection could be
+   signed by anybody — including an administrator. The control was not
+   wrong; it was unreachable.
+
+   Being an administrator does not make someone competent to sign a
+   routine test, so the answer is not to exempt roles. It is to let
+   competency be recorded, and to say plainly on the capture screen what
+   is missing when a signature is refused.
+   --------------------------------------------------------------- */
+const SKILLS = [
+  "Routine testing sign-off",
+  "Visual and dimensional inspection",
+  "Wiring and termination inspection",
+  "Coating inspection",
+  "Measuring equipment use",
+  "Incoming inspection"
+];
+const LEVELS = [
+  [0, "Not competent", "Cannot perform or sign this work"],
+  [1, "Trained", "May perform under direct supervision"],
+  [2, "Competent", "May perform; signs under supervision"],
+  [3, "Competent to sign off", "May perform and sign independently"]
+];
+
+const levelOf = (profileId, skill) => {
+  const c = S.competencies.find(x => x.profile_id === profileId && x.skill === skill);
+  if (!c) return 0;
+  if (c.valid_to && c.valid_to < today()) return 0;      // lapsed
+  return c.level;
+};
+const topLevel = profileId => Math.max(0, ...SKILLS.map(sk => levelOf(profileId, sk)));
+
+function competencyView() {
+  const active = S.people.filter(p => p.active);
+  const needed = Math.max(0, ...S.templates.map(t => t.min_competency || 0));
+  const anyoneCanSign = active.some(p => topLevel(p.id) >= needed);
+
+  const cell = (p, sk) => {
+    const lvl = levelOf(p.id, sk);
+    const c = S.competencies.find(x => x.profile_id === p.id && x.skill === sk);
+    const lapsed = c && c.valid_to && c.valid_to < today();
+    return `<td style="text-align:center">
+      <select data-comp="${p.id}|${esc(sk)}"
+        style="padding:4px 6px;border:1px solid ${lapsed ? "var(--bad)" : "var(--line)"};
+               border-radius:6px;font-size:12px;background:${lvl >= 3 ? "var(--ok-bg)" : "#fff"}"
+        title="${lapsed ? "Expired " + c.valid_to : ""}">
+        ${LEVELS.map(([v, label]) => `<option value="${v}" ${lvl === v ? "selected" : ""}>${v} · ${label}</option>`).join("")}
+      </select></td>`;
+  };
+
+  return (anyoneCanSign ? "" : `<div class="note q" style="margin-bottom:13px">
+      <b>Nobody can sign an inspection yet.</b> The strictest template requires level
+      ${needed}, and no active user holds it for any skill. The database refuses the
+      signature, which is correct — record competency below, or lower the level a
+      template demands in the Form designer.</div>`)
+    + `<div class="card"><h3>Competency matrix
+        <span class="cl">${active.length} active user${active.length === 1 ? "" : "s"}</span></h3>
+      <div class="bd">
+        <div class="note" style="margin-bottom:13px">What each person is competent to do.
+          A template names the level it requires; the database refuses a signature below it.
+          Changes save immediately.</div>
+        <div style="overflow-x:auto"><table><thead><tr><th>Person</th><th>Role</th>
+          ${SKILLS.map(sk => `<th style="text-align:center;white-space:normal;max-width:120px">${esc(sk)}</th>`).join("")}
+        </tr></thead><tbody>
+        ${active.map(p => `<tr style="cursor:default">
+          <td><b>${esc(p.full_name)}</b><div class="sub">${esc(p.email)}</div></td>
+          <td style="color:var(--ink-2)">${esc(p.role)}</td>
+          ${SKILLS.map(sk => cell(p, sk)).join("")}
+        </tr>`).join("")}
+        </tbody></table></div>
+        <div class="legend" style="margin-top:12px">
+          ${LEVELS.map(([v, label, detail]) => `<span title="${esc(detail)}"><b>${v}</b> ${esc(label)}</span>`).join("")}
+        </div>
+      </div></div>
+
+      <div class="card" style="margin-top:13px"><h3>What each template requires</h3><div class="bd">
+        ${S.templates.length ? `<div style="overflow-x:auto"><table><thead><tr>
+          <th>Template</th><th>Stage</th><th>Requires</th><th>Who can sign it</th></tr></thead><tbody>
+          ${S.templates.map(t => {
+            const can = active.filter(p => topLevel(p.id) >= (t.min_competency || 0));
+            return `<tr style="cursor:default"><td><span class="id">${esc(t.code)}</span>
+                <div class="sub">${esc(t.name)}</div></td>
+              <td>${esc(stageName(t.stage_id))}</td>
+              <td>level ${t.min_competency || 0}</td>
+              <td>${can.length
+                ? can.map(p => esc(p.full_name)).join(", ")
+                : `<span style="color:var(--bad)">nobody — signatures will be refused</span>`}</td></tr>`;
+          }).join("")}
+        </tbody></table></div>` : `<div class="empty">No templates yet.</div>`}
+      </div></div>`;
+}
+
+async function setCompetency(profileId, skill, level) {
+  busy(true);
+  try {
+    if (Number(level) === 0) {
+      const { error } = await supabase.from("competencies")
+        .delete().eq("profile_id", profileId).eq("skill", skill);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("competencies")
+        .upsert({ profile_id: profileId, skill, level: Number(level) },
+                { onConflict: "profile_id,skill" });
+      if (error) throw error;
+    }
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
 }
 
 /* ---------------------------------------------------------------
@@ -1760,6 +1910,10 @@ document.addEventListener("change", e => {
   if (d.num !== undefined) return saveAnswer(d.num, { value_num: e.target.value === "" ? null : Number(e.target.value) });
   if (d.txt !== undefined) return saveAnswer(d.txt, { value_text: e.target.value });
   if (d.equip !== undefined) return saveAnswer(d.equip, { equipment_id: e.target.value ? Number(e.target.value) : null });
+  if (d.comp) {
+    const [pid, skill] = d.comp.split("|");
+    return setCompetency(pid, skill, e.target.value);
+  }
   if (d.role) return setProfileField(d.role, { role: e.target.value });
   if (d.dept) return setProfileField(d.dept, { department_id: e.target.value ? Number(e.target.value) : null });
   if (d.assign) return assignInspection(d.assign, e.target.value);
