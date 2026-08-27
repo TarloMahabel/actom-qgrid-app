@@ -147,6 +147,18 @@ const finallys = [...app.matchAll(/finally\s*\{\s*busy\(false\)/g)].length;
 s.check('every busy(true) is released in a finally', busyStarts <= finallys,
   `${busyStarts} starts, ${finallys} releases`);
 
+s.group('no control is gated on its own outcome');
+/* The Generate button was disabled by a global count of unmet readiness
+   steps, and that list ends with "Generate the inspections" — so the button
+   that creates inspections disabled itself because none existed. Circular
+   gating is easy to write and invisible until someone tries to use it. */
+s.check('generate is gated per works order, not on a global counter',
+  app.includes('function generateBlockedReason'));
+s.check('the readiness counter no longer disables anything',
+  !/\$\{blocked \?[^}]*disabled/.test(app));
+s.check('the reason is shown, not just implied',
+  app.includes('generateBlockedReason(w)') && app.includes('note q'));
+
 s.group('no dead code left behind');
 for (const token of ['generateSchedule', 'saveGenerate', 'refCard', 'WORK_LISTS', 'tplPick']) {
   s.check(`${token} is gone`, !app.includes(token));

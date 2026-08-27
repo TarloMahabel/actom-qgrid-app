@@ -88,6 +88,47 @@ const { loadApp, suite } = require('./test/harness');
   s.check('saving inserts the works order', insW && insW[2].code === 'WO-99999',
     insW ? JSON.stringify(insW[2]) : 'no call');
 
+  s.group('Generate is enabled exactly when it can work');
+  /* The button disabled itself. It was gated on a global count of unmet
+     readiness steps, and that list ends with "Generate the inspections" —
+     never done before the first generate. So the button that creates
+     inspections was disabled because no inspections existed.
+
+     The check is per works order now, and each case below asserts both the
+     state AND that the reason names the specific thing missing. */
+  const genCases = [
+    ['everything ready', d2 => { d2.inspections = []; }, null],
+    ['no published template', d2 => {
+      d2.inspections = []; d2.template_revisions.forEach(r => { r.status = 'draft'; });
+    }, 'No template is published'],
+    ['project has no product family', d2 => {
+      d2.inspections = []; d2.projects.forEach(p => { p.family_id = null; });
+    }, 'no product family'],
+    ['no requirement for that family', d2 => {
+      d2.inspections = []; d2.inspection_requirements = [];
+    }, 'No requirements are set'],
+    ['works order closed', d2 => {
+      d2.inspections = []; d2.works_orders.forEach(o => { o.status = 'closed'; });
+    }, 'closed']
+  ];
+  for (const [label, patch, expectReason] of genCases) {
+    const g = await loadApp('inspect', { afterMock: win => patch(win.GRID_TEST_DATA) });
+    const gd = g.window.document;
+    gd.querySelector('#nav button[data-go="sched"]').click(); await g.sleep(60);
+    gd.querySelector('.tabs button[data-tab="2"]').click(); await g.sleep(130);
+    const btn = gd.querySelector('[data-act="gen-wo"]');
+    if (!expectReason) {
+      s.check(`enabled when ${label}`, btn && !btn.disabled,
+        btn ? btn.title : 'no button');
+    } else {
+      s.check(`disabled when ${label}`, btn && btn.disabled, btn ? 'enabled' : 'no button');
+      s.check(`  and says why: ${expectReason}`,
+        btn && btn.title.includes(expectReason), btn ? btn.title : '');
+      s.check('  and says it on the row too, not just a tooltip',
+        g.$('page').textContent.includes(expectReason));
+    }
+  }
+
   s.group('an empty schedule says what is blocking it');
   /* Reported as "I cannot schedule even if a project is created": the Schedule
      tab said only "Nothing to show yet", which is indistinguishable from a

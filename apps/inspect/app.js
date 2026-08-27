@@ -1363,9 +1363,34 @@ function emptyBecause(whatIsEmpty, doneMessage) {
    matrix, the prerequisites are shown as a checklist instead of failing
    silently at the end.
    --------------------------------------------------------------- */
+/* Why THIS works order cannot be generated from, or null if it can.
+   The button used to be disabled from a global count of unmet readiness
+   steps — and that list ends with "Generate the inspections", which is
+   never done before the first generate. So the button that creates
+   inspections disabled itself because no inspections existed. A per-row
+   reason is both correct and more useful: it names the thing missing for
+   this order rather than pointing at a checklist. */
+function generateBlockedReason(w) {
+  if (!publishedRevs().length)
+    return "No template is published. A draft is skipped when generating.";
+  const p = byId(S.projects, w.project_id);
+  if (!p) return "This works order is not linked to a project.";
+  if (!p.family_id)
+    return `${p.code} has no product family, so the requirements matrix cannot be read for it.`;
+  const reqs = S.requirements.filter(r =>
+    r.family_id === p.family_id && r.template_id && r.level !== "na");
+  if (!reqs.length) {
+    const fam = byId(S.families, p.family_id);
+    return `No requirements are set for ${fam ? fam.name : "that product family"}, so there is nothing to generate.`;
+  }
+  const publishable = reqs.filter(r => revFor(r.template_id));
+  if (!publishable.length)
+    return "Every template in the matrix for this family is still a draft. Publish one.";
+  if (w.status === "closed") return "This works order is closed.";
+  return null;
+}
+
 function worksView() {
-  const steps = readiness();
-  const blocked = steps.filter(x => !x.ok).length;
   const checklist = readinessCard("Getting to a scheduled inspection");
 
   if (!S.projects.length) {
@@ -1417,13 +1442,18 @@ function worksView() {
             <span style="font-size:12.6px">${esc(w.description || "—")}</span>
             <span style="font-size:12.6px">${w.qty}</span>
             <span>${made ? pill(`${made} generated`) : `<span style="color:var(--muted);font-size:12px">none yet</span>`}</span>
-            <div style="display:flex;gap:6px;justify-content:flex-end">
+            <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
               ${w.status === "held" ? pill("Held") : ""}
               <button class="btn sm" data-act="edit-wo" data-id="${w.id}">Edit</button>
               <button class="btn sm ${made ? "" : "pri"}" data-act="gen-wo" data-id="${w.id}"
-                ${blocked ? "disabled title=\"Complete the checklist above first\"" : ""}
+                ${(() => { const why = generateBlockedReason(w);
+                           return why ? `disabled title="${esc(why)}"` : ""; })()}
               >${made ? "Generate again" : "Generate"}</button>
-            </div></div>`;
+            </div>
+            ${(() => { const why = generateBlockedReason(w);
+              return why ? `<div style="grid-column:1/-1;padding:2px 0 8px">
+                <div class="note q" style="font-size:11.8px">${esc(why)}</div></div>` : ""; })()}
+          </div>`;
         }).join("")}
         ${orders.length ? "" : `<div style="padding:12px 2px;color:var(--muted);font-size:12.5px">
           No works orders yet. A works order is what is actually being built — its quantity
