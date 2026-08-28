@@ -1193,9 +1193,23 @@ async function publishDraft() {
   try {
     const { data, error } = await supabase.rpc("publish_template_revision", { p_rev: draft.id });
     if (error) throw error;
-    d.result = { ok: true, rev: data.rev, selfApproved: !!data.self_approved,
-                 at: new Date().toLocaleString("en-ZA") };
     await reload();
+
+    /* Verify rather than trust. The publish RPC once reported success while
+       row level security had silently filtered its UPDATE to zero rows: the
+       banner said published, the template stayed a draft, and nothing
+       anywhere said otherwise. The database asserts this now too, but a
+       client that confirms what it claims would have caught it on day one. */
+    const after = S.revisions.find(r => r.id === draft.id);
+    if (!after || after.status !== "published") {
+      d.result = { ok: false, message:
+        `The database reported success but revision ${draft.rev} is still ` +
+        `${after ? after.status : "missing"}. Nothing was published. This is a ` +
+        `permissions problem — send this to Group IT.` };
+    } else {
+      d.result = { ok: true, rev: data.rev, selfApproved: !!data.self_approved,
+                   at: new Date().toLocaleString("en-ZA") };
+    }
   } catch (e) {
     /* Inline and persistent, not a toast. A toast that disappears after seven
        seconds is indistinguishable from nothing having happened, which is

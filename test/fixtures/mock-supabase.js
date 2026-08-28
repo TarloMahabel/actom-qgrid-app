@@ -100,6 +100,13 @@
       if (fn === "publish_template_revision") {
         const rev = DATA.template_revisions.find(r => r.id === args.p_rev);
         if (!rev) return Promise.resolve({ data: null, error: { message: "PUBLISH_MISSING" } });
+        /* Set DATA.__silentPublish to reproduce the real fault: the RPC
+           returns success but the row does not change, because row level
+           security filtered the UPDATE. */
+        if (DATA.__silentPublish) {
+          return Promise.resolve({ data: { template_id: rev.template_id, rev: rev.rev,
+            status: "published", self_approved: false }, error: null });
+        }
         DATA.template_revisions.forEach(r => {
           if (r.template_id === rev.template_id && r.status === "published") r.status = "superseded";
         });

@@ -94,7 +94,13 @@
              'built one cannot publish it. Turn that off in Administration > Options, ' +
              'or ask another Quality Manager to approve it.';
     if (m.indexOf('PUBLISH_ROLE') > -1)
-      return 'Only a Quality Manager may publish a template.';
+      return 'Only a Quality Manager or System Administrator may publish a template.';
+    if (m.indexOf('PUBLISH_BLOCKED') > -1)
+      return 'Your role is not permitted to change this template revision, so nothing ' +
+             'was published. Ask Group IT to check the row level security policies.';
+    if (m.indexOf('SUBMIT_BLOCKED') > -1)
+      return 'Your role is not permitted to sign this inspection, so nothing was saved. ' +
+             'Ask Group IT to check the row level security policies.';
     if (m.indexOf('GEN_ROLE') > -1)
       return 'You do not have permission to generate a schedule.';
     if ((error && error.code) === '42501' || m.indexOf('row-level security') > -1)

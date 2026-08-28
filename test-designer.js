@@ -86,6 +86,28 @@ const { loadApp, suite } = require('./test/harness');
       $('page').innerHTML.includes('Cannot publish yet'));
   }
 
+  s.group('a publish that quietly did nothing is caught');
+  /* The reported fault: the banner said "Revision 1 published", the status
+     line still said draft, and the library still said Never published. The
+     database now raises on a zero-row update, and the client verifies the
+     revision actually changed rather than trusting the response. */
+  const silent = await loadApp('inspect', {
+    afterMock: win => { win.GRID_TEST_DATA.__silentPublish = true; }
+  });
+  const sd2 = silent.window.document;
+  sd2.querySelector('#nav button[data-go="dsn"]').click(); await silent.sleep(80);
+  sd2.querySelector('[data-act="open-designer"]').click(); await silent.sleep(140);
+  const pubBtn = sd2.querySelector('[data-act="publish"]');
+  if (pubBtn) {
+    pubBtn.click(); await silent.sleep(400);
+    const txt = silent.$('page').textContent;
+    s.check('the app does not claim success', !txt.includes('It is live now'));
+    s.check('it says nothing was published', txt.includes('Nothing was published'));
+    s.check('it names the revision and its real state', /still (draft|in_review)/.test(txt));
+  } else {
+    s.check('publish available in the silent-failure fixture', false, 'no publish button');
+  }
+
   s.group('the revision a button will write is named on the button');
   const back = d.querySelector('[data-act="back-to-library"]');
   if (back) { back.click(); await sleep(120); }

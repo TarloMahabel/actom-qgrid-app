@@ -124,6 +124,20 @@ const unpoliced = tables.filter(t => !looped.has(t) && !explicit.has(t) && !clos
 s.check('every table has a policy or is closed to clients outright',
   unpoliced.length === 0, unpoliced.join(', '));
 
+s.group('functions cannot report success they did not achieve');
+/* publish_template_revision reported "published" while RLS had filtered its
+   UPDATE to zero rows — not an error in Postgres, so the function returned its
+   cheerful result and the app believed it. Any statement that MUST change a row
+   has to assert that it did. */
+for (const fn of ['publish_template_revision', 'submit_inspection']) {
+  const defs = [...sql.matchAll(new RegExp('create or replace function ' + fn + '[\\s\\S]*?\\$\\$;', 'g'))];
+  const last = defs.length ? defs[defs.length - 1][0] : '';
+  s.check(`${fn} checks how many rows it changed`, /get diagnostics\s+\w+\s*=\s*row_count/i.test(last));
+  s.check(`${fn} raises when it changed none`, /row_count[\s\S]*?raise exception/i.test(last));
+}
+s.check('the app verifies a publish actually happened',
+  app.includes('after.status !== "published"'));
+
 s.group('error handling');
 /* loadYield and loadAudit are called from render() without await, so a
    throw became an unhandled rejection: nothing on screen and nothing
