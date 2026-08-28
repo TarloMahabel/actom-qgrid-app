@@ -95,6 +95,9 @@
              'or ask another Quality Manager to approve it.';
     if (m.indexOf('PUBLISH_ROLE') > -1)
       return 'Only a Quality Manager or System Administrator may publish a template.';
+    if (m.indexOf('PUBLISH_EMPTY') > -1)
+      return 'This revision has no questions on it. Add at least one field an inspector ' +
+             'can answer — a heading or an instruction is not a question.';
     if (m.indexOf('PUBLISH_BLOCKED') > -1)
       return 'Your role is not permitted to change this template revision, so nothing ' +
              'was published. Ask Group IT to check the row level security policies.';

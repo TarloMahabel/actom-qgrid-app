@@ -11,7 +11,7 @@
 --  Paste into the Supabase SQL editor of a NEW, EMPTY project and run.
 --  Order matters; do not run sections out of sequence.
 --
---  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql
+--  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-published-revision.sql, 007-no-empty-templates.sql
 --
 --  This script is for a fresh project. It is not idempotent: running it
 --  twice will fail on "type user_role already exists", which is the
@@ -1145,7 +1145,150 @@ grant execute on function publish_template_revision, submit_inspection to authen
 
 
 -- ============================================================
---  SECTION 7 — Group reference data
+--  SECTION 7 — 007-no-empty-published-revision.sql
+-- ============================================================
+
+create or replace function publish_template_revision(p_rev uuid)
+returns jsonb language plpgsql security invoker as $$
+declare
+  v_tpl uuid; v_author uuid; v_rev smallint; v_require boolean;
+  v_rows int; v_fields int;
+begin
+  if not has_role('quality_manager', 'sysadmin') then
+    raise exception 'PUBLISH_ROLE: only a Quality Manager or System Administrator may publish a template';
+  end if;
+
+  select template_id, created_by, rev into v_tpl, v_author, v_rev
+    from template_revisions where id = p_rev;
+  if v_tpl is null then raise exception 'PUBLISH_MISSING: revision not found'; end if;
+
+  -- Count answerable fields. Sections and instructions are not questions.
+  select count(*) into v_fields
+    from template_revisions tr,
+         jsonb_array_elements(tr.definition->'sections') s,
+         jsonb_array_elements(s->'items') f
+   where tr.id = p_rev
+     and coalesce(f->>'type', '') not in ('section', 'info');
+
+  if coalesce(v_fields, 0) = 0 then
+    raise exception 'PUBLISH_EMPTY: this revision has no questions on it. An inspection generated from it could not be filled in.';
+  end if;
+
+  select require_second_approver into v_require from division_profile where id;
+
+  if coalesce(v_require, false) and v_author = auth.uid() then
+    raise exception 'PUBLISH_SELF: this division requires a second approver, so the person who built a template cannot publish it.';
+  end if;
+
+  update template_revisions
+     set status = 'superseded'
+   where template_id = v_tpl and status = 'published';
+
+  update template_revisions
+     set status = 'published',
+         approved_by = auth.uid(),
+         effective_from = current_date
+   where id = p_rev;
+
+  get diagnostics v_rows = row_count;
+  if v_rows = 0 then
+    raise exception 'PUBLISH_BLOCKED: row level security prevented the update. Your role may not edit this revision.';
+  end if;
+
+  return jsonb_build_object('template_id', v_tpl, 'rev', v_rev, 'status', 'published',
+                            'fields', v_fields,
+                            'self_approved', v_author = auth.uid());
+end $$;
+
+grant execute on function publish_template_revision to authenticated;
+
+-- ------------------------------------------------------------
+--  Anything already published empty is a live trap: it will keep
+--  generating unfillable inspections. Report them so they can be dealt
+--  with, rather than changing status underneath a running division.
+-- ------------------------------------------------------------
+do $$
+declare r record; n int := 0;
+begin
+  for r in
+    select t.code, tr.rev
+      from template_revisions tr
+      join inspection_templates t on t.id = tr.template_id
+     where tr.status = 'published'
+       and (select count(*)
+              from jsonb_array_elements(tr.definition->'sections') s,
+                   jsonb_array_elements(s->'items') f
+             where coalesce(f->>'type','') not in ('section','info')) = 0
+  loop
+    n := n + 1;
+    raise warning 'Published revision with no questions: % rev % — inspections generated from it cannot be filled in.', r.code, r.rev;
+  end loop;
+  if n > 0 then
+    raise warning '% published revision(s) have no questions. Add fields, publish a new revision, and move any unstarted inspections onto it.', n;
+  end if;
+end $$;
+
+
+-- ============================================================
+--  SECTION 8 — 007-no-empty-templates.sql
+-- ============================================================
+
+create or replace function publish_template_revision(p_rev uuid)
+returns jsonb language plpgsql security invoker as $$
+declare
+  v_tpl uuid; v_author uuid; v_rev smallint; v_require boolean;
+  v_rows int; v_fields int; v_def jsonb;
+begin
+  if not has_role('quality_manager', 'sysadmin') then
+    raise exception 'PUBLISH_ROLE: only a Quality Manager or System Administrator may publish a template';
+  end if;
+
+  select template_id, created_by, rev, definition
+    into v_tpl, v_author, v_rev, v_def
+    from template_revisions where id = p_rev;
+  if v_tpl is null then raise exception 'PUBLISH_MISSING: revision not found'; end if;
+
+  -- Something an inspector can actually answer. Headings and instructions
+  -- are not questions.
+  select count(*) into v_fields
+    from jsonb_array_elements(coalesce(v_def->'sections', '[]'::jsonb)) s,
+         jsonb_array_elements(coalesce(s->'items', '[]'::jsonb)) f
+   where coalesce(f->>'type', '') not in ('section', 'info');
+
+  if v_fields = 0 then
+    raise exception 'PUBLISH_EMPTY: this revision has no questions on it, so an inspection generated from it could not be completed.';
+  end if;
+
+  select require_second_approver into v_require from division_profile where id;
+
+  if coalesce(v_require, false) and v_author = auth.uid() then
+    raise exception 'PUBLISH_SELF: this division requires a second approver, so the person who built a template cannot publish it.';
+  end if;
+
+  update template_revisions
+     set status = 'superseded'
+   where template_id = v_tpl and status = 'published';
+
+  update template_revisions
+     set status = 'published',
+         approved_by = auth.uid(),
+         effective_from = current_date
+   where id = p_rev;
+
+  get diagnostics v_rows = row_count;
+  if v_rows = 0 then
+    raise exception 'PUBLISH_BLOCKED: row level security prevented the update. Your role may not edit this revision.';
+  end if;
+
+  return jsonb_build_object('template_id', v_tpl, 'rev', v_rev, 'status', 'published',
+                            'fields', v_fields, 'self_approved', v_author = auth.uid());
+end $$;
+
+grant execute on function publish_template_revision to authenticated;
+
+
+-- ============================================================
+--  SECTION 9 — Group reference data
 -- ============================================================
 
 insert into manufacturing_stages (name, sort_order) values
@@ -1170,7 +1313,7 @@ on conflict (code) do nothing;
 
 
 -- ============================================================
---  SECTION 8 — Division seed — EDIT BEFORE RUNNING
+--  SECTION 10 — Division seed — EDIT BEFORE RUNNING
 -- ============================================================
 
 insert into division_profile (code, name, hold_points)
@@ -1200,7 +1343,7 @@ on conflict (family_id, stage_id) do nothing;
 
 
 -- ============================================================
---  SECTION 9 — Migration ledger stamp
+--  SECTION 11 — Migration ledger stamp
 --
 --  Running this script bypasses scripts/migrate.mjs, so the ledger it
 --  reads would be empty and the next run would try to apply everything
@@ -1221,12 +1364,14 @@ insert into public.qgrid_migrations (filename) values
   ('003-publish-roles.sql'),
   ('004-publish-approval-optional.sql'),
   ('005-lock-ref-sequences.sql'),
-  ('006-fix-silent-publish.sql')
+  ('006-fix-silent-publish.sql'),
+  ('007-no-empty-published-revision.sql'),
+  ('007-no-empty-templates.sql')
 on conflict (filename) do nothing;
 
 
 -- ============================================================
---  SECTION 10 — Verification
+--  SECTION 12 — Verification
 --  Run these and check the results before going any further.
 -- ============================================================
 

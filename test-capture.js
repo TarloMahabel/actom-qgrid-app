@@ -88,6 +88,60 @@ const { loadApp, suite } = require('./test/harness');
   s.check('saving inserts the works order', insW && insW[2].code === 'WO-99999',
     insW ? JSON.stringify(insW[2]) : 'no call');
 
+  s.group('starting an inspection opens the current form');
+  /* An inspection is locked to the revision it was generated against — right
+     for a record with answers in it, wrong for one nobody has started.
+     Publishing a template with no fields and adding them in a later revision
+     left every scheduled inspection pointing at the empty one: the form opened
+     with a heading, nothing to fill in, and progress reading "0 of 0". */
+  const stale = await loadApp('inspect', {
+    afterMock: win => {
+      const D = win.GRID_TEST_DATA;
+      const good = D.template_revisions.find(r => r.status === 'published');
+      D.template_revisions.push({ id: 'r0', template_id: good.template_id, rev: 0,
+        status: 'superseded', created_by: 'u2',
+        definition: { sections: [{ id: 's1', title: 'IDENTIFICATION', items: [] }] } });
+      D.inspections[0].template_rev_id = 'r0';
+      D.inspections[0].status = 'scheduled';
+    }
+  });
+  const st = stale.window.document;
+  st.querySelector('#nav button[data-go="work"]').click(); await stale.sleep(60);
+  st.querySelector('[data-open-capture]').click(); await stale.sleep(420);
+  const moved = stale.window.GRID_CALLS
+    .filter(c => c[0] === 'update' && c[1] === 'inspections' && c[2].template_rev_id).pop();
+  s.check('an untouched inspection moves to the published revision', !!moved,
+    'it would otherwise open an empty form');
+  s.check('the form then has questions on it',
+    !stale.$('page').textContent.includes('no questions on it'));
+  s.check('progress is a number, not NaN', !stale.$('page').textContent.includes('NaN'));
+
+  /* And the opposite, which matters more: a record with answers on it must
+     never have the form changed underneath it. */
+  const started = await loadApp('inspect', {
+    afterMock: win => {
+      const D = win.GRID_TEST_DATA;
+      const good = D.template_revisions.find(r => r.status === 'published');
+      D.template_revisions.push({ id: 'r0', template_id: good.template_id, rev: 0,
+        status: 'superseded', created_by: 'u2',
+        definition: { sections: [{ id: 's1', title: 'OLD', items: [
+          { id: 'x1', type: 'passfail', label: 'An old question', req: 1 }] }] } });
+      D.inspections[0].template_rev_id = 'r0';
+      D.inspections[0].status = 'in_progress';
+      D.inspection_results = [{ id: 'ir1', inspection_id: D.inspections[0].id,
+        field_id: 'x1', label: 'An old question', outcome: 'pass' }];
+    }
+  });
+  const sd3 = started.window.document;
+  sd3.querySelector('#nav button[data-go="work"]').click(); await started.sleep(60);
+  sd3.querySelector('[data-open-capture]').click(); await started.sleep(420);
+  const movedToo = started.window.GRID_CALLS
+    .filter(c => c[0] === 'update' && c[1] === 'inspections' && c[2].template_rev_id).pop();
+  s.check('an inspection in progress is NOT moved', !movedToo,
+    'changing the form under a part-captured record would orphan its answers');
+  s.check('it still shows the questions it was captured against',
+    started.$('page').textContent.includes('An old question'));
+
   s.group('photos attach, upload and count as answered');
   /* The field rendered a file picker that did nothing: choosing a file
      recorded no answer, so submitting failed with "Photo has not been

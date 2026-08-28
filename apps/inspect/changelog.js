@@ -22,10 +22,18 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.9.8";
+window.APP_VERSION = "0.9.9";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.9.9", d: "2026-08-28", t: "Starting an inspection opens the current form",
+    items: [
+      "An inspection that had not been started could open with an empty form. It stayed attached to the version of the template it was created from, so fields added afterwards never reached it. Opening one now switches it to the current published form automatically, as long as nothing has been captured on it yet.",
+      "An inspection that already has answers on it still keeps the form it was captured against, so nothing changes underneath a record in progress.",
+      "A form with no questions on it can no longer be published. That is how empty forms reached the shop floor."
+    ]
+  },
   {
     v: "0.9.8", d: "2026-08-28", t: "Photos on an inspection",
     items: [

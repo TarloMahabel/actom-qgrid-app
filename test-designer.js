@@ -86,6 +86,25 @@ const { loadApp, suite } = require('./test/harness');
       $('page').innerHTML.includes('Cannot publish yet'));
   }
 
+  s.group('an empty template cannot be published');
+  /* Publishing a revision with no questions is how an inspection reached the
+     shop floor with nothing to fill in. */
+  const empty = await loadApp('inspect', {
+    afterMock: win => {
+      const D = win.GRID_TEST_DATA;
+      D.template_revisions.forEach(r => {
+        if (r.status === 'draft') r.definition = { sections: [{ id: 's1', title: 'ID', items: [
+          { id: 'h1', type: 'info', label: 'Read the work instruction first' }] }] };
+      });
+    }
+  });
+  const ed = empty.window.document;
+  ed.querySelector('#nav button[data-go="dsn"]').click(); await empty.sleep(80);
+  ed.querySelector('[data-act="open-designer"]').click(); await empty.sleep(140);
+  s.check('publish is refused with no questions', !ed.querySelector('[data-act="publish"]'));
+  s.check('and says an instruction is not a question',
+    empty.$('page').textContent.includes('no questions on it'));
+
   s.group('a publish that quietly did nothing is caught');
   /* The reported fault: the banner said "Revision 1 published", the status
      line still said draft, and the library still said Never published. The

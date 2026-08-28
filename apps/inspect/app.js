@@ -388,7 +388,34 @@ function renderCapture() {
   const rev = byId(S.revisions, insp.template_rev_id);
   const tpl = tplForRev(insp.template_rev_id);
   const def = rev?.definition;
-  if (!def?.sections) return `<div class="card"><div class="empty">This template has no fields defined.</div></div>`;
+  const fieldCount = (def?.sections || [])
+    .reduce((a, sec) => a + (sec.items || []).filter(f => !["info", "section"].includes(f.type)).length, 0);
+
+  /* A revision with no answerable fields produces an inspection nobody can
+     complete: the form renders a heading and nothing else, progress reads
+     "0 of 0" and the percentage is NaN. It happens when a template is
+     published before its fields are added — the inspection is locked to the
+     revision it was generated against, so later edits do not reach it. */
+  if (!def?.sections || fieldCount === 0) {
+    const latest = publishedRevs().find(x => x.template_id === tpl?.id);
+    const newer = latest && rev && latest.rev > rev.rev ? latest : null;
+    return `<div class="card"><div class="bd" style="text-align:center;padding:34px 20px">
+      <div style="font-size:14.5px;font-weight:700;margin-bottom:6px">This form has no questions on it</div>
+      <p style="color:var(--ink-2);font-size:13px;max-width:520px;margin:0 auto 8px">
+        ${esc(insp.ref)} was generated against <b>${esc(tpl?.code || "this template")} revision
+        ${rev?.rev ?? "?"}</b>, and that revision has no fields. An inspection stays on the
+        revision it was created with, so adding fields to a later revision does not reach it.</p>
+      ${newer
+        ? `<p style="color:var(--ink-2);font-size:13px;max-width:520px;margin:0 auto 18px">
+             Revision ${newer.rev} is published and does have fields. Move this inspection onto it —
+             safe to do because nothing has been captured yet.</p>
+           <button class="btn pri" data-act="upgrade-inspection" data-id="${insp.id}">
+             Use revision ${newer.rev}</button>`
+        : `<p style="color:var(--ink-2);font-size:13px;max-width:520px;margin:0 auto 18px">
+             Add fields to the template and publish a new revision, then move this inspection onto it.</p>
+           <button class="btn pri" data-goto="dsn">Form designer →</button>`}
+    </div></div>`;
+  }
 
   const val = fid => S.capture.results[fid] || {};
   const fields = def.sections.flatMap(s => s.items).filter(f => !["info", "section"].includes(f.type));
@@ -476,8 +503,9 @@ function renderCapture() {
     </div></div></div></div>
     <div>
       <div class="card" style="margin-bottom:13px"><h3>Progress</h3><div class="bd">
-        <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:6px"><span>${answered} of ${fields.length} answered</span><b>${Math.round(answered / fields.length * 100)}%</b></div>
-        <div style="height:7px;background:#eef1f6;border-radius:4px;overflow:hidden;margin-bottom:13px"><i style="display:block;height:100%;width:${answered / fields.length * 100}%;background:var(--brand)"></i></div>
+        <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:6px"><span>${answered} of ${fields.length} answered</span><b>${
+          fields.length ? Math.round(answered / fields.length * 100) : 0}%</b></div>
+        <div style="height:7px;background:#eef1f6;border-radius:4px;overflow:hidden;margin-bottom:13px"><i style="display:block;height:100%;width:${fields.length ? answered / fields.length * 100 : 0}%;background:var(--brand)"></i></div>
         ${fails.length ? `<div class="note q" style="margin-bottom:11px"><b>${fails.length} failure${fails.length > 1 ? "s" : ""} recorded.</b> A failed check will be raised for each on submit.</div>` : ""}
         ${(() => {
           const req = tpl ? (tpl.min_competency || 0) : 0;
@@ -668,7 +696,16 @@ function designerView(m) {
      missing feature — which is how this was first reported. */
   const canPublishRole = isRole("quality_manager", "sysadmin");
   const isAuthor = draft && draft.created_by === S.profile.id;
-  const publishBlock = !draft
+  /* A template with nothing to answer produces an inspection nobody can
+     complete. Publishing one is how empty forms reached the shop floor. */
+  const answerable = draft
+    ? (draft.definition?.sections || []).reduce((a, sec) =>
+        a + (sec.items || []).filter(f => !["info", "section"].includes(f.type)).length, 0)
+    : 0;
+  const publishBlock = draft && answerable === 0
+    ? { label: `Publish rev ${draft.rev}`,
+        why: "This revision has no questions on it. An inspection generated from it would open with nothing to fill in." }
+    : !draft
     ? { label: "Publish", why: "There is no draft to publish. Change something and save a draft first." }
     : !canPublishRole
       ? { label: `Publish rev ${draft.rev}`, why: "Only a Quality Manager or System Administrator may publish." }
@@ -1085,9 +1122,37 @@ async function loadAudit() {
    ------------------------------------------------------------ */
 async function openCapture(id) {
   S.capture = { id, results: {}, photos: {} };
-  const insp = byId(S.inspections, id);
+  let insp = byId(S.inspections, id);
   busy(true);
   try {
+    /* Move an untouched inspection onto the current published revision before
+       opening it.
+
+       An inspection is locked to the revision it was generated against, which
+       is right for a record with answers in it and wrong for one nobody has
+       started. Publishing a template with no fields, then adding them in a
+       later revision, left every already-scheduled inspection pointing at the
+       empty one — the form opened with a heading and nothing to fill in.
+
+       The rule: no results captured and not yet started, so nothing is lost. */
+    if (insp && insp.status === "scheduled" && !insp.signed_at) {
+      const cur = byId(S.revisions, insp.template_rev_id);
+      const latest = publishedRevs().find(r => r.template_id === cur?.template_id);
+      if (latest && latest.id !== insp.template_rev_id) {
+        const { data: existing, error: eChk } = await supabase.from("inspection_results")
+          .select("id").eq("inspection_id", id).limit(1);
+        if (eChk) throw eChk;
+        if (!existing || !existing.length) {
+          const { error: eUp } = await supabase.from("inspections")
+            .update({ template_rev_id: latest.id }).eq("id", id);
+          if (eUp) throw eUp;
+          insp.template_rev_id = latest.id;
+          if (cur && latest.rev !== cur.rev) {
+            toast(`Using the current form — revision ${latest.rev}.`, "ok");
+          }
+        }
+      }
+    }
     if (insp.status === "scheduled") {
       await supabase.from("inspections")
         .update({ status: "in_progress", started_at: new Date().toISOString(), assigned_to: insp.assigned_to || S.profile.id })
@@ -1133,6 +1198,39 @@ function saveAnswer(fieldId, patch) {
       toast(explain(e), "bad");
     }
   }, 500);
+}
+
+/* Moves an inspection that has not been started onto the newest published
+   revision of its template. Deliberately refused once anything is captured:
+   an inspection is evidence against the revision it was answered under, and
+   silently swapping the questions afterwards would make the record a lie. */
+async function upgradeInspection(id) {
+  const insp = byId(S.inspections, id);
+  if (!insp) return;
+  const cur = byId(S.revisions, insp.template_rev_id);
+  const latest = publishedRevs().find(r => r.template_id === cur?.template_id);
+  if (!latest || latest.id === insp.template_rev_id) {
+    toast("This inspection is already on the newest published revision.", "bad");
+    return;
+  }
+  busy(true);
+  try {
+    const { data: answers, error: e1 } = await supabase.from("inspection_results")
+      .select("id").eq("inspection_id", id).limit(1);
+    if (e1) throw e1;
+    if (answers && answers.length) {
+      toast("Answers have already been captured, so this inspection stays on revision " +
+            `${cur.rev}. Cancel it and generate a new one if it needs the newer form.`, "bad");
+      return;
+    }
+    const { error } = await supabase.from("inspections")
+      .update({ template_rev_id: latest.id }).eq("id", id);
+    if (error) throw error;
+    toast(`Moved to revision ${latest.rev}.`, "ok");
+    await reload();
+    await openCapture(id);
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
 }
 
 async function submitInspection() {
@@ -2116,6 +2214,7 @@ document.addEventListener("click", async e => {
     case "new-template": return newTemplate();
     case "save-template": return saveTemplate();
     case "submit-inspection": return submitInspection();
+    case "upgrade-inspection": return upgradeInspection(t.dataset.id);
     case "toggle-hp": return toggleHoldPoints();
     case "toggle-2nd": return toggleSecondApprover();
     case "add-project": return projectModal(null);
