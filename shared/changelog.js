@@ -22,10 +22,16 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.10.4";
+window.APP_VERSION = "0.10.5";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.10.5", d: "2026-08-28", t: "Removing a photo",
+    items: [
+      "Removing a photo reported 'you do not have access to that record'. An answer already recorded on an inspection cannot be deleted — that is deliberate, because a quality record should show that something was entered and then withdrawn, not that it never existed. Clearing an answer now blanks it instead."
+    ]
+  },
   {
     v: "0.10.4", d: "2026-08-28", t: "Photos upload",
     items: [

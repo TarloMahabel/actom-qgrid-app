@@ -1515,6 +1515,32 @@ async function saveTemplate() {
 
 
 
+
+/* Clearing an answer BLANKS the row; it never deletes it.
+
+   DELETE on inspection_results is revoked from every client role by design —
+   a captured answer is evidence, and the audit trail should show that a value
+   was recorded and then withdrawn, not that it never existed. Three places
+   were deleting instead, which produced "You do not have access to that
+   record" and left the form insisting a field was still answered.
+
+   Blanking satisfies the completeness check the same way: the database looks
+   for outcome, value_text or value_num being present. */
+async function clearAnswer(fieldId) {
+  delete S.capture.results[fieldId];
+  try {
+    const { error } = await supabase.from("inspection_results")
+      .update({ outcome: null, value_text: null, value_num: null })
+      .eq("inspection_id", S.capture.id).eq("field_id", fieldId);
+    if (error) throw error;
+  } catch (e) {
+    /* If this fails the field still counts as answered in the database while
+       the screen says it does not — the inspector would submit and be refused
+       for a reason that is not on screen. */
+    toast("Could not clear that answer. " + explain(e), "bad");
+  }
+}
+
 /* ---------------------------------------------------------------
    Fault lists.
 
@@ -1661,11 +1687,7 @@ async function setNoFaults(fieldId, checked) {
   if (checked) {
     saveAnswer(fieldId, { value_text: "no faults found", value_num: 0, outcome: "pass" });
   } else {
-    delete S.capture.results[fieldId];
-    try {
-      await supabase.from("inspection_results")
-        .delete().eq("inspection_id", S.capture.id).eq("field_id", fieldId);
-    } catch (e) { toast(explain(e), "bad"); }
+    await clearAnswer(fieldId);
   }
   render();
 }
@@ -1678,12 +1700,7 @@ async function recordFaultAnswer(fieldId) {
     saveAnswer(fieldId, { value_text: `${n} fault${n === 1 ? "" : "s"}`, value_num: n, outcome: "fail" });
     return;
   }
-  delete S.capture.results[fieldId];
-  try {
-    const { error } = await supabase.from("inspection_results")
-      .delete().eq("inspection_id", S.capture.id).eq("field_id", fieldId);
-    if (error) throw error;
-  } catch (e) { toast(explain(e), "bad"); }
+  await clearAnswer(fieldId);
 }
 
 /* ---------------------------------------------------------------
@@ -1842,18 +1859,8 @@ async function recordPhotoAnswer(fieldId) {
     saveAnswer(fieldId, { value_text: `${n} photo${n === 1 ? "" : "s"}`, value_num: n, outcome: "pass" });
     return;
   }
-  // Below the minimum: clear the answer so the form is honestly incomplete.
-  delete S.capture.results[fieldId];
-  try {
-    const { error } = await supabase.from("inspection_results")
-      .delete().eq("inspection_id", S.capture.id).eq("field_id", fieldId);
-    if (error) throw error;
-  } catch (e) {
-    /* If this fails the field still counts as answered in the database while
-       the screen says it is not — the inspector would submit and be refused
-       for a reason that is not on screen. */
-    toast("Could not update the photo count. " + explain(e), "bad");
-  }
+  // Below the minimum: blank the answer so the form is honestly incomplete.
+  await clearAnswer(fieldId);
 }
 
 /* ---------------------------------------------------------------

@@ -177,6 +177,17 @@ s.check('the readiness counter no longer disables anything',
 s.check('the reason is shown, not just implied',
   app.includes('generateBlockedReason(w)') && app.includes('note q'));
 
+s.group('captured answers are never deleted');
+/* DELETE on inspection_results is revoked from every client role: an answer
+   that was recorded and then withdrawn should show as withdrawn, not vanish.
+   Three code paths cleared answers by deleting them, which the database
+   refused outright. */
+s.check('the schema revokes delete on inspection_results',
+  /revoke delete on inspection_results/.test(sql));
+s.check('the app clears an answer by blanking it', app.includes('function clearAnswer'));
+s.check('nothing deletes an inspection result',
+  !/from\("inspection_results"\)[\s\S]{0,80}\.delete\(\)/.test(app));
+
 s.group('the photo path is complete');
 /* The photo field rendered a picker with no handler for weeks. Each piece is
    asserted because the missing one was invisible: the control looked finished. */

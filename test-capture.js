@@ -154,6 +154,17 @@ const { loadApp, suite } = require('./test/harness');
   s.check('the two states cannot both be set',
     cd.querySelector('[data-fault-add]').disabled);
 
+  /* Re-query: ticking re-renders the form, so the original checkbox is a
+     detached node and its event never reaches the delegated listener. */
+  const tick2 = cd.querySelector('[data-fault-none]');
+  tick2.checked = false;
+  tick2.dispatchEvent(new clean.window.Event('change', { bubbles: true }));
+  await clean.sleep(700);
+  s.check('unticking blanks the answer rather than deleting it',
+    clean.window.GRID_CALLS.some(c => c[0] === 'update' && c[1] === 'inspection_results') &&
+    !clean.window.GRID_CALLS.some(c => c[0] === 'delete' && c[1] === 'inspection_results'));
+
+
   s.group('starting an inspection opens the current form');
   /* An inspection is locked to the revision it was generated against — right
      for a record with answers in it, wrong for one nobody has started.
@@ -274,8 +285,15 @@ const { loadApp, suite } = require('./test/harness');
 
   pdoc.querySelector('[data-rm-photo]').click(); await ph.sleep(450);
   s.check('a photo can be removed', /1 of 2 taken/.test(ph.$('page').textContent));
+  /* Blanked, never deleted. DELETE on inspection_results is revoked from
+     every client role — a captured answer is evidence — so clearing one by
+     deleting produced "You do not have access to that record" and left the
+     form insisting the field was still answered. */
   s.check('dropping below the minimum clears the answer again',
-    pc.some(c => c[0] === 'delete' && c[1] === 'inspection_results'));
+    pc.some(c => c[0] === 'update' && c[1] === 'inspection_results' &&
+      c[2] && c[2].outcome === null && c[2].value_text === null));
+  s.check('an answer is never deleted, only blanked',
+    !pc.some(c => c[0] === 'delete' && c[1] === 'inspection_results'));
 
   s.group('a repaint while the dialog is open does not lose the photo');
   const mid = await loadApp('inspect');
