@@ -22,10 +22,17 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.10.1";
+window.APP_VERSION = "0.10.2";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.10.2", d: "2026-08-28", t: "Photos actually upload",
+    items: [
+      "Choosing a photo did nothing at all — no error, no thumbnail. The file dialog stays open while you browse, and if anything refreshed the screen in that time the app lost track of which file you had picked. The picker no longer depends on the screen staying still.",
+      "The screen also holds off refreshing while a file dialog is open."
+    ]
+  },
   {
     v: "0.10.1", d: "2026-08-28", t: "Photo upload says when it fails",
     items: [

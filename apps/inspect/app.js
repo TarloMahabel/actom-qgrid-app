@@ -61,7 +61,7 @@ const S = {
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
   designer: { open: false, tplId: null, revId: null, def: null, sel: null,
               preview: false, dirty: false, busy: null, result: null },
-  capture: { id: null, results: {}, photos: {}, faults: {}, photoError: null }
+  capture: { id: null, results: {}, photos: {}, faults: {}, photoError: null, pickerField: null }
 };
 
 /* CHANGELOG lives in changelog.js so a release note is a one-line edit
@@ -207,7 +207,13 @@ const reload = async () => { await loadData(); render(); };
 let rtTimer, channel = null;
 function subscribe() {
   if (channel) { supabase.removeChannel(channel); channel = null; }
-  const bump = () => { clearTimeout(rtTimer); rtTimer = setTimeout(reload, 600); };
+  /* Hold off while a file dialog is open. Repainting under it is what broke
+     photo upload: the input the dialog belongs to is replaced and the chosen
+     file goes nowhere. */
+  const bump = () => {
+    clearTimeout(rtTimer);
+    rtTimer = setTimeout(() => { if (!S.capture.pickerField) reload(); }, 600);
+  };
   channel = supabase.channel("qgrid")
     .on("postgres_changes", { event: "*", schema: "public", table: "inspections" }, bump)
     .on("postgres_changes", { event: "*", schema: "public", table: "failed_checks" }, bump)
@@ -475,19 +481,14 @@ function renderCapture() {
           </div>`).join("")}
         </div>` : ""}
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <label class="btn sm" for="cam-${f.id}">
+          <button class="btn sm" data-shoot="${f.id}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M4 8h3l2-2h6l2 2h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
-            Take a photo</label>
-          <input id="cam-${f.id}" type="file" accept="image/*" capture="environment"
-                 data-photo="${f.id}" hidden>
-
-          <label class="btn sm" for="file-${f.id}">
+            Take a photo</button>
+          <button class="btn sm" data-pick="${f.id}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v13"/></svg>
-            Upload a file</label>
-          <input id="file-${f.id}" type="file" accept="image/*" multiple
-                 data-photo="${f.id}" hidden>
+            Upload a file</button>
         </div>
         <div class="hint" style="margin-top:7px">${shots.length} of ${need} taken.
           Photos are resized before upload so they go through on a slow connection.</div>
@@ -2333,7 +2334,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-rm-photo],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
+  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-rm-photo],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
   if (!t) return;
   const d = t.dataset;
 
@@ -2355,6 +2356,11 @@ document.addEventListener("click", async e => {
   }
   if (d.dispose) return disposeFailedCheck(d.dispose);
   if (d.rmPhoto) { const [fid, i] = d.rmPhoto.split(":"); return removePhoto(fid, Number(i)); }
+  if (d.pick || d.shoot) {
+    S.capture.pickerField = d.pick || d.shoot;
+    $(d.shoot ? "cameraPicker" : "photoPicker").click();
+    return;
+  }
   if (d.faultAdd) return addFault(d.faultAdd);
   if (d.faultDel) { const [fid, id] = d.faultDel.split("|"); return deleteFault(fid, id); }
   if (d.refSave) return saveRefList(d.refSave);
@@ -2481,12 +2487,6 @@ document.addEventListener("change", e => {
     return saveFault(fid, id, col, e.target.value);
   }
   if (d.faultNone !== undefined) return setNoFaults(d.faultNone, e.target.checked);
-  if (d.photo !== undefined) {
-    const files = e.target.files;
-    e.target.value = "";                     // allow re-picking the same file
-    if (files && files.length) addPhotos(d.photo, files);
-    return;
-  }
   if (d.comp) {
     const [pid, skill] = d.comp.split("|");
     return setCompetency(pid, skill, e.target.value);
@@ -2511,6 +2511,19 @@ $("btnRecheck").addEventListener("click", () => start());
 $("btnSignOut").addEventListener("click", signOutNow);
 $("btnSignOut2").addEventListener("click", signOutNow);
 $("btnRefresh").addEventListener("click", reload);
+
+/* Both pickers are wired once, to elements that outlive every render. The
+   field they belong to is remembered on S.capture rather than read from the
+   DOM, because by the time the dialog closes the form may have repainted. */
+function onPicked(e) {
+  const field = S.capture.pickerField;
+  const files = e.target.files;
+  e.target.value = "";                   // allow picking the same file again
+  S.capture.pickerField = null;
+  if (field && files && files.length) addPhotos(field, files);
+}
+$("photoPicker").addEventListener("change", onPicked);
+$("cameraPicker").addEventListener("change", onPicked);
 $("whatsNew").addEventListener("click", () => {
   const log = window.CHANGELOG || [];
   openModal(`What's new — v${window.APP_VERSION || "?"}`,

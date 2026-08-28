@@ -181,13 +181,20 @@ s.group('the photo path is complete');
 /* The photo field rendered a picker with no handler for weeks. Each piece is
    asserted because the missing one was invisible: the control looked finished. */
 for (const [label, needle] of [
-  ['a change handler', 'if (d.photo !== undefined)'],
+  ['a change handler on a persistent picker', 'photoPicker").addEventListener'],
+  ['pickers outside the re-rendered page', 'S.capture.pickerField'],
   ['resizing before upload', 'function resizeImage'],
   ['upload to storage', 'inspection-photos'],
   ['an attachment record', 'from("attachments").insert'],
   ['an answer so the form counts as complete', 'function recordPhotoAnswer'],
   ['signed URLs for previews', 'createSignedUrls']
 ]) s.check(`photos: ${label}`, app.includes(needle));
+/* The pickers must not be rendered inside #page: the file dialog outlives a
+   repaint, and an input replaced mid-dialog silently swallows the selection. */
+s.check('the photo pickers are declared in the shell, not the page',
+  html.includes('id="photoPicker"') && html.includes('id="cameraPicker"'));
+s.check('a background reload defers while a dialog is open',
+  app.includes('if (!S.capture.pickerField) reload()'));
 s.check('the CSP allows images from the project origin',
   read('scripts/gen-config.mjs').includes("img-src 'self' data: blob: ${url}"));
 

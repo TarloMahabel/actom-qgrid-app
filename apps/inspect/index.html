@@ -102,6 +102,15 @@
 
 <div class="busy hidden" id="busy"><div class="sp"></div></div>
 
+<!-- The photo pickers live HERE, outside #page, and are never re-rendered.
+     They used to be rendered inside the capture form. The native file dialog
+     stays open for as long as the user is browsing, and any render in that
+     window — a realtime event, a background reload — destroyed the input the
+     dialog belonged to. The chosen file then landed on a detached element and
+     the change event never reached the app: no error, nothing happened. -->
+<input id="photoPicker"  type="file" accept="image/*" multiple hidden>
+<input id="cameraPicker" type="file" accept="image/*" capture="environment" hidden>
+
 <!-- Load order matters and is enforced by supabase.js, which throws if the
      vendored client is not present yet:
        vendor/supabase.js  the pinned client, committed to the repo

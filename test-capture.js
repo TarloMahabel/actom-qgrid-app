@@ -216,26 +216,34 @@ const { loadApp, suite } = require('./test/harness');
   const pw = ph.window, pdoc = pw.document;
   pdoc.querySelector('#nav button[data-go="work"]').click(); await ph.sleep(60);
   pdoc.querySelector('[data-open-capture]').click(); await ph.sleep(280);
-  const cam = pdoc.querySelector('input[id^="cam-"]');
-  const fil = pdoc.querySelector('input[id^="file-"]');
+  const cam = pdoc.querySelector('[data-shoot]');
+  const fil = pdoc.querySelector('[data-pick]');
   /* Two controls, not one. A single input with capture="environment" forces
      the camera on a tablet and gives no way to attach a photo that already
      exists — a drawing, a supplier certificate, a shot taken earlier. */
   s.check('taking a photo is offered', !!cam);
-  s.check('it opens the camera', cam && cam.getAttribute('capture') === 'environment');
   s.check('uploading an existing file is offered', !!fil);
-  s.check('the upload control does not force the camera', fil && !fil.hasAttribute('capture'));
-  s.check('several files can be attached at once', fil && fil.hasAttribute('multiple'));
-  s.check('both are labelled buttons wired to their inputs',
-    Array.from(pdoc.querySelectorAll('label.btn'))
-      .filter(l => pdoc.getElementById(l.htmlFor)).length === 2);
-  const pin = fil;
+  s.check('the camera picker asks for the camera',
+    pdoc.getElementById('cameraPicker').getAttribute('capture') === 'environment');
+  s.check('the file picker does not force the camera',
+    !pdoc.getElementById('photoPicker').hasAttribute('capture'));
+  s.check('several files can be attached at once',
+    pdoc.getElementById('photoPicker').hasAttribute('multiple'));
+
+  /* THE BUG THIS GUARDS. The pickers must live outside #page. They used to be
+     rendered inside the capture form, and the native file dialog stays open
+     for as long as the user is browsing — any repaint in that window replaced
+     the input the dialog belonged to, so the chosen file landed on a detached
+     element and nothing happened at all, with no error. */
+  s.check('the pickers live outside the re-rendered page',
+    !pdoc.getElementById('page').contains(pdoc.getElementById('photoPicker')));
 
   /* Re-query the input every time: the page re-renders after each upload, so
      a held reference is a detached node and its event never reaches the
      delegated listener on document. */
   const pick = files => {
-    const el = pdoc.querySelector('input[id^="file-"]');
+    pdoc.querySelector('[data-pick]').click();          // sets the target field
+    const el = pdoc.getElementById('photoPicker');
     Object.defineProperty(el, 'files', { value: files, configurable: true });
     el.dispatchEvent(new pw.Event('change', { bubbles: true }));
   };
@@ -269,6 +277,23 @@ const { loadApp, suite } = require('./test/harness');
   s.check('dropping below the minimum clears the answer again',
     pc.some(c => c[0] === 'delete' && c[1] === 'inspection_results'));
 
+  s.group('a repaint while the dialog is open does not lose the photo');
+  const mid = await loadApp('inspect');
+  const md = mid.window.document;
+  md.querySelector('#nav button[data-go="work"]').click(); await mid.sleep(60);
+  md.querySelector('[data-open-capture]').click(); await mid.sleep(400);
+  md.querySelector('[data-pick]').click(); await mid.sleep(40);
+  // repaint, as a realtime event or a tab change would
+  md.querySelector('.tabs button[data-tab="0"]').click(); await mid.sleep(80);
+  md.querySelector('.tabs button[data-tab="1"]').click(); await mid.sleep(120);
+  const mp = md.getElementById('photoPicker');
+  s.check('the picker is still attached after a repaint', mp && mp.isConnected);
+  Object.defineProperty(mp, 'files', { value: [{ name: 'x.jpg', size: 5e6 }], configurable: true });
+  mp.dispatchEvent(new mid.window.Event('change', { bubbles: true }));
+  await mid.sleep(700);
+  s.check('the photo still uploads',
+    mid.window.GRID_CALLS.some(c => c[0] === 'storage.upload'));
+
   s.group('an upload that fails says so, on the field');
   /* Reported as "I can browse but when I upload nothing happens". The failure
      went to a toast that lasts seven seconds — indistinguishable from nothing
@@ -279,7 +304,8 @@ const { loadApp, suite } = require('./test/harness');
   const nb = noBucket.window.document;
   nb.querySelector('#nav button[data-go="work"]').click(); await noBucket.sleep(60);
   nb.querySelector('[data-open-capture]').click(); await noBucket.sleep(400);
-  const nbf = nb.querySelector('input[id^="file-"]');
+  nb.querySelector('[data-pick]').click();
+  const nbf = nb.getElementById('photoPicker');
   Object.defineProperty(nbf, 'files', { value: [{ name: 'x.jpg', size: 5e6 }], configurable: true });
   nbf.dispatchEvent(new noBucket.window.Event('change', { bubbles: true }));
   await noBucket.sleep(800);
@@ -297,7 +323,8 @@ const { loadApp, suite } = require('./test/harness');
   const bdoc = bad.window.document;
   bdoc.querySelector('#nav button[data-go="work"]').click(); await bad.sleep(60);
   bdoc.querySelector('[data-open-capture]').click(); await bad.sleep(280);
-  const bin = bdoc.querySelector('[data-photo]');
+  bdoc.querySelector('[data-pick]').click();
+  const bin = bdoc.getElementById('photoPicker');
   Object.defineProperty(bin, 'files', { value: [{ name: 'c.jpg', size: 5e6 }], configurable: true });
   bin.dispatchEvent(new bad.window.Event('change', { bubbles: true }));
   await bad.sleep(600);
