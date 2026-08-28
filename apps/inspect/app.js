@@ -61,7 +61,7 @@ const S = {
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
   designer: { open: false, tplId: null, revId: null, def: null, sel: null,
               preview: false, dirty: false, busy: null, result: null },
-  capture: { id: null, results: {} }
+  capture: { id: null, results: {}, photos: {} }
 };
 
 /* CHANGELOG lives in changelog.js so a release note is a one-line edit
@@ -425,8 +425,28 @@ function renderCapture() {
           ["overdue","out_of_service"].includes(e.status) ? ` (${e.status.replace("_"," ").toUpperCase()} — blocked)` : ""}</option>`).join("")}
       </select>`;
     }
-    if (f.type === "photo") return `<div><input type="file" accept="image/*" capture="environment" multiple data-photo="${f.id}">
-      <div class="hint">Minimum ${f.minp || 1}. Photos are compressed before upload.</div></div>`;
+    if (f.type === "photo") {
+      const shots = (S.capture.photos[f.id] || []);
+      const need = f.minp || 1;
+      return `<div>
+        ${shots.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:9px">
+          ${shots.map((ph, i) => `<div style="position:relative">
+            ${ph.url
+              ? `<img src="${esc(ph.url)}" alt="" style="width:96px;height:96px;object-fit:cover;
+                   border-radius:8px;border:1px solid var(--line);display:block">`
+              : `<div style="width:96px;height:96px;border-radius:8px;border:1px dashed var(--line);
+                   display:grid;place-items:center;font-size:11px;color:var(--muted)">
+                   ${ph.uploading ? "uploading…" : "no preview"}</div>`}
+            ${ph.uploading ? "" : `<button class="btn sm danger" data-rm-photo="${f.id}:${i}"
+                 style="position:absolute;top:3px;right:3px;padding:1px 6px;line-height:1.4"
+                 title="Remove">×</button>`}
+          </div>`).join("")}
+        </div>` : ""}
+        <input type="file" accept="image/*" capture="environment" multiple data-photo="${f.id}">
+        <div class="hint">${shots.length} of ${need} taken.
+          Photos are resized before upload so they go through on a slow connection.</div>
+      </div>`;
+    }
     if (f.type === "sign") return `<div class="drop" style="border-color:var(--brand);color:var(--brand-dk)">Signing happens when you submit below</div>`;
     return `<div class="ro">${esc(f.type)}</div>`;
   };
@@ -1064,7 +1084,7 @@ async function loadAudit() {
    5. Actions (writes)
    ------------------------------------------------------------ */
 async function openCapture(id) {
-  S.capture = { id, results: {} };
+  S.capture = { id, results: {}, photos: {} };
   const insp = byId(S.inspections, id);
   busy(true);
   try {
@@ -1077,6 +1097,7 @@ async function openCapture(id) {
     const { data, error } = await supabase.from("inspection_results").select("*").eq("inspection_id", id);
     if (error) throw error;
     for (const r of data) S.capture.results[r.field_id] = r;
+    await loadCapturePhotos(id);
   } catch (e) { toast(explain(e), "bad"); }
   finally { busy(false); }
   S.view = "work"; S.tab = 1; buildNav(); render();
@@ -1124,7 +1145,7 @@ async function submitInspection() {
     if (error) throw error;
     toast(`${data.ref} submitted — ${data.result}${data.failed_checks ? `, ${data.failed_checks} failed check(s)` : ""}${data.works_order_held ? ", works order held" : ""}`,
       data.result === "pass" ? "ok" : "");
-    S.capture = { id: null, results: {} };
+    S.capture = { id: null, results: {}, photos: {} };
     S.tab = 0;
     await reload();
   } catch (e) { toast(explain(e), "bad"); }
@@ -1363,6 +1384,171 @@ async function saveTemplate() {
 }
 
 
+
+
+/* ---------------------------------------------------------------
+   Inspection photos.
+
+   The field rendered a file picker that did nothing: choosing a file
+   recorded no answer, so submitting failed with "Photo has not been
+   answered" and the photo was never uploaded. This is the whole path —
+   resize, upload, record, preview, remove.
+
+   Photos are resized in the browser before upload. A tablet camera
+   produces 4–8 MB per shot; over shop-floor Wi-Fi that is the difference
+   between an inspection that submits and one that times out. 1600 px on
+   the long edge at 80% quality is plenty to read a defect from and lands
+   around 300 kB.
+   --------------------------------------------------------------- */
+const PHOTO_MAX_EDGE = 1600;
+const PHOTO_QUALITY = 0.8;
+
+function resizeImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      canvas.toBlob(blob => {
+        URL.revokeObjectURL(url);
+        blob ? resolve(blob) : reject(new Error("Could not read that image."));
+      }, "image/jpeg", PHOTO_QUALITY);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("That file is not an image.")); };
+    img.src = url;
+  });
+}
+
+async function loadCapturePhotos(inspectionId) {
+  S.capture.photos = {};
+  let data, error;
+  try {
+    ({ data, error } = await supabase.from("attachments")
+      .select("id,storage_path,result_id,kind").eq("inspection_id", inspectionId));
+  } catch (e) { error = e; }
+  if (error) {
+    /* Non-fatal: the inspection is still workable, the inspector just cannot
+       see what is already attached. Say so rather than showing an empty strip
+       that implies nothing was ever taken. */
+    toast("Could not load the photos already attached. " + explain(error), "bad");
+    return;
+  }
+  for (const a of data || []) {
+    // The field is the second segment: inspections/<id>/<field>/<file>
+    const field = (a.storage_path.split("/")[2]) || "photo";
+    (S.capture.photos[field] ||= []).push({ id: a.id, path: a.storage_path, url: null });
+  }
+  /* The bucket is private, so a signed URL is needed to show anything. One
+     batch call rather than one per photo. */
+  const paths = Object.values(S.capture.photos).flat().map(p => p.path);
+  if (!paths.length) return;
+  let signed = [];
+  try {
+    const res = await supabase.storage.from("inspection-photos").createSignedUrls(paths, 3600);
+    if (res.error) throw res.error;
+    signed = res.data || [];
+  } catch (e) {
+    // Previews are a convenience; the attachments themselves are recorded.
+    console.warn("photo previews unavailable", e);
+  }
+  const byPath = {};
+  for (const sgn of signed) byPath[sgn.path] = sgn.signedUrl;
+  for (const list of Object.values(S.capture.photos))
+    for (const ph of list) ph.url = byPath[ph.path] || null;
+}
+
+async function addPhotos(fieldId, files) {
+  const insp = byId(S.inspections, S.capture.id);
+  if (!insp) return;
+  const list = (S.capture.photos[fieldId] ||= []);
+
+  for (const file of Array.from(files)) {
+    const placeholder = { uploading: true, url: URL.createObjectURL(file) };
+    list.push(placeholder);
+    render();
+    try {
+      const blob = await resizeImage(file);
+      const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const path = `inspections/${S.capture.id}/${fieldId}/${name}`;
+
+      const { error: upErr } = await supabase.storage
+        .from("inspection-photos").upload(path, blob, { contentType: "image/jpeg" });
+      if (upErr) throw upErr;
+
+      const { data: row, error: rowErr } = await supabase.from("attachments").insert({
+        inspection_id: S.capture.id, storage_path: path,
+        kind: "photo", uploaded_by: S.profile.id
+      }).select().single();
+      if (rowErr) throw rowErr;
+
+      Object.assign(placeholder, { uploading: false, id: row.id, path });
+    } catch (e) {
+      /* Drop the placeholder rather than leaving a permanent "uploading…"
+         tile that looks like the photo is on its way when it is not. */
+      const i = list.indexOf(placeholder);
+      if (i > -1) list.splice(i, 1);
+      toast(explain(e), "bad");
+    }
+    render();
+  }
+  await recordPhotoAnswer(fieldId);
+}
+
+async function removePhoto(fieldId, index) {
+  const list = S.capture.photos[fieldId] || [];
+  const ph = list[index];
+  if (!ph) return;
+  /* The storage object is deliberately not deleted: photos are evidence and
+     the storage policy refuses a delete. Detaching removes it from this
+     inspection; the file stays for the audit trail. */
+  if (ph.id) {
+    try {
+      const { error } = await supabase.from("attachments").delete().eq("id", ph.id);
+      if (error) throw error;
+    } catch (e) {
+      /* Leave it on screen. Removing it locally while the record survives
+         would show an inspection as having fewer photos than it has. */
+      toast("Could not remove that photo. " + explain(e), "bad");
+      return;
+    }
+  }
+  list.splice(index, 1);
+  await recordPhotoAnswer(fieldId);
+  render();
+}
+
+/* A photo field is "answered" when it holds at least the minimum. Writing a
+   result row is what makes the database's completeness check pass — without
+   it, submitting failed with "Photo has not been answered" no matter how many
+   photos were attached. */
+async function recordPhotoAnswer(fieldId) {
+  const insp = byId(S.inspections, S.capture.id);
+  const rev = insp && byId(S.revisions, insp.template_rev_id);
+  const field = rev && rev.definition.sections.flatMap(x => x.items).find(f => f.id === fieldId);
+  const n = (S.capture.photos[fieldId] || []).filter(p => !p.uploading).length;
+  const need = (field && field.minp) || 1;
+
+  if (n >= need) {
+    saveAnswer(fieldId, { value_text: `${n} photo${n === 1 ? "" : "s"}`, value_num: n, outcome: "pass" });
+    return;
+  }
+  // Below the minimum: clear the answer so the form is honestly incomplete.
+  delete S.capture.results[fieldId];
+  try {
+    const { error } = await supabase.from("inspection_results")
+      .delete().eq("inspection_id", S.capture.id).eq("field_id", fieldId);
+    if (error) throw error;
+  } catch (e) {
+    /* If this fails the field still counts as answered in the database while
+       the screen says it is not — the inspector would submit and be refused
+       for a reason that is not on screen. */
+    toast("Could not update the photo count. " + explain(e), "bad");
+  }
+}
 
 /* ---------------------------------------------------------------
    Readiness.
@@ -1842,7 +2028,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-tpl],[data-id]");
+  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-rm-photo],[data-tpl],[data-id]");
   if (!t) return;
   const d = t.dataset;
 
@@ -1863,6 +2049,7 @@ document.addEventListener("click", async e => {
     return setProfileField(p.id, { active: !p.active });
   }
   if (d.dispose) return disposeFailedCheck(d.dispose);
+  if (d.rmPhoto) { const [fid, i] = d.rmPhoto.split(":"); return removePhoto(fid, Number(i)); }
   if (d.refSave) return saveRefList(d.refSave);
   if (d.refAdd) return addRefRow(d.refAdd);
   if (d.refToggle) { const [tb, id] = d.refToggle.split("|"); return toggleRefActive(tb, id); }
@@ -1981,6 +2168,12 @@ document.addEventListener("change", e => {
   if (d.num !== undefined) return saveAnswer(d.num, { value_num: e.target.value === "" ? null : Number(e.target.value) });
   if (d.txt !== undefined) return saveAnswer(d.txt, { value_text: e.target.value });
   if (d.equip !== undefined) return saveAnswer(d.equip, { equipment_id: e.target.value ? Number(e.target.value) : null });
+  if (d.photo !== undefined) {
+    const files = e.target.files;
+    e.target.value = "";                     // allow re-picking the same file
+    if (files && files.length) addPhotos(d.photo, files);
+    return;
+  }
   if (d.comp) {
     const [pid, skill] = d.comp.split("|");
     return setCompetency(pid, skill, e.target.value);

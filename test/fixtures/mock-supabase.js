@@ -57,6 +57,7 @@
     { id:1, profile_id:"u1", skill:"Routine testing sign-off", level:3, valid_to:null },
     { id:2, profile_id:"u2", skill:"Visual and dimensional inspection", level:2, valid_to:null }
   ],
+  attachments: [],
   inspection_results: [],
     audit_trail: [{at:"2026-08-26T09:00:00Z",actor_name:"Varshan Mahabel",action:"insert",entity:"inspections",entity_id:"n1abcdef"}]
   };
@@ -180,6 +181,32 @@
       signOut: () => Promise.resolve({})
     }
   };
+  /* Storage. The real client exposes .storage.from(bucket) with upload and
+     createSignedUrls; without it the photo path could not be tested at all,
+     and photo upload shipped broken once already for exactly that reason. */
+  client.storage = {
+    from: function (bucket) {
+      return {
+        upload: function (path, blob, opts) {
+          CALLS.push(["storage.upload", bucket, path, blob && blob.size]);
+          if (DATA.__storageFails) {
+            return Promise.resolve({ data: null, error: { message: "storage full" } });
+          }
+          DATA.__uploads = DATA.__uploads || [];
+          DATA.__uploads.push({ bucket, path });
+          return Promise.resolve({ data: { path }, error: null });
+        },
+        createSignedUrls: function (paths, expiry) {
+          CALLS.push(["storage.signed", bucket, paths.length]);
+          return Promise.resolve({
+            data: paths.map(p => ({ path: p, signedUrl: "https://never.invalid/" + p })),
+            error: null
+          });
+        }
+      };
+    }
+  };
+
   window.supabase = {
     createClient: function () { return client; }
   };

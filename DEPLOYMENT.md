@@ -188,8 +188,9 @@ custom domain, division seed data.
 
 Being explicit so none of this is discovered late:
 
-- **Photo upload.** The bucket, the policies and the form field exist; the compress-and-upload
-  handler does not. Half a day, needs a real device to test against.
+- **Photo upload** is built: resized in the browser, uploaded to private storage, shown as
+  thumbnails. Still worth one pass on a real tablet — jsdom has no camera and no canvas, so
+  the suite exercises the upload path with those stubbed.
 - **Offline capture.** The form writes each answer through as it is given, so a dropped
   connection loses one field rather than an inspection. True offline queueing with a service
   worker is a separate piece of work and should be scoped against the actual shop-floor

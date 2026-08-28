@@ -88,6 +88,69 @@ const { loadApp, suite } = require('./test/harness');
   s.check('saving inserts the works order', insW && insW[2].code === 'WO-99999',
     insW ? JSON.stringify(insW[2]) : 'no call');
 
+  s.group('photos attach, upload and count as answered');
+  /* The field rendered a file picker that did nothing: choosing a file
+     recorded no answer, so submitting failed with "Photo has not been
+     answered" and nothing was ever uploaded. */
+  const ph = await loadApp('inspect');
+  const pw = ph.window, pdoc = pw.document;
+  pdoc.querySelector('#nav button[data-go="work"]').click(); await ph.sleep(60);
+  pdoc.querySelector('[data-open-capture]').click(); await ph.sleep(280);
+  const pin = pdoc.querySelector('[data-photo]');
+  s.check('the capture form offers a photo field', !!pin);
+
+  /* Re-query the input every time: the page re-renders after each upload, so
+     a held reference is a detached node and its event never reaches the
+     delegated listener on document. */
+  const pick = files => {
+    const el = pdoc.querySelector('[data-photo]');
+    Object.defineProperty(el, 'files', { value: files, configurable: true });
+    el.dispatchEvent(new pw.Event('change', { bubbles: true }));
+  };
+  pick([{ name: 'a.jpg', size: 5e6 }]);
+  await ph.sleep(600);
+  const pc = pw.GRID_CALLS;
+  s.check('the image is uploaded to storage',
+    pc.some(c => c[0] === 'storage.upload' && c[1] === 'inspection-photos'));
+  s.check('it is resized first, not sent at camera size',
+    pc.some(c => c[0] === 'storage.upload' && c[3] < 1e6),
+    String((pc.find(c => c[0] === 'storage.upload') || [])[3]));
+  s.check('the path is scoped to the inspection and field',
+    pc.some(c => c[0] === 'storage.upload' && /^inspections\/[^/]+\/[^/]+\//.test(c[2])));
+  s.check('an attachment record is written',
+    pc.some(c => c[0] === 'insert' && c[1] === 'attachments'));
+  s.check('one photo does NOT satisfy a minimum of two',
+    !pc.some(c => c[0] === 'upsert' && c[2] && c[2].field_id === 'i7'));
+  s.check('progress shows how many are still needed',
+    /1 of 2 taken/.test(ph.$('page').textContent));
+
+  pick([{ name: 'b.jpg', size: 5e6 }]);
+  await ph.sleep(600);
+  const answer = pc.filter(c => c[0] === 'upsert' && c[2] && c[2].field_id === 'i7').pop();
+  s.check('reaching the minimum records the answer', !!answer,
+    'without this, submit fails with "Photo has not been answered"');
+  s.check('the answer says how many', answer && answer[2].value_num === 2);
+  s.check('thumbnails are shown', (ph.$('page').innerHTML.match(/<img[^>]+src=/g) || []).length >= 2);
+
+  pdoc.querySelector('[data-rm-photo]').click(); await ph.sleep(450);
+  s.check('a photo can be removed', /1 of 2 taken/.test(ph.$('page').textContent));
+  s.check('dropping below the minimum clears the answer again',
+    pc.some(c => c[0] === 'delete' && c[1] === 'inspection_results'));
+
+  s.group('an upload that fails does not look like success');
+  const bad = await loadApp('inspect', {
+    afterMock: win => { win.GRID_TEST_DATA.__storageFails = true; }
+  });
+  const bdoc = bad.window.document;
+  bdoc.querySelector('#nav button[data-go="work"]').click(); await bad.sleep(60);
+  bdoc.querySelector('[data-open-capture]').click(); await bad.sleep(280);
+  const bin = bdoc.querySelector('[data-photo]');
+  Object.defineProperty(bin, 'files', { value: [{ name: 'c.jpg', size: 5e6 }], configurable: true });
+  bin.dispatchEvent(new bad.window.Event('change', { bubbles: true }));
+  await bad.sleep(600);
+  s.check('no thumbnail is left behind', !/uploading/.test(bad.$('page').textContent));
+  s.check('the count still reads zero', /0 of \d+ taken/.test(bad.$('page').textContent));
+
   s.group('Generate is enabled exactly when it can work');
   /* The button disabled itself. It was gated on a global count of unmet
      readiness steps, and that list ends with "Generate the inspections" —

@@ -79,6 +79,29 @@ async function loadApp(app, opts) {
 
   // jsdom leaves a few browser globals out; the app expects them.
   if (!w.structuredClone) w.structuredClone = v => JSON.parse(JSON.stringify(v));
+
+  /* jsdom has no canvas and no real image decoding, so photo resizing cannot
+     run as written. Stub the three pieces it uses — Image, canvas.toBlob and
+     object URLs — so the UPLOAD PATH is exercised even though the pixels are
+     not. Without this the photo flow would be untestable, which is how it
+     shipped broken the first time. */
+  w.URL.createObjectURL = () => 'blob:test/photo';
+  w.URL.revokeObjectURL = () => {};
+  class FakeImage {
+    constructor() { this.width = 3000; this.height = 2000; }
+    set src(v) { setTimeout(() => this.onload && this.onload(), 0); }
+    get src() { return 'blob:test/photo'; }
+  }
+  w.Image = FakeImage;
+  const realCreate = w.document.createElement.bind(w.document);
+  w.document.createElement = tag => {
+    const el = realCreate(tag);
+    if (tag === 'canvas') {
+      el.getContext = () => ({ drawImage() {} });
+      el.toBlob = (cb) => cb({ size: 240000, type: 'image/jpeg' });
+    }
+    return el;
+  };
   w.confirm = opts.confirm || (() => true);
   w.alert   = () => {};
   w.scrollTo = () => {};

@@ -177,6 +177,20 @@ s.check('the readiness counter no longer disables anything',
 s.check('the reason is shown, not just implied',
   app.includes('generateBlockedReason(w)') && app.includes('note q'));
 
+s.group('the photo path is complete');
+/* The photo field rendered a picker with no handler for weeks. Each piece is
+   asserted because the missing one was invisible: the control looked finished. */
+for (const [label, needle] of [
+  ['a change handler', 'if (d.photo !== undefined)'],
+  ['resizing before upload', 'function resizeImage'],
+  ['upload to storage', 'inspection-photos'],
+  ['an attachment record', 'from("attachments").insert'],
+  ['an answer so the form counts as complete', 'function recordPhotoAnswer'],
+  ['signed URLs for previews', 'createSignedUrls']
+]) s.check(`photos: ${label}`, app.includes(needle));
+s.check('the CSP allows images from the project origin',
+  read('scripts/gen-config.mjs').includes("img-src 'self' data: blob: ${url}"));
+
 s.group('no dead code left behind');
 for (const token of ['generateSchedule', 'saveGenerate', 'refCard', 'WORK_LISTS', 'tplPick']) {
   s.check(`${token} is gone`, !app.includes(token));

@@ -78,7 +78,11 @@ const CSP = [
   "default-src 'none'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  /* The Supabase origin is needed for inspection photos: they live in
+     private storage and are shown through signed URLs on that host. Without
+     it the upload succeeds and every thumbnail is blocked, which looks like
+     the photo was lost. */
+  `img-src 'self' data: blob: ${url}`,
   "font-src 'self'",
   "manifest-src 'self'",
   "worker-src 'self' blob:",

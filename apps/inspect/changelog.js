@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.9.7";
+window.APP_VERSION = "0.9.8";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.9.8", d: "2026-08-28", t: "Photos on an inspection",
+    items: [
+      "Taking or attaching a photo now works. The file picker was there but did nothing: the photo was never uploaded and submitting failed with 'Photo has not been answered'.",
+      "Photos are resized on the tablet before upload, so a camera shot goes through on shop-floor Wi-Fi instead of timing out.",
+      "Attached photos show as thumbnails and can be removed before signing. The count shows how many a field still needs.",
+      "An upload that fails says so and leaves nothing behind, rather than looking as though the photo went through."
+    ]
+  },
   {
     v: "0.9.7", d: "2026-08-28", t: "Test entry",
     items: ["A change you would notice."]
