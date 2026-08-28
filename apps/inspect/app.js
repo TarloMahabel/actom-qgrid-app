@@ -469,8 +469,22 @@ function renderCapture() {
                  title="Remove">×</button>`}
           </div>`).join("")}
         </div>` : ""}
-        <input type="file" accept="image/*" capture="environment" multiple data-photo="${f.id}">
-        <div class="hint">${shots.length} of ${need} taken.
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <label class="btn sm" for="cam-${f.id}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 8h3l2-2h6l2 2h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+            Take a photo</label>
+          <input id="cam-${f.id}" type="file" accept="image/*" capture="environment"
+                 data-photo="${f.id}" hidden>
+
+          <label class="btn sm" for="file-${f.id}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v13"/></svg>
+            Upload a file</label>
+          <input id="file-${f.id}" type="file" accept="image/*" multiple
+                 data-photo="${f.id}" hidden>
+        </div>
+        <div class="hint" style="margin-top:7px">${shots.length} of ${need} taken.
           Photos are resized before upload so they go through on a slow connection.</div>
       </div>`;
     }

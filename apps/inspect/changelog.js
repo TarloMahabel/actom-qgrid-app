@@ -22,10 +22,17 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.9.9";
+window.APP_VERSION = "0.9.10";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.9.10", d: "2026-08-28", t: "Take a photo or upload one",
+    items: [
+      "The photo field now offers both. On a tablet it previously forced the camera, so there was no way to attach a drawing, a certificate or a photo taken earlier.",
+      "Upload takes several files at once; the camera takes one at a time, as the device does."
+    ]
+  },
   {
     v: "0.9.9", d: "2026-08-28", t: "Starting an inspection opens the current form",
     items: [

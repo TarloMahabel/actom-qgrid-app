@@ -150,14 +150,26 @@ const { loadApp, suite } = require('./test/harness');
   const pw = ph.window, pdoc = pw.document;
   pdoc.querySelector('#nav button[data-go="work"]').click(); await ph.sleep(60);
   pdoc.querySelector('[data-open-capture]').click(); await ph.sleep(280);
-  const pin = pdoc.querySelector('[data-photo]');
-  s.check('the capture form offers a photo field', !!pin);
+  const cam = pdoc.querySelector('input[id^="cam-"]');
+  const fil = pdoc.querySelector('input[id^="file-"]');
+  /* Two controls, not one. A single input with capture="environment" forces
+     the camera on a tablet and gives no way to attach a photo that already
+     exists — a drawing, a supplier certificate, a shot taken earlier. */
+  s.check('taking a photo is offered', !!cam);
+  s.check('it opens the camera', cam && cam.getAttribute('capture') === 'environment');
+  s.check('uploading an existing file is offered', !!fil);
+  s.check('the upload control does not force the camera', fil && !fil.hasAttribute('capture'));
+  s.check('several files can be attached at once', fil && fil.hasAttribute('multiple'));
+  s.check('both are labelled buttons wired to their inputs',
+    Array.from(pdoc.querySelectorAll('label.btn'))
+      .filter(l => pdoc.getElementById(l.htmlFor)).length === 2);
+  const pin = fil;
 
   /* Re-query the input every time: the page re-renders after each upload, so
      a held reference is a detached node and its event never reaches the
      delegated listener on document. */
   const pick = files => {
-    const el = pdoc.querySelector('[data-photo]');
+    const el = pdoc.querySelector('input[id^="file-"]');
     Object.defineProperty(el, 'files', { value: files, configurable: true });
     el.dispatchEvent(new pw.Event('change', { bubbles: true }));
   };
