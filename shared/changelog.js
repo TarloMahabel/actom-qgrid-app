@@ -22,10 +22,18 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.10.0";
+window.APP_VERSION = "0.10.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.10.1", d: "2026-08-28", t: "Photo upload says when it fails",
+    items: [
+      "An upload that failed showed a message that disappeared after a few seconds, so it looked as though nothing had happened at all. The reason now stays on the photo field until the next attempt.",
+      "If the photo store has not been set up on a division, the field says so and says who fixes it, instead of failing silently.",
+      "Removing a photo from an inspection now actually removes it. The permission to do so was missing, so it disappeared from the screen and stayed on the record."
+    ]
+  },
   {
     v: "0.10.0", d: "2026-08-28", t: "Many faults on one panel",
     items: [

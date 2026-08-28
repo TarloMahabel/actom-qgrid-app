@@ -11,7 +11,7 @@
 --  Paste into the Supabase SQL editor of a NEW, EMPTY project and run.
 --  Order matters; do not run sections out of sequence.
 --
---  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-published-revision.sql, 007-no-empty-templates.sql, 008-fault-list.sql
+--  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-published-revision.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 009-photo-storage.sql
 --
 --  This script is for a fresh project. It is not idempotent: running it
 --  twice will fail on "type user_role already exists", which is the
@@ -1439,7 +1439,59 @@ grant execute on function submit_inspection to authenticated;
 
 
 -- ============================================================
---  SECTION 10 — Group reference data
+--  SECTION 10 — 009-photo-storage.sql
+-- ============================================================
+
+-- 1. Detaching a photo from an inspection.
+drop policy if exists att_detach on attachments;
+create policy att_detach on attachments for delete
+  using (
+    uploaded_by = auth.uid()
+    or has_role('quality_engineer', 'quality_manager', 'sysadmin')
+  );
+
+comment on table attachments is
+  'Links a stored object to an inspection. Deleting a row DETACHES the photo; '
+  'the object in storage is never removed, because it is evidence.';
+
+-- 2. The bucket, idempotently.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('inspection-photos', 'inspection-photos', false, 8388608,
+        array['image/jpeg','image/png','image/webp'])
+on conflict (id) do update
+  set public = false,
+      file_size_limit = 8388608,
+      allowed_mime_types = array['image/jpeg','image/png','image/webp'];
+
+-- 3. The policies, replaced so the set is current rather than accumulated.
+drop policy if exists "qgrid read own division photos" on storage.objects;
+drop policy if exists "qgrid upload photos" on storage.objects;
+drop policy if exists "qgrid no photo deletes" on storage.objects;
+drop policy if exists "q360 read own division photos" on storage.objects;
+drop policy if exists "q360 upload photos" on storage.objects;
+drop policy if exists "q360 no photo deletes" on storage.objects;
+
+create policy "grid read inspection photos" on storage.objects for select
+  using (bucket_id = 'inspection-photos' and auth.uid() is not null);
+
+create policy "grid upload inspection photos" on storage.objects for insert
+  with check (
+    bucket_id = 'inspection-photos'
+    and auth.uid() is not null
+    and (storage.foldername(name))[1] = 'inspections'
+    and array_length(storage.foldername(name), 1) >= 3   -- inspections/<id>/<field>/
+  );
+
+-- Photos are evidence. Nobody deletes the object, including an administrator.
+create policy "grid never delete inspection photos" on storage.objects for delete
+  using (false);
+
+create policy "grid never overwrite inspection photos" on storage.objects for update
+  using (false);
+
+
+-- ============================================================
+--  SECTION 11 — Group reference data
 -- ============================================================
 
 insert into manufacturing_stages (name, sort_order) values
@@ -1464,7 +1516,7 @@ on conflict (code) do nothing;
 
 
 -- ============================================================
---  SECTION 11 — Division seed — EDIT BEFORE RUNNING
+--  SECTION 12 — Division seed — EDIT BEFORE RUNNING
 -- ============================================================
 
 insert into division_profile (code, name, hold_points)
@@ -1494,7 +1546,7 @@ on conflict (family_id, stage_id) do nothing;
 
 
 -- ============================================================
---  SECTION 12 — Migration ledger stamp
+--  SECTION 13 — Migration ledger stamp
 --
 --  Running this script bypasses scripts/migrate.mjs, so the ledger it
 --  reads would be empty and the next run would try to apply everything
@@ -1518,12 +1570,13 @@ insert into public.qgrid_migrations (filename) values
   ('006-fix-silent-publish.sql'),
   ('007-no-empty-published-revision.sql'),
   ('007-no-empty-templates.sql'),
-  ('008-fault-list.sql')
+  ('008-fault-list.sql'),
+  ('009-photo-storage.sql')
 on conflict (filename) do nothing;
 
 
 -- ============================================================
---  SECTION 13 — Verification
+--  SECTION 14 — Verification
 --  Run these and check the results before going any further.
 -- ============================================================
 

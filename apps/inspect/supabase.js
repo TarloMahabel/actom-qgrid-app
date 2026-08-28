@@ -122,6 +122,11 @@
     if ((error && error.code) === '23503')
       return 'Still in use. Something references this entry, so it cannot be deleted. ' +
              'Retire it instead: that hides it from new forms and keeps historic records readable.';
+    if (m.indexOf('Bucket not found') > -1)
+      return 'The photo store has not been set up for this division. Group IT needs to run ' +
+             'the storage migration.';
+    if (m.indexOf('exceeded the maximum allowed size') > -1 || m.indexOf('Payload too large') > -1)
+      return 'That image is too large even after resizing. Try a single photo rather than a scan.';
     if ((error && error.code) === '23502')
       return 'A required field is empty.';
     return m || 'Something went wrong. Try again, and tell IT if it keeps happening.';

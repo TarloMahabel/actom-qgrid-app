@@ -219,7 +219,9 @@
         upload: function (path, blob, opts) {
           CALLS.push(["storage.upload", bucket, path, blob && blob.size]);
           if (DATA.__storageFails) {
-            return Promise.resolve({ data: null, error: { message: "storage full" } });
+            return Promise.resolve({ data: null,
+              error: { message: DATA.__storageFails === "bucket"
+                ? "Bucket not found" : "storage full" } });
           }
           DATA.__uploads = DATA.__uploads || [];
           DATA.__uploads.push({ bucket, path });

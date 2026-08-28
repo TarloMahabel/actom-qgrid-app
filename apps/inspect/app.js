@@ -61,7 +61,7 @@ const S = {
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
   designer: { open: false, tplId: null, revId: null, def: null, sel: null,
               preview: false, dirty: false, busy: null, result: null },
-  capture: { id: null, results: {}, photos: {}, faults: {} }
+  capture: { id: null, results: {}, photos: {}, faults: {}, photoError: null }
 };
 
 /* CHANGELOG lives in changelog.js so a release note is a one-line edit
@@ -491,6 +491,14 @@ function renderCapture() {
         </div>
         <div class="hint" style="margin-top:7px">${shots.length} of ${need} taken.
           Photos are resized before upload so they go through on a slow connection.</div>
+        ${S.capture.photoError && S.capture.photoError.field === f.id
+          ? `<div class="note q" style="margin-top:9px;background:var(--bad-bg);
+                border-color:#f2c8c3;color:#8a2f24">
+               <b>That photo did not upload.</b> ${esc(S.capture.photoError.message)}
+               ${/[Bb]ucket/.test(S.capture.photoError.message)
+                 ? " The photo store is not set up on this division — send this to Group IT."
+                 : ""}</div>`
+          : ""}
       </div>`;
     }
     if (f.type === "sign") return `<div class="drop" style="border-color:var(--brand);color:var(--brand-dk)">Signing happens when you submit below</div>`;
@@ -1141,7 +1149,7 @@ async function loadAudit() {
    5. Actions (writes)
    ------------------------------------------------------------ */
 async function openCapture(id) {
-  S.capture = { id, results: {}, photos: {}, faults: {} };
+  S.capture = { id, results: {}, photos: {}, faults: {}, photoError: null };
   let insp = byId(S.inspections, id);
   busy(true);
   try {
@@ -1264,7 +1272,7 @@ async function submitInspection() {
     if (error) throw error;
     toast(`${data.ref} submitted — ${data.result}${data.failed_checks ? `, ${data.failed_checks} failed check(s)` : ""}${data.works_order_held ? ", works order held" : ""}`,
       data.result === "pass" ? "ok" : "");
-    S.capture = { id: null, results: {}, photos: {}, faults: {} };
+    S.capture = { id: null, results: {}, photos: {}, faults: {}, photoError: null };
     S.tab = 0;
     await reload();
   } catch (e) { toast(explain(e), "bad"); }
@@ -1757,6 +1765,7 @@ async function addPhotos(fieldId, files) {
   if (!insp) return;
   const list = (S.capture.photos[fieldId] ||= []);
 
+  S.capture.photoError = null;
   for (const file of Array.from(files)) {
     const placeholder = { uploading: true, url: URL.createObjectURL(file) };
     list.push(placeholder);
@@ -1776,12 +1785,17 @@ async function addPhotos(fieldId, files) {
       }).select().single();
       if (rowErr) throw rowErr;
 
+      if (!row || !row.id) throw new Error("The photo uploaded but was not recorded against this inspection.");
       Object.assign(placeholder, { uploading: false, id: row.id, path });
     } catch (e) {
       /* Drop the placeholder rather than leaving a permanent "uploading…"
-         tile that looks like the photo is on its way when it is not. */
+         tile that looks like the photo is on its way when it is not, and keep
+         the reason ON the field. A seven-second toast is indistinguishable
+         from nothing happening, which is exactly how this was reported. */
       const i = list.indexOf(placeholder);
       if (i > -1) list.splice(i, 1);
+      S.capture.photoError = { field: fieldId, message: explain(e) };
+      console.error("photo upload failed", e);
       toast(explain(e), "bad");
     }
     render();

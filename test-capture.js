@@ -269,6 +269,27 @@ const { loadApp, suite } = require('./test/harness');
   s.check('dropping below the minimum clears the answer again',
     pc.some(c => c[0] === 'delete' && c[1] === 'inspection_results'));
 
+  s.group('an upload that fails says so, on the field');
+  /* Reported as "I can browse but when I upload nothing happens". The failure
+     went to a toast that lasts seven seconds — indistinguishable from nothing
+     happening, which is precisely how it was described. */
+  const noBucket = await loadApp('inspect', {
+    afterMock: win => { win.GRID_TEST_DATA.__storageFails = "bucket"; }
+  });
+  const nb = noBucket.window.document;
+  nb.querySelector('#nav button[data-go="work"]').click(); await noBucket.sleep(60);
+  nb.querySelector('[data-open-capture]').click(); await noBucket.sleep(400);
+  const nbf = nb.querySelector('input[id^="file-"]');
+  Object.defineProperty(nbf, 'files', { value: [{ name: 'x.jpg', size: 5e6 }], configurable: true });
+  nbf.dispatchEvent(new noBucket.window.Event('change', { bubbles: true }));
+  await noBucket.sleep(800);
+  const nbt = noBucket.$('page').textContent;
+  s.check('the failure is shown on the field, not only in a toast',
+    nbt.includes('did not upload'));
+  s.check('a missing bucket is translated into something actionable',
+    nbt.includes('photo store has not been set up'));
+  s.check('and says who fixes it', nbt.includes('Group IT'));
+
   s.group('an upload that fails does not look like success');
   const bad = await loadApp('inspect', {
     afterMock: win => { win.GRID_TEST_DATA.__storageFails = true; }
