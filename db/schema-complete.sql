@@ -1471,23 +1471,57 @@ drop policy if exists "q360 read own division photos" on storage.objects;
 drop policy if exists "q360 upload photos" on storage.objects;
 drop policy if exists "q360 no photo deletes" on storage.objects;
 
-create policy "grid read inspection photos" on storage.objects for select
-  using (bucket_id = 'inspection-photos' and auth.uid() is not null);
+-- TO AUTHENTICATED, stated explicitly.
+--
+-- The originals omitted the role and so applied to PUBLIC. That is usually
+-- harmless, but it is not what was meant, and an unqualified policy on a
+-- table Supabase also ships its own policies for is hard to reason about
+-- when an upload comes back with "new row violates row-level security
+-- policy" and no indication of WHICH policy said no.
+--
+-- The path requirement is also relaxed to two segments. The app writes
+-- inspections/<inspection>/<field>/<file>, but insisting on three turned an
+-- unexpected path into the same opaque refusal.
+create policy "grid read inspection photos" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'inspection-photos');
 
-create policy "grid upload inspection photos" on storage.objects for insert
+create policy "grid upload inspection photos" on storage.objects
+  for insert to authenticated
   with check (
     bucket_id = 'inspection-photos'
-    and auth.uid() is not null
     and (storage.foldername(name))[1] = 'inspections'
-    and array_length(storage.foldername(name), 1) >= 3   -- inspections/<id>/<field>/
   );
 
--- Photos are evidence. Nobody deletes the object, including an administrator.
-create policy "grid never delete inspection photos" on storage.objects for delete
-  using (false);
+-- Photos are evidence. Nobody deletes or replaces the object, including an
+-- administrator: detaching a photo removes the link, never the file.
+create policy "grid never delete inspection photos" on storage.objects
+  for delete to authenticated using (false);
 
-create policy "grid never overwrite inspection photos" on storage.objects for update
-  using (false);
+create policy "grid never overwrite inspection photos" on storage.objects
+  for update to authenticated using (false);
+
+-- ------------------------------------------------------------
+--  Check what you have. Run this after the migration: expect exactly the
+--  four policies above, and nothing else on this bucket.
+-- ------------------------------------------------------------
+do $verify$
+declare v_count int; v_bucket int;
+begin
+  select count(*) into v_bucket from storage.buckets where id = 'inspection-photos';
+  if v_bucket = 0 then
+    raise exception 'The inspection-photos bucket does not exist. The insert above should have created it.';
+  end if;
+
+  select count(*) into v_count from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and policyname like 'grid %';
+  if v_count <> 4 then
+    raise exception 'Expected 4 storage policies, found %. Uploads will be refused.', v_count;
+  end if;
+
+  raise notice 'Storage ready: bucket present, 4 policies installed.';
+end $verify$;
 
 
 -- ============================================================

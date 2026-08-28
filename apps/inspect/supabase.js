@@ -122,6 +122,9 @@
     if ((error && error.code) === '23503')
       return 'Still in use. Something references this entry, so it cannot be deleted. ' +
              'Retire it instead: that hides it from new forms and keeps historic records readable.';
+    if (m.indexOf('row-level security') > -1 && m.indexOf('new row violates') > -1)
+      return 'The photo store is refusing uploads for this division. Group IT needs to run ' +
+             'the storage migration (009) — nothing you can fix from here.';
     if (m.indexOf('Bucket not found') > -1)
       return 'The photo store has not been set up for this division. Group IT needs to run ' +
              'the storage migration.';

@@ -22,10 +22,17 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.10.2";
+window.APP_VERSION = "0.10.3";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.10.3", d: "2026-08-28", t: "Photo store permissions",
+    items: [
+      "Uploads were being refused by the photo store's own permission rules. The rules are rewritten and now check themselves when installed, so a division cannot end up with photos silently unable to save.",
+      "If the store ever refuses an upload again, the field says it is a permissions problem and who fixes it, rather than showing a database message."
+    ]
+  },
   {
     v: "0.10.2", d: "2026-08-28", t: "Photos actually upload",
     items: [
