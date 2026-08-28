@@ -2517,10 +2517,20 @@ $("btnRefresh").addEventListener("click", reload);
    DOM, because by the time the dialog closes the form may have repainted. */
 function onPicked(e) {
   const field = S.capture.pickerField;
-  const files = e.target.files;
-  e.target.value = "";                   // allow picking the same file again
+
+  /* COPY THE FILES OUT FIRST. input.files is a LIVE FileList: resetting
+     input.value empties it, and a variable holding it is holding that same
+     live object, not a snapshot. Reading .length afterwards therefore gave
+     zero and the upload was skipped — silently, every time, with no error
+     anywhere. That was the whole bug behind "I can browse and select but
+     nothing happens".
+
+     The value has to be reset, or picking the same file twice in a row fires
+     no change event at all. So: snapshot, then reset. */
+  const files = Array.from(e.target.files || []);
+  e.target.value = "";
   S.capture.pickerField = null;
-  if (field && files && files.length) addPhotos(field, files);
+  if (field && files.length) addPhotos(field, files);
 }
 $("photoPicker").addEventListener("change", onPicked);
 $("cameraPicker").addEventListener("change", onPicked);

@@ -182,6 +182,10 @@ s.group('the photo path is complete');
    asserted because the missing one was invisible: the control looked finished. */
 for (const [label, needle] of [
   ['a change handler on a persistent picker', 'photoPicker").addEventListener'],
+  /* input.files is a LIVE FileList: resetting input.value empties it, and a
+     variable holding it holds that same object. Reading .length after the
+     reset gave zero and the upload was skipped, silently, for four versions. */
+  ['the file list copied before the input is reset', 'Array.from(e.target.files'],
   ['pickers outside the re-rendered page', 'S.capture.pickerField'],
   ['resizing before upload', 'function resizeImage'],
   ['upload to storage', 'inspection-photos'],

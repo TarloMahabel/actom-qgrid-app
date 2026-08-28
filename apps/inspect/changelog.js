@@ -22,10 +22,17 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.10.3";
+window.APP_VERSION = "0.10.4";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.10.4", d: "2026-08-28", t: "Photos upload",
+    items: [
+      "Choosing a photo did nothing. The app cleared the file box so the same photo could be picked twice in a row, and clearing it also discarded the photo that had just been chosen — before it was read. It now keeps the photo first.",
+      "This was the actual cause of photos not uploading. The earlier attempts at it were treating symptoms."
+    ]
+  },
   {
     v: "0.10.3", d: "2026-08-28", t: "Photo store permissions",
     items: [

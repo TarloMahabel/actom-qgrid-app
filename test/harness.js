@@ -85,6 +85,36 @@ async function loadApp(app, opts) {
      object URLs — so the UPLOAD PATH is exercised even though the pixels are
      not. Without this the photo flow would be untestable, which is how it
      shipped broken the first time. */
+  /* A FileList that behaves like the real one: LIVE, and emptied when the
+     input's value is reset. The suites used to attach a plain array, which
+     survives a reset — so the app could read files AFTER clearing value, get
+     nothing, and skip the upload, while every test passed. That exact bug
+     shipped and took four attempts to find. A test double gentler than the
+     platform hides the faults worth catching.
+
+     Use it as: setFiles(inputEl, [{name, size}]). */
+  w.__setFiles = (el, arr) => {
+    /* ONE object, mutated in place — that is what makes a FileList "live".
+       Returning a fresh copy per read (the first attempt at this) let a
+       snapshot survive the reset, so the suite still passed against the bug.
+       The real platform hands back the same object and empties it. */
+    const fl = { item: i => fl[i] };
+    let n = arr.length;
+    arr.forEach((f, i) => { fl[i] = f; });
+    Object.defineProperty(fl, 'length', { get: () => n });
+
+    Object.defineProperty(el, 'files', { configurable: true, get: () => fl });
+    let val = arr.length ? 'C:\\fakepath\\' + arr[0].name : '';
+    Object.defineProperty(el, 'value', {
+      configurable: true,
+      get: () => val,
+      set: v => {
+        val = v;
+        if (v === '') { for (let i = 0; i < n; i++) delete fl[i]; n = 0; }
+      }
+    });
+  };
+
   w.URL.createObjectURL = () => 'blob:test/photo';
   w.URL.revokeObjectURL = () => {};
   class FakeImage {

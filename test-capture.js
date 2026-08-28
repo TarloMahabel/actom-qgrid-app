@@ -244,7 +244,7 @@ const { loadApp, suite } = require('./test/harness');
   const pick = files => {
     pdoc.querySelector('[data-pick]').click();          // sets the target field
     const el = pdoc.getElementById('photoPicker');
-    Object.defineProperty(el, 'files', { value: files, configurable: true });
+    pw.__setFiles(el, files);                           // live FileList, as the browser gives
     el.dispatchEvent(new pw.Event('change', { bubbles: true }));
   };
   pick([{ name: 'a.jpg', size: 5e6 }]);
@@ -288,7 +288,7 @@ const { loadApp, suite } = require('./test/harness');
   md.querySelector('.tabs button[data-tab="1"]').click(); await mid.sleep(120);
   const mp = md.getElementById('photoPicker');
   s.check('the picker is still attached after a repaint', mp && mp.isConnected);
-  Object.defineProperty(mp, 'files', { value: [{ name: 'x.jpg', size: 5e6 }], configurable: true });
+  mid.window.__setFiles(mp, [{ name: 'x.jpg', size: 5e6 }]);
   mp.dispatchEvent(new mid.window.Event('change', { bubbles: true }));
   await mid.sleep(700);
   s.check('the photo still uploads',
@@ -306,7 +306,7 @@ const { loadApp, suite } = require('./test/harness');
   nb.querySelector('[data-open-capture]').click(); await noBucket.sleep(400);
   nb.querySelector('[data-pick]').click();
   const nbf = nb.getElementById('photoPicker');
-  Object.defineProperty(nbf, 'files', { value: [{ name: 'x.jpg', size: 5e6 }], configurable: true });
+  noBucket.window.__setFiles(nbf, [{ name: 'x.jpg', size: 5e6 }]);
   nbf.dispatchEvent(new noBucket.window.Event('change', { bubbles: true }));
   await noBucket.sleep(800);
   const nbt = noBucket.$('page').textContent;
@@ -325,7 +325,7 @@ const { loadApp, suite } = require('./test/harness');
   bdoc.querySelector('[data-open-capture]').click(); await bad.sleep(280);
   bdoc.querySelector('[data-pick]').click();
   const bin = bdoc.getElementById('photoPicker');
-  Object.defineProperty(bin, 'files', { value: [{ name: 'c.jpg', size: 5e6 }], configurable: true });
+  bad.window.__setFiles(bin, [{ name: 'c.jpg', size: 5e6 }]);
   bin.dispatchEvent(new bad.window.Event('change', { bubbles: true }));
   await bad.sleep(600);
   s.check('no thumbnail is left behind', !/uploading/.test(bad.$('page').textContent));
