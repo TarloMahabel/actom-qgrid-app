@@ -90,11 +90,37 @@
   }
   const client = {
     from: q,
-    rpc: (fn, args) => { CALLS.push(["rpc", fn, args]);
-      const map = { submit_inspection: { ref:"INS-26-1191", result:"fail", failed_checks:1, works_order_held:false },
-                    publish_template_revision: { rev:4, status:"published" },
-                    generate_inspections: { works_order:"WO-44812", created:3 } };
-      return Promise.resolve({ data: map[fn], error: null }); },
+    /* The RPCs MUTATE the fixture, as the real ones mutate the database. A
+       stub that only returned a canned object let the app reload and still
+       see the draft sitting there, so a test could not tell a successful
+       publish from a no-op — the assertion that the publish button
+       disappears afterwards failed against perfectly good code. */
+    rpc: function (fn, args) {
+      CALLS.push(["rpc", fn, args]);
+      if (fn === "publish_template_revision") {
+        const rev = DATA.template_revisions.find(r => r.id === args.p_rev);
+        if (!rev) return Promise.resolve({ data: null, error: { message: "PUBLISH_MISSING" } });
+        DATA.template_revisions.forEach(r => {
+          if (r.template_id === rev.template_id && r.status === "published") r.status = "superseded";
+        });
+        rev.status = "published"; rev.approved_by = "u1";
+        return Promise.resolve({ data: { template_id: rev.template_id, rev: rev.rev,
+          status: "published", self_approved: rev.created_by === "u1" }, error: null });
+      }
+      if (fn === "submit_inspection") {
+        const insp = DATA.inspections.find(i => i.id === args.p_inspection);
+        if (insp) { insp.status = "completed"; insp.result = "fail"; insp.signed_by = "u1";
+                    insp.signed_at = new Date().toISOString(); }
+        return Promise.resolve({ data: { ref: insp ? insp.ref : "INS-26-1191",
+          result: "fail", failed_checks: 1, works_order_held: false }, error: null });
+      }
+      if (fn === "generate_inspections") {
+        const wo = DATA.works_orders.find(w => w.id === args.p_works_order);
+        return Promise.resolve({ data: { works_order: wo ? wo.code : "WO-44812", created: 3 },
+          error: null });
+      }
+      return Promise.resolve({ data: null, error: { message: "unknown rpc " + fn } });
+    },
     /* Faithful to the real client, deliberately.
 
      The previous stub accepted .on() at any time and returned a fresh

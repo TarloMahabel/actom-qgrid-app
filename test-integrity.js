@@ -142,8 +142,12 @@ for (const m of app.matchAll(/async function (\w+)\s*\([^)]*\)\s*\{/g)) {
 s.check('every async function touching Supabase handles failure', noCatch.length === 0,
   noCatch.join(', '));
 
+/* Match busy(false) ANYWHERE inside the finally block, not only as its first
+   statement. Two functions now reset designer state in the same finally and
+   the stricter pattern reported a leak that did not exist — a check that
+   fails on correct code gets ignored, which is worse than not having it. */
 const busyStarts = [...app.matchAll(/busy\(true\)/g)].length;
-const finallys = [...app.matchAll(/finally\s*\{\s*busy\(false\)/g)].length;
+const finallys = [...app.matchAll(/finally\s*\{[^}]*busy\(false\)/g)].length;
 s.check('every busy(true) is released in a finally', busyStarts <= finallys,
   `${busyStarts} starts, ${finallys} releases`);
 

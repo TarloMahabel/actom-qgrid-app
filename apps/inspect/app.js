@@ -59,7 +59,8 @@ const S = {
   projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [], competencies: [],
   dash: {},
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
-  designer: { open: false, tplId: null, revId: null, def: null, sel: null, preview: false, dirty: false },
+  designer: { open: false, tplId: null, revId: null, def: null, sel: null,
+              preview: false, dirty: false, busy: null, result: null },
   capture: { id: null, results: {} }
 };
 
@@ -655,17 +656,43 @@ function designerView(m) {
         ? { label: `Publish rev ${draft.rev}`, why: "This division requires a second approver, so the person who built a template cannot publish it. Turn it off in Administration → Options if that is not how you work." }
         : null;
 
+  /* What the next revision will be, stated rather than implied. Editing a
+     published template starts a new one, and there was nothing on screen
+     saying so — the Save draft button just said "Save draft". */
+  const maxRev = Math.max(0, ...revs.map(r => r.rev));
+  const nextRev = draft ? draft.rev : maxRev + 1;
+
   const act = `
     <button class="btn" data-act="back-to-library">← Library</button>
     <button class="btn" data-act="toggle-preview">${S.designer.preview ? "Back to designer" : "Preview as inspector"}</button>
-    <button class="btn" data-act="save-draft"${S.designer.dirty ? "" : " disabled"}>Save draft</button>
+    <button class="btn" data-act="save-draft"
+      ${S.designer.dirty && !S.designer.busy ? "" : "disabled"}>${
+        S.designer.busy === "save" ? "Saving…"
+          : draft ? `Save draft rev ${draft.rev}`
+          : `Save as draft rev ${nextRev}`}</button>
     ${publishBlock
       ? `<button class="btn" disabled title="${esc(publishBlock.why)}">${publishBlock.label}</button>`
-      : `<button class="btn pri" data-act="publish">Publish rev ${draft.rev}</button>`}`;
+      : `<button class="btn pri" data-act="publish" ${S.designer.busy ? "disabled" : ""}>${
+          S.designer.busy === "publish" ? "Publishing…" : `Publish rev ${draft.rev}`}</button>`}`;
+
+  const r = S.designer.result;
+  const banner = !r ? "" : r.ok
+    ? `<div class="note" style="margin-bottom:13px;background:var(--ok-bg);border-color:#bfe4d1;color:#12613f">
+         <b>${r.started ? `Revision ${r.rev} started as a draft.`
+             : r.saved ? `Draft rev ${r.rev} saved.`
+             : `Revision ${r.rev} published${r.at ? " at " + esc(r.at) : ""}.`}</b>
+         ${r.saved ? " Not published yet — inspections still use the published revision."
+           : ` It is live now: new inspections use it. Editing this template again starts revision ${r.rev + 1}.`}
+         ${r.selfApproved ? " Recorded as self-approved." : ""}
+       </div>`
+    : `<div class="note q" style="margin-bottom:13px;background:var(--bad-bg);border-color:#f2c8c3;color:#8a2f24">
+         <b>Not published.</b> ${esc(r.message)}</div>`;
 
   return head(m, `${esc(tpl.code)} — ${esc(tpl.name)}`, act)
+    + banner
     + `<div class="filters">
         <span class="cnt">rev ${rev?.rev ?? "—"} · ${pill(rev?.status || "none")} ·
+          ${pub ? `published rev ${pub.rev} is live` : "nothing published yet"} ·
           ${nFields} fields · ${esc(stageName(tpl.stage_id))} ·
           ${esc(byId(S.families, tpl.family_id)?.name || "all families")}
           ${S.designer.dirty ? ' · <b style="color:var(--warn)">unsaved changes</b>' : ""}</span>
@@ -1106,6 +1133,8 @@ async function submitInspection() {
 
 async function saveDraft() {
   const d = S.designer;
+  if (d.busy) return;
+  d.busy = "save"; d.result = null; render();
   busy(true);
   try {
     /* Find the draft by TEMPLATE, not by the revId held in designer state.
@@ -1137,25 +1166,45 @@ async function saveDraft() {
         definition: d.def, created_by: S.profile.id
       });
       if (error) throw error;
-      toast(`Started revision ${nextRev} as a draft.`, "ok");
+      d.result = { ok: true, saved: true, rev: nextRev, started: true };
     }
+    if (!d.result) d.result = { ok: true, saved: true, rev: draft.rev };
     d.dirty = false;
     await reload();
-  } catch (e) { toast(explain(e), "bad"); }
-  finally { busy(false); }
+  } catch (e) {
+    d.result = { ok: false, message: explain(e) };
+  } finally {
+    d.busy = null; busy(false); render();
+  }
 }
 
 async function publishDraft() {
-  const draft = S.revisions.find(r => r.template_id === S.designer.tplId && ["draft", "in_review"].includes(r.status));
+  const d = S.designer;
+  /* Guard against a second click. The button used to stay live for the whole
+     round trip, so an impatient double-click sent two publish calls and put
+     two approvals in the audit trail for one revision. */
+  if (d.busy) return;
+  const draft = S.revisions.find(r =>
+    r.template_id === d.tplId && ["draft", "in_review"].includes(r.status));
   if (!draft) return;
+
+  d.busy = "publish"; d.result = null; render();
   busy(true);
   try {
     const { data, error } = await supabase.rpc("publish_template_revision", { p_rev: draft.id });
     if (error) throw error;
-    toast(`Published rev ${data.rev}.${data.self_approved ? " Recorded as self-approved." : ""}`, "ok");
+    d.result = { ok: true, rev: data.rev, selfApproved: !!data.self_approved,
+                 at: new Date().toLocaleString("en-ZA") };
     await reload();
-  } catch (e) { toast(explain(e), "bad"); }
-  finally { busy(false); }
+  } catch (e) {
+    /* Inline and persistent, not a toast. A toast that disappears after seven
+       seconds is indistinguishable from nothing having happened, which is
+       exactly how a refused publish read: the button was still there, the
+       template was still a draft, and there was no explanation on screen. */
+    d.result = { ok: false, message: explain(e) };
+  } finally {
+    d.busy = null; busy(false); render();
+  }
 }
 
 function editCell(familyId, stageId) {
@@ -1293,7 +1342,7 @@ async function saveTemplate() {
     if (e2) throw e2;
     closeModal();
     S.designer = { open: true, tplId: data.id, revId: null, def: null,
-                   sel: null, preview: false, dirty: false };
+                   sel: null, preview: false, dirty: false, busy: null, result: null };
     S.view = "dsn"; buildNav(); await reload();
   } catch (e) { toast(explain(e), "bad"); }
   finally { busy(false); }
@@ -1820,7 +1869,7 @@ document.addEventListener("click", async e => {
       if (d.add === "photo") item.minp = 1;
       target.items.push(item); S.designer.sel = nid;
     }
-    S.designer.dirty = true; return render();
+    S.designer.dirty = true; S.designer.result = null; return render();
   }
   if (d.move) {
     const [id, dir] = d.move.split(":"); const f = findItem(id);
@@ -1840,17 +1889,17 @@ document.addEventListener("click", async e => {
     case "refresh": return reload();
     case "open-designer":
       S.designer = { open: true, tplId: t.dataset.tpl, revId: null, def: null,
-                     sel: null, preview: false, dirty: false };
+                     sel: null, preview: false, dirty: false, busy: null, result: null };
       return render();
     case "open-preview":
       S.designer = { open: true, tplId: t.dataset.tpl, revId: null, def: null,
-                     sel: null, preview: true, dirty: false };
+                     sel: null, preview: true, dirty: false, busy: null, result: null };
       return render();
     case "back-to-library":
       if (S.designer.dirty &&
           !confirm("You have unsaved changes to this template. Leave without saving?")) return;
       S.designer = { open: false, tplId: null, revId: null, def: null,
-                     sel: null, preview: false, dirty: false };
+                     sel: null, preview: false, dirty: false, busy: null, result: null };
       return render();
     case "toggle-preview": S.designer.preview = !S.designer.preview; return render();
     case "save-draft": return saveDraft();

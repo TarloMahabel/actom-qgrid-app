@@ -62,14 +62,39 @@ const { loadApp, suite } = require('./test/harness');
   const active = d.querySelector('[data-act="publish"]');
   s.check('the author can publish while a second approver is not required', !!active);
   if (active) {
-    active.click(); await sleep(250);
-    s.check('publish goes through the RPC', CALLS.some(c => c[0] === 'rpc' && c[1] === 'publish_template_revision'));
+    /* Double-click. The button used to stay live for the whole round trip, so
+       an impatient second click sent a second publish and put two approvals in
+       the audit trail for one revision. */
+    active.click(); active.click(); active.click();
+    await sleep(400);
+    const publishCalls = CALLS.filter(c => c[0] === 'rpc' && c[1] === 'publish_template_revision');
+    s.check('publish goes through the RPC', publishCalls.length > 0);
+    s.check('three rapid clicks send exactly one publish', publishCalls.length === 1,
+      publishCalls.length + ' calls');
+
+    const after = $('page').textContent;
+    s.check('the result is stated on the page, not only in a toast',
+      after.includes('published'), after.slice(0, 90));
+    s.check('it says the published revision is live', after.includes('live now'));
+    s.check('it says what the next revision will be', /starts revision \d+/.test(after));
+    s.check('the publish button is no longer offered',
+      !d.querySelector('[data-act="publish"]'));
   } else {
     s.check('a disabled publish button explains why', !!anyPublish[0].title,
       anyPublish[0].title || 'no title');
     s.check('the reason is also stated on the page',
       $('page').innerHTML.includes('Cannot publish yet'));
   }
+
+  s.group('the revision a button will write is named on the button');
+  const back = d.querySelector('[data-act="back-to-library"]');
+  if (back) { back.click(); await sleep(120); }
+  d.querySelector('[data-act="open-designer"]').click(); await sleep(140);
+  const saveBtn = d.querySelector('[data-act="save-draft"]');
+  s.check('the save button names the revision it will write',
+    saveBtn && /rev \d+/.test(saveBtn.textContent), saveBtn ? saveBtn.textContent : 'missing');
+  s.check('the status line says what is live',
+    /published rev \d+ is live|nothing published yet/.test($('page').textContent));
 
   s.group('leaving the designer');
   d.querySelector('[data-act="back-to-library"]').click(); await sleep(120);
