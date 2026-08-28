@@ -26,6 +26,7 @@ run_suite test-security
 run_suite test-hook
 run_suite test-deploy
 run_suite test-integrity
+run_suite test-version
 
 echo
 echo "=== Boot path (real vendored client) ==="

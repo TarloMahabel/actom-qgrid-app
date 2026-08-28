@@ -1822,7 +1822,15 @@ function render() {
   $("whoEmail").textContent = S.profile.email;
   $("whoInitials").textContent = S.profile.full_name.split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
   $("sideDivision").textContent = S.division?.name || DIVISION.name;
-  $("buildTag").textContent = `${BUILD.context} · ${BUILD.commit}`;
+  $("buildTag").textContent =
+    `v${window.APP_VERSION || "?"} · ${BUILD.context} · ${BUILD.commit}`;
+  /* A dot on "What's new" until this version's notes have been opened. The
+     changelog is only useful if people know there is something in it. */
+  const seen = (() => { try { return localStorage.getItem("grid.seenVersion"); } catch { return null; } })();
+  const wn = $("whatsNew");
+  if (wn) wn.innerHTML = "What's new" +
+    (seen === window.APP_VERSION ? "" :
+     ` <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--bad);vertical-align:middle;margin-left:4px"></span>`);
   const od = S.dash.overdue || 0;
   $("chipOverdue").classList.toggle("hidden", !od);
   $("chipOverdue").textContent = `${od} overdue`;
@@ -1997,9 +2005,25 @@ $("btnRecheck").addEventListener("click", () => start());
 $("btnSignOut").addEventListener("click", signOutNow);
 $("btnSignOut2").addEventListener("click", signOutNow);
 $("btnRefresh").addEventListener("click", reload);
-$("whatsNew").addEventListener("click", () => openModal("What's new",
-  (window.CHANGELOG||[]).map(c => `<div class="fld"><label>${c.d}</label><div class="val">${esc(c.t)}</div></div>`).join(""),
-  [["Close", "close", "pri"]], {}));
+$("whatsNew").addEventListener("click", () => {
+  const log = window.CHANGELOG || [];
+  openModal(`What's new — v${window.APP_VERSION || "?"}`,
+    log.map((c, i) => `
+      <div style="padding:${i ? "16px" : "0"} 0 4px;${i ? "border-top:1px solid var(--line)" : ""}">
+        <div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap">
+          <span class="id">v${esc(c.v)}</span>
+          <b style="font-size:13.5px">${esc(c.t)}</b>
+          <span class="sub" style="margin:0">${esc(c.d)}</span>
+          ${i === 0 ? pill("Current") : ""}
+        </div>
+        <ul style="margin:8px 0 0;padding-left:19px;font-size:12.8px;color:var(--ink-2);line-height:1.65">
+          ${(c.items || []).map(x => `<li>${esc(x)}</li>`).join("")}
+        </ul>
+      </div>`).join(""),
+    [["Close", "close", "pri"]], {});
+  try { localStorage.setItem("grid.seenVersion", window.APP_VERSION); } catch {}
+  const wn = $("whatsNew"); if (wn) wn.textContent = "What's new";
+});
 
 /* ------------------------------------------------------------
    Boot
@@ -2116,3 +2140,4 @@ console.info("Grid app.js loaded — build",
 start().catch(bootFailed);
 
 })();
+// x

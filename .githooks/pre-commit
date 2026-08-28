@@ -112,7 +112,43 @@ if printf '%s\n' $STAGED | grep -qE '^apps/[^/]+/config\.js$'; then
   FAIL=1
 fi
 
-# -------------------------------------------------------- 4. CDN imports
+# ------------------------------------------------ 4. version and changelog
+# A change to the app, the shared assets or the schema has to arrive with a
+# release note and a version bump. This is not bookkeeping: the change history
+# of a quality system is something a certification body asks to see, and
+# reconstructing it from a git log months later is not the same thing.
+WATCHED=$(printf '%s\n' $STAGED | grep -E '^(apps/|shared/|db/)' \
+          | grep -v '/config\.js$' | grep -v '/_headers$' \
+          | grep -v 'schema-complete\.sql$' | grep -v 'changelog\.js$' || true)
+if [ -n "$WATCHED" ]; then
+  if ! printf '%s\n' $STAGED | grep -q 'changelog\.js$'; then
+    say "BLOCKED  these changed without a release note:"
+    printf '%s\n' "$WATCHED" | head -6 | sed 's/^/           /'
+    say "         Bump APP_VERSION and add an entry in shared/changelog.js,"
+    say "         then run ./shared/sync.sh."
+    FAIL=1
+  else
+    # The note must belong to the new version, not repeat the last one.
+    NEWV=$(grep -oE 'APP_VERSION = "[0-9]+\.[0-9]+\.[0-9]+"' shared/changelog.js | head -1 |
+           grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+    TOPV=$(grep -oE 'v: "[0-9]+\.[0-9]+\.[0-9]+"' shared/changelog.js | head -1 |
+           grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+    if [ "$NEWV" != "$TOPV" ]; then
+      say "BLOCKED  APP_VERSION is $NEWV but the newest changelog entry is $TOPV."
+      FAIL=1
+    fi
+    OLDV=$(git show HEAD:shared/changelog.js 2>/dev/null |
+           grep -oE 'APP_VERSION = "[0-9]+\.[0-9]+\.[0-9]+"' | head -1 |
+           grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
+    if [ -n "$OLDV" ] && [ "$OLDV" = "$NEWV" ]; then
+      say "BLOCKED  APP_VERSION is still $NEWV. Bump it — patch for a fix,"
+      say "         minor for anything a user would notice."
+      FAIL=1
+    fi
+  fi
+fi
+
+# -------------------------------------------------------- 5. CDN imports
 for f in $STAGED; do
   case "$f" in apps/*|shared/*) ;; *) continue ;; esac
   case "$f" in */vendor/*) continue ;; esac
