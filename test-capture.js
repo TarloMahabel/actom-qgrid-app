@@ -88,6 +88,72 @@ const { loadApp, suite } = require('./test/harness');
   s.check('saving inserts the works order', insW && insW[2].code === 'WO-99999',
     insW ? JSON.stringify(insW[2]) : 'no call');
 
+  s.group('a panel can carry many faults');
+  /* A checksheet answers fixed questions, one answer each. A fault list is
+     the other shape: one panel, however many faults are found. The form
+     could only hold the first. */
+  const fl = await loadApp('inspect');
+  const fw = fl.window, fd = fw.document;
+  fd.querySelector('#nav button[data-go="work"]').click(); await fl.sleep(60);
+  fd.querySelector('[data-open-capture]').click(); await fl.sleep(400);
+
+  s.check('the form offers a fault list', !!fd.querySelector('[data-fault-add]'));
+  s.check('an empty list asks for a fault or a confirmation',
+    fl.$('page').textContent.includes('Add a fault, or confirm there are none'));
+
+  fd.querySelector('[data-fault-add]').click(); await fl.sleep(420);
+  s.check('adding a fault writes a record',
+    fw.GRID_CALLS.some(c => c[0] === 'insert' && c[1] === 'failed_checks'));
+  const firstInsert = fw.GRID_CALLS.filter(c => c[0] === 'insert' && c[1] === 'failed_checks').pop();
+  s.check('it is marked as coming from a fault list',
+    firstInsert && firstInsert[2].source === 'fault_list');
+  s.check('it carries a line number', firstInsert && firstInsert[2].seq === 1);
+
+  fd.querySelector('[data-fault-add]').click(); await fl.sleep(420);
+  s.check('a second fault can be added on the same panel',
+    fd.querySelectorAll('[data-fault-del]').length === 2);
+  const ids = Array.from(fd.querySelectorAll('[data-fault-del]'))
+    .map(x => x.dataset.faultDel.split('|')[1]);
+  s.check('each line is a separate record', new Set(ids).size === 2, ids.join(','));
+
+  const desc = Array.from(fd.querySelectorAll('[data-fault]'))
+    .find(x => x.dataset.fault.endsWith('|description'));
+  desc.value = 'Paint chipped on LV door';
+  desc.dispatchEvent(new fw.Event('change', { bubbles: true }));
+  await fl.sleep(750);
+  s.check('typing a fault saves it as you go',
+    fw.GRID_CALLS.some(c => c[0] === 'update' && c[1] === 'failed_checks' &&
+      c[2].description === 'Paint chipped on LV door'));
+
+  const answers = fw.GRID_CALLS.filter(c => c[0] === 'upsert' && c[2] && c[2].field_id === 'i9');
+  s.check('the field counts as answered once a fault exists', answers.length > 0);
+  s.check('the answer records how many', answers.length &&
+    /\d+ faults?/.test(answers[answers.length - 1][2].value_text));
+
+  fd.querySelector('[data-fault-del]').click(); await fl.sleep(520);
+  s.check('a line can be removed on its own',
+    fd.querySelectorAll('[data-fault-del]').length === 1);
+
+  s.group('no faults is stated, not assumed');
+  /* An empty section and a clean panel must not look the same in a quality
+     record: "nobody looked" and "nothing was wrong" are different facts. */
+  const clean = await loadApp('inspect');
+  const cd = clean.window.document;
+  cd.querySelector('#nav button[data-go="work"]').click(); await clean.sleep(60);
+  cd.querySelector('[data-open-capture]').click(); await clean.sleep(400);
+  const tick = cd.querySelector('[data-fault-none]');
+  s.check('there is a way to confirm a clean panel', !!tick);
+  tick.checked = true;
+  tick.dispatchEvent(new clean.window.Event('change', { bubbles: true }));
+  await clean.sleep(700);
+  const none = clean.window.GRID_CALLS
+    .filter(c => c[0] === 'upsert' && c[2] && c[2].field_id === 'i9').pop();
+  s.check('confirming writes an answer', !!none);
+  s.check('and records it as no faults found',
+    none && none[2].value_text === 'no faults found');
+  s.check('the two states cannot both be set',
+    cd.querySelector('[data-fault-add]').disabled);
+
   s.group('starting an inspection opens the current form');
   /* An inspection is locked to the revision it was generated against — right
      for a record with answers in it, wrong for one nobody has started.

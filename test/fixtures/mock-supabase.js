@@ -22,6 +22,7 @@
       { id:"i5", type:"instr", label:"Torque wrench used", req:1, cat:"Torque" },
       { id:"i6", type:"select", label:"Panel type", opts:["Incomer","Feeder"] },
       { id:"i7", type:"photo", label:"Photo of assembly", minp:2 },
+      { id:"i9", type:"faultlist", label:"Faults found on this panel", req:1 },
       { id:"i8", type:"sign", label:"Inspector signature", req:1 }]}]};
 
   const DATA = {
@@ -81,15 +82,43 @@
       select() { return chain; }, eq() { return chain; }, order() { return chain; },
       limit() { return chain; }, maybeSingle() { return Promise.resolve(one(table)); },
       single() { return Promise.resolve(one(table)); },
-      insert(v) { CALLS.push(["insert", table, v]); return { select: () => ({ single: () => Promise.resolve({ data: { id: "new1" }, error: null }) }), then: r => r({ error: null }) }; },
+      /* Returns a UNIQUE id and echoes the row back. The old stub answered
+       "new1" to every insert, so two rows added in a row shared an id and
+       deleting one removed both — a fault in the test double that looked
+       exactly like a fault in the app. */
+    insert(v) {
+      CALLS.push(["insert", table, v]);
+      const row = Object.assign({ id: "new" + (++client._seq) }, v);
+      if (Array.isArray(DATA[table])) DATA[table].push(row);
+      const res = { data: row, error: null };
+      return {
+        select: () => ({ single: () => Promise.resolve(res), then: r => r(res) }),
+        then: r => r({ data: row, error: null })
+      };
+    },
       update(v) { CALLS.push(["update", table, v]); return chain; },
       upsert(v) { CALLS.push(["upsert", table, v]); return Promise.resolve({ error: null }); },
-      delete() { CALLS.push(["delete", table]); return chain; },
+      /* Records what was asked for AND removes it, so a suite can tell a
+       successful delete from a no-op. */
+    delete() {
+      CALLS.push(["delete", table]);
+      const del = { _eq: {},
+        eq(col, val) { this._eq[col] = val; this._apply(); return this; },
+        _apply() {
+          if (!Array.isArray(DATA[table])) return;
+          const keys = Object.keys(this._eq);
+          if (!keys.length) return;
+          DATA[table] = DATA[table].filter(r => !keys.every(k => String(r[k]) === String(this._eq[k])));
+        },
+        then(r) { return Promise.resolve({ data: null, error: null }).then(r); } };
+      return del;
+    },
       then(res) { return Promise.resolve(result(table)).then(res); }
     };
     return chain;
   }
   const client = {
+    _seq: 0,
     from: q,
     /* The RPCs MUTATE the fixture, as the real ones mutate the database. A
        stub that only returned a canned object let the app reload and still

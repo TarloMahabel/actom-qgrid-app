@@ -61,7 +61,7 @@ const S = {
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
   designer: { open: false, tplId: null, revId: null, def: null, sel: null,
               preview: false, dirty: false, busy: null, result: null },
-  capture: { id: null, results: {}, photos: {} }
+  capture: { id: null, results: {}, photos: {}, faults: {} }
 };
 
 /* CHANGELOG lives in changelog.js so a release note is a one-line edit
@@ -364,13 +364,17 @@ function vWork(m) {
       }));
   }
   else {
-    const cols = ["Reference", "Inspection", "Defect", "Recorded"]
+    const cols = ["Reference", "Inspection", "Found", "Defect", "What", "Recorded"]
       .concat(HP() ? ["Hold point"] : []).concat(["Disposition", ""]);
     body = T(cols, S.failedChecks.map(f => {
       const insp = byId(S.inspections, f.inspection_id);
       const base = [`<span class="id">${esc(f.ref)}</span>`,
         `<span class="id">${esc(insp?.ref || "—")}</span>`,
+        pill(f.source === "fault_list" ? "Fault list" : "Checkpoint"),
         esc(byId(S.defects, f.defect_code_id)?.code || "—"),
+        f.description
+          ? `${esc(f.description)}${f.location ? `<div class="sub">${esc(f.location)}</div>` : ""}`
+          : `<span style="color:var(--muted)">a checkpoint failed</span>`,
         new Date(f.created_at).toLocaleString("en-ZA")];
       const hp = HP() ? [f.is_hold ? pill("Hold point") : "—"] : [];
       return base.concat(hp, [pill(f.disposition || "awaiting"),
@@ -452,6 +456,7 @@ function renderCapture() {
           ["overdue","out_of_service"].includes(e.status) ? ` (${e.status.replace("_"," ").toUpperCase()} — blocked)` : ""}</option>`).join("")}
       </select>`;
     }
+    if (f.type === "faultlist") return faultTable(f);
     if (f.type === "photo") {
       const shots = (S.capture.photos[f.id] || []);
       const need = f.minp || 1;
@@ -591,6 +596,7 @@ const TYPES = {
   section:{n:"Section",c:"#5a6672",ic:"§",d:"Groups checkpoints under a heading"},
   info:{n:"Instruction",c:"#7b8794",ic:"i",d:"Read-only guidance for the inspector"},
   passfail:{n:"Pass / Fail",c:"#1e8e5a",ic:"P/F",d:"Three-state: pass, fail, not applicable"},
+  faultlist:{n:"Fault list",c:"#b03a30",ic:"≡",d:"As many faults as the inspector finds, each its own line"},
   measure:{n:"Measurement",c:"#0063AF",ic:"mm",d:"Numeric value judged against a tolerance"},
   number:{n:"Number",c:"#2a7fd4",ic:"#",d:"Numeric value with no tolerance"},
   text:{n:"Text",c:"#5b4bbd",ic:"Ab",d:"Short or long free text"},
@@ -772,7 +778,7 @@ function designerView(m) {
     + (S.designer.preview
       ? `<div class="card"><h3>Preview <span class="cl">${esc(tpl.code)} rev ${rev?.rev}</span></h3><div class="bd">${previewHtml(def)}</div></div>`
       : `<div class="dsn">
-          <div class="pal">${pal("Structure", ["section","info"])}${pal("Results", ["passfail","measure","number"])}${pal("Capture", ["text","select","date","photo"])}${pal("Traceability", ["serial","instr","sign"])}</div>
+          <div class="pal">${pal("Structure", ["section","info"])}${pal("Results", ["passfail","faultlist","measure","number"])}${pal("Capture", ["text","select","date","photo"])}${pal("Traceability", ["serial","instr","sign"])}</div>
           <div class="cv">
             <div class="cvhead"><div><div class="tn">${esc(tpl.name)}</div>
               <div class="sub">${esc(tpl.code)} · ${esc(stageName(tpl.stage_id))} · ${esc(byId(S.families, tpl.family_id)?.name || "all families")}</div></div>
@@ -1135,7 +1141,7 @@ async function loadAudit() {
    5. Actions (writes)
    ------------------------------------------------------------ */
 async function openCapture(id) {
-  S.capture = { id, results: {}, photos: {} };
+  S.capture = { id, results: {}, photos: {}, faults: {} };
   let insp = byId(S.inspections, id);
   busy(true);
   try {
@@ -1177,6 +1183,7 @@ async function openCapture(id) {
     if (error) throw error;
     for (const r of data) S.capture.results[r.field_id] = r;
     await loadCapturePhotos(id);
+    await loadCaptureFaults(id);
   } catch (e) { toast(explain(e), "bad"); }
   finally { busy(false); }
   S.view = "work"; S.tab = 1; buildNav(); render();
@@ -1257,7 +1264,7 @@ async function submitInspection() {
     if (error) throw error;
     toast(`${data.ref} submitted — ${data.result}${data.failed_checks ? `, ${data.failed_checks} failed check(s)` : ""}${data.works_order_held ? ", works order held" : ""}`,
       data.result === "pass" ? "ok" : "");
-    S.capture = { id: null, results: {}, photos: {} };
+    S.capture = { id: null, results: {}, photos: {}, faults: {} };
     S.tab = 0;
     await reload();
   } catch (e) { toast(explain(e), "bad"); }
@@ -1497,6 +1504,178 @@ async function saveTemplate() {
 
 
 
+
+
+/* ---------------------------------------------------------------
+   Fault lists.
+
+   A checksheet answers fixed questions, one answer each. A fault list is
+   the other shape: one panel, however many faults the inspector finds,
+   each with its own code, description and location. The form could only
+   hold the first one.
+
+   Faults are written to failed_checks as they are typed, alongside the
+   defects raised by failed checkpoints — the same table, distinguished by
+   `source`. That is deliberate: a fault and a failed checkpoint are the
+   same fact found two ways, and splitting them would mean two of every
+   report and two things for Phase 2's NCR workflow to read.
+
+   Zero faults is a POSITIVE statement, not an empty section. The
+   inspector ticks "no faults found", and that writes an answer. An empty
+   fault list with no confirmation is an unfinished inspection, because
+   "nobody looked" and "nothing was wrong" must not look the same in a
+   quality record.
+   --------------------------------------------------------------- */
+const SEVERITIES = [["minor", "Minor"], ["major", "Major"]];
+
+async function loadCaptureFaults(inspectionId) {
+  S.capture.faults = {};
+  let data, error;
+  try {
+    ({ data, error } = await supabase.from("failed_checks")
+      .select("*").eq("inspection_id", inspectionId).eq("source", "fault_list")
+      .order("seq"));
+  } catch (e) { error = e; }
+  if (error) { toast("Could not load the fault list. " + explain(error), "bad"); return; }
+  for (const f of data || []) (S.capture.faults[f.field_id] ||= []).push(f);
+}
+
+function faultTable(f) {
+  const rows = S.capture.faults[f.id] || [];
+  const none = (S.capture.results[f.id] || {}).value_text === "no faults found";
+  const cols = "70px 150px 1fr 150px 110px 44px";
+
+  return `<div>
+    ${rows.length ? `
+      <div style="display:grid;grid-template-columns:${cols};gap:8px;padding:0 2px 6px;
+            font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700">
+        <div>Line</div><div>Defect code</div><div>Fault</div>
+        <div>Where on the panel</div><div>Severity</div><div></div>
+      </div>
+      ${rows.map((r, i) => `<div style="display:grid;grid-template-columns:${cols};gap:8px;
+            align-items:center;padding:3px 2px">
+        <span class="id">${i + 1}</span>
+        <select data-fault="${f.id}|${r.id}|defect_code_id"
+          style="padding:6px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px">
+          <option value="">—</option>
+          ${S.defects.map(dc => `<option value="${dc.id}" ${r.defect_code_id === dc.id ? "selected" : ""}>${esc(dc.code)}</option>`).join("")}
+        </select>
+        <input data-fault="${f.id}|${r.id}|description" value="${esc(r.description || "")}"
+          placeholder="what is wrong"
+          style="padding:6px 8px;border:1px solid ${r.description ? "var(--line)" : "var(--bad)"};border-radius:7px">
+        <input data-fault="${f.id}|${r.id}|location" value="${esc(r.location || "")}"
+          placeholder="e.g. LV door, left"
+          style="padding:6px 8px;border:1px solid var(--line);border-radius:7px">
+        <select data-fault="${f.id}|${r.id}|severity"
+          style="padding:6px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px">
+          ${SEVERITIES.map(([v, l]) => `<option value="${v}" ${r.severity === v ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
+        <button class="btn sm danger" data-fault-del="${f.id}|${r.id}" title="Remove this line">×</button>
+      </div>`).join("")}
+    ` : ""}
+
+    <div style="display:flex;gap:10px;align-items:center;margin-top:${rows.length ? "12px" : "2px"};flex-wrap:wrap">
+      <button class="btn sm ${rows.length ? "" : "pri"}" data-fault-add="${f.id}"
+        ${none ? "disabled title=\"Untick 'no faults found' first\"" : ""}>+ Add a fault</button>
+      <label class="btn sm" style="font-weight:500;${rows.length ? "opacity:.5;pointer-events:none" : ""}">
+        <input type="checkbox" data-fault-none="${f.id}" ${none ? "checked" : ""}
+          ${rows.length ? "disabled" : ""} style="margin:0">
+        No faults found on this panel</label>
+      <span class="cnt">${rows.length
+        ? `${rows.length} fault${rows.length === 1 ? "" : "s"} recorded`
+        : none ? "Recorded as clean" : "Add a fault, or confirm there are none"}</span>
+    </div>
+  </div>`;
+}
+
+async function addFault(fieldId) {
+  const insp = byId(S.inspections, S.capture.id);
+  if (!insp) return;
+  const rows = S.capture.faults[fieldId] || [];
+  busy(true);
+  try {
+    const { data, error } = await supabase.from("failed_checks").insert({
+      inspection_id: S.capture.id, source: "fault_list", field_id: fieldId,
+      seq: rows.length + 1, description: "(describe the fault)",
+      severity: "minor", qty: 1, disposition: "awaiting"
+    }).select().single();
+    if (error) throw error;
+    (S.capture.faults[fieldId] ||= []).push(data);
+    await recordFaultAnswer(fieldId);
+    render();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+/* Saved as typed, like every other answer on the form. A fault half-typed
+   when the tablet loses signal is a fault that still exists. */
+const faultTimers = {};
+function saveFault(fieldId, id, column, value) {
+  const rows = S.capture.faults[fieldId] || [];
+  const row = rows.find(r => String(r.id) === String(id));
+  if (!row) return;
+  row[column] = column === "defect_code_id" ? (value ? Number(value) : null) : value;
+  const key = `${id}|${column}`;
+  clearTimeout(faultTimers[key]);
+  faultTimers[key] = setTimeout(async () => {
+    try {
+      const { error } = await supabase.from("failed_checks")
+        .update({ [column]: row[column] }).eq("id", id);
+      if (error) throw error;
+      const el = $("saveState");
+      if (el) el.textContent = "Saved " + new Date().toLocaleTimeString("en-ZA");
+    } catch (e) { toast(explain(e), "bad"); }
+  }, 500);
+}
+
+async function deleteFault(fieldId, id) {
+  busy(true);
+  try {
+    const { error } = await supabase.from("failed_checks").delete().eq("id", id);
+    if (error) throw error;
+    const rows = (S.capture.faults[fieldId] || []).filter(r => String(r.id) !== String(id));
+    S.capture.faults[fieldId] = rows;
+    // Renumber so the line numbers the inspector sees stay 1..n.
+    for (const [i, r] of rows.entries()) {
+      if (r.seq !== i + 1) {
+        r.seq = i + 1;
+        await supabase.from("failed_checks").update({ seq: r.seq }).eq("id", r.id);
+      }
+    }
+    await recordFaultAnswer(fieldId);
+    render();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function setNoFaults(fieldId, checked) {
+  if (checked) {
+    saveAnswer(fieldId, { value_text: "no faults found", value_num: 0, outcome: "pass" });
+  } else {
+    delete S.capture.results[fieldId];
+    try {
+      await supabase.from("inspection_results")
+        .delete().eq("inspection_id", S.capture.id).eq("field_id", fieldId);
+    } catch (e) { toast(explain(e), "bad"); }
+  }
+  render();
+}
+
+/* The field is answered when there is at least one fault, or the inspector
+   has confirmed there are none. */
+async function recordFaultAnswer(fieldId) {
+  const n = (S.capture.faults[fieldId] || []).length;
+  if (n > 0) {
+    saveAnswer(fieldId, { value_text: `${n} fault${n === 1 ? "" : "s"}`, value_num: n, outcome: "fail" });
+    return;
+  }
+  delete S.capture.results[fieldId];
+  try {
+    const { error } = await supabase.from("inspection_results")
+      .delete().eq("inspection_id", S.capture.id).eq("field_id", fieldId);
+    if (error) throw error;
+  } catch (e) { toast(explain(e), "bad"); }
+}
 
 /* ---------------------------------------------------------------
    Inspection photos.
@@ -2140,7 +2319,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-rm-photo],[data-tpl],[data-id]");
+  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-rm-photo],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
   if (!t) return;
   const d = t.dataset;
 
@@ -2162,6 +2341,8 @@ document.addEventListener("click", async e => {
   }
   if (d.dispose) return disposeFailedCheck(d.dispose);
   if (d.rmPhoto) { const [fid, i] = d.rmPhoto.split(":"); return removePhoto(fid, Number(i)); }
+  if (d.faultAdd) return addFault(d.faultAdd);
+  if (d.faultDel) { const [fid, id] = d.faultDel.split("|"); return deleteFault(fid, id); }
   if (d.refSave) return saveRefList(d.refSave);
   if (d.refAdd) return addRefRow(d.refAdd);
   if (d.refToggle) { const [tb, id] = d.refToggle.split("|"); return toggleRefActive(tb, id); }
@@ -2281,6 +2462,11 @@ document.addEventListener("change", e => {
   if (d.num !== undefined) return saveAnswer(d.num, { value_num: e.target.value === "" ? null : Number(e.target.value) });
   if (d.txt !== undefined) return saveAnswer(d.txt, { value_text: e.target.value });
   if (d.equip !== undefined) return saveAnswer(d.equip, { equipment_id: e.target.value ? Number(e.target.value) : null });
+  if (d.fault) {
+    const [fid, id, col] = d.fault.split("|");
+    return saveFault(fid, id, col, e.target.value);
+  }
+  if (d.faultNone !== undefined) return setNoFaults(d.faultNone, e.target.checked);
   if (d.photo !== undefined) {
     const files = e.target.files;
     e.target.value = "";                     // allow re-picking the same file

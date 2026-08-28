@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.9.10";
+window.APP_VERSION = "0.10.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.10.0", d: "2026-08-28", t: "Many faults on one panel",
+    items: [
+      "New Fault list field for the form designer. An inspector can add as many fault lines as they find on a panel, each with its own defect code, description, location and severity — the form previously had room for one.",
+      "A clean panel is confirmed with 'no faults found' rather than left blank, so a panel nobody checked and a panel with nothing wrong do not look the same on the record.",
+      "Faults and failed checkpoints appear together in Failed checks, marked by how they were found. Defect counts and Pareto cover both.",
+      "An inspection with faults on it is recorded as a fail even when every checkpoint passed."
+    ]
+  },
   {
     v: "0.9.10", d: "2026-08-28", t: "Take a photo or upload one",
     items: [
