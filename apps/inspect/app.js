@@ -765,7 +765,15 @@ function vSched(m) {
           const t = tplForRev(i.template_rev_id);
           return [`<span class="id">${esc(i.ref)}</span>`, esc(t?.name || "—"), esc(stageName(i.stage_id)),
             `${esc(byId(S.projects, i.project_id)?.code || "—")}<div class="sub">${esc(byId(S.worksOrders, i.works_order_id)?.code || "")}</div>`,
-            esc(i.unit_ref || "—"), fmtDate(i.planned_date),
+            esc(i.unit_ref || "—"),
+            /* Editable while it has not been started. A plan is a forecast and
+               forecasts move; changing the date on something already under way
+               would rewrite history, so those stay read-only. */
+            (i.status === "scheduled" && canPlan())
+              ? `<input type="date" data-planned="${i.id}" value="${esc(i.planned_date || "")}"
+                   style="padding:5px 7px;border:1px solid ${i.planned_date < today() ? "var(--bad)" : "var(--line)"};
+                          border-radius:7px;font-size:12px;font-family:var(--num)">`
+              : fmtDate(i.planned_date),
             i.assigned_to ? esc(byId(S.people, i.assigned_to)?.full_name || "—") : pill("Unassigned"),
             pill(i.planned_date < today() && i.status === "scheduled" ? "Overdue" : i.status)];
         }))
@@ -1140,9 +1148,12 @@ function vAdm(m) {
 const REF_LISTS = [
   { table: "manufacturing_stages", title: "Manufacturing stages", state: "stages",
     order: "sort_order",
-    note: "The sequence work moves through. Drives which checklist loads and the pass-rate-by-stage chart.",
+    note: "The sequence work moves through. <b>Days out</b> is how many working days after a schedule starts this stage's inspection falls due — a nine-stage route should not all land on one day.",
     cols: [{ f: "name", label: "Stage", type: "text" },
-           { f: "sort_order", label: "Order", type: "number", w: "90px" }] },
+           { f: "sort_order", label: "Order", type: "number", w: "80px" },
+           /* How far into a build this stage's inspection falls due. It is a
+              division's own lead time, so it is data, not code. */
+           { f: "offset_days", label: "Days out", type: "number", w: "95px" }] },
 
   { table: "departments", title: "Departments", state: "departments",
     order: "sort_order",
@@ -3101,15 +3112,110 @@ async function deleteProject(id) {
    dialog was a second way to do the same thing, and being a dropdown it could
    not show what mattered — which project, which family, how many inspections
    already exist — so it made a clear action look like a form to fill in. */
-async function generateForWorksOrder(id) {
+/* Generating asks for a start date and shows what the route will look like
+   before it commits. It used to stamp today on everything, so a works order
+   released for panels due in three weeks was overdue by Tuesday and the
+   overdue count — the one number a supervisor acts on — meant nothing. */
+function generateModal(worksOrderId) {
+  const wo = byId(S.worksOrders, worksOrderId);
+  const project = byId(S.projects, wo.project_id);
+  const fam = project && byId(S.families, project.family_id);
+  const reqs = S.requirements.filter(r =>
+    project && r.family_id === project.family_id && r.template_id && r.level !== "na");
+
+  const start = new Date();
+  const iso = d => d.toISOString().slice(0, 10);
+
+  openModal(`Generate for ${wo.code}`, `
+    <div class="two">
+      <div class="fld"><label>Start date</label>
+        <input id="gStart" type="date" value="${iso(start)}">
+        <div class="hint">Each stage falls due a set number of working days after this.
+          Weekends are skipped.</div></div>
+      <div class="fld"><label>What will be created</label>
+        <div class="ro">${reqs.length} requirement${reqs.length === 1 ? "" : "s"} ·
+          ${esc(fam ? fam.name : "no family")} · qty ${wo.qty}</div></div>
+    </div>
+    <div id="gPreview"></div>
+    <div class="note">Dates are a plan, not a commitment — any of them can be moved
+      afterwards from the Schedule.</div>`,
+    [["Cancel", "close"], ["Generate", "save-generate", "pri"]], { id: worksOrderId });
+  renderGeneratePreview();
+}
+
+/* Working days, weekends skipped — the same rule the database uses, so the
+   preview and the result agree. Public holidays are not handled either side. */
+function addWorkingDays(from, days) {
+  const d = new Date(from + "T00:00:00");
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  let left = Math.max(0, days || 0);
+  while (left > 0) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() !== 0 && d.getDay() !== 6) left--;
+  }
+  return d;
+}
+
+function renderGeneratePreview() {
+  const host = $("gPreview"); if (!host) return;
+  const wo = byId(S.worksOrders, modalCtx.id);
+  const project = byId(S.projects, wo.project_id);
+  const startVal = $("gStart").value;
+  if (!startVal) { host.innerHTML = ""; return; }
+
+  const reqs = S.requirements.filter(r =>
+    project && r.family_id === project.family_id && r.template_id && r.level !== "na");
+  const rows = reqs.map(r => {
+    const st = byId(S.stages, r.stage_id);
+    const when = addWorkingDays(startVal, (st && st.offset_days) || 0);
+    return { stage: st ? st.name : "—", offset: (st && st.offset_days) || 0, when,
+             n: r.sampling === "full" ? wo.qty : 1 };
+  }).sort((a, b) => a.when - b.when);
+
+  if (!rows.length) { host.innerHTML = `<div class="note q">Nothing to generate — the
+    requirements matrix has no published template for this product family.</div>`; return; }
+
+  const total = rows.reduce((a, r) => a + r.n, 0);
+  host.innerHTML = `<div style="margin:4px 0 12px">
+    <div class="eyebrow" style="margin-bottom:7px">${total} inspection${total === 1 ? "" : "s"},
+      ${rows[0].when.toLocaleDateString("en-ZA")} to ${rows[rows.length - 1].when.toLocaleDateString("en-ZA")}</div>
+    <table><thead><tr><th>Stage</th><th>Working days out</th><th>Planned</th><th>How many</th>
+      </tr></thead><tbody>
+      ${rows.map(r => `<tr style="cursor:default"><td>${esc(r.stage)}</td>
+        <td>${r.offset === 0 ? "same day" : `+${r.offset}`}</td>
+        <td><b>${r.when.toLocaleDateString("en-ZA", { weekday: "short", day: "2-digit", month: "short" })}</b></td>
+        <td>${r.n}</td></tr>`).join("")}
+    </tbody></table>
+    <div class="hint" style="margin-top:7px">Change how far out a stage falls under
+      Administration → Reference lists.</div></div>`;
+}
+
+async function generateForWorksOrder(id, startDate) {
   busy(true);
   try {
-    const { data, error } = await supabase.rpc("generate_inspections", { p_works_order: Number(id) });
+    const { data, error } = await supabase.rpc("generate_inspections", {
+      p_works_order: Number(id), p_start: startDate || null
+    });
     if (error) throw error;
+    closeModal();
     toast(data.created
-      ? `${data.created} inspection(s) created for ${data.works_order}.`
+      ? `${data.created} inspection(s) created for ${data.works_order}, ` +
+        `${data.first_date} to ${data.last_date}.`
       : `Nothing generated for ${data.works_order} — check the requirements matrix has a published template for that product family.`,
       data.created ? "ok" : "bad");
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function rescheduleInspection(id, date) {
+  busy(true);
+  try {
+    const { data, error } = await supabase.rpc("reschedule_inspection", {
+      p_inspection: id, p_date: date
+    });
+    if (error) throw error;
+    toast(`${data.ref} moved to ${data.planned_date}.`, "ok");
     await reload();
   } catch (e) { toast(explain(e), "bad"); }
   finally { busy(false); }
@@ -3172,7 +3278,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-action-set],[data-fc],[data-rm-photo],[data-sig-clear],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
+  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-planned],[data-action-set],[data-fc],[data-rm-photo],[data-sig-clear],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
   if (!t) return;
   const d = t.dataset;
 
@@ -3287,7 +3393,8 @@ document.addEventListener("click", async e => {
     case "add-wo": return worksOrderModal(Number(t.dataset.id), null);
     case "edit-wo": return worksOrderModal(null, byId(S.worksOrders, Number(t.dataset.id)));
     case "save-wo": return saveWorksOrder();
-    case "gen-wo": return generateForWorksOrder(t.dataset.id);
+    case "gen-wo": return generateModal(Number(t.dataset.id));
+    case "save-generate": return generateForWorksOrder(modalCtx.id, $("gStart").value);
     case "save-cell": return saveCell();
     case "clear-cell": { const { existingId } = modalCtx;
       if (existingId) { await supabase.from("inspection_requirements").delete().eq("id", existingId); }
@@ -3335,6 +3442,8 @@ document.addEventListener("change", e => {
     return saveFault(fid, id, col, e.target.value);
   }
   if (d.faultNone !== undefined) return setNoFaults(d.faultNone, e.target.checked);
+  if (e.target.id === "gStart") return renderGeneratePreview();
+  if (d.planned) return rescheduleInspection(d.planned, e.target.value);
   if (e.target.id === "period") { S.period = e.target.value; return render(); }
   if (d.actionSet) {
     const [id, col] = d.actionSet.split("|");

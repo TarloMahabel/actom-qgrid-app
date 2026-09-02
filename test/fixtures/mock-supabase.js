@@ -27,7 +27,11 @@
 
   const DATA = {
     division_profile: { id:true, code:"MVS", name:"ACTOM MV Switchgear", hold_points:false, require_second_approver:false },
-    manufacturing_stages: [{id:1,name:"Assembly",sort_order:5,active:true},{id:2,name:"Wiring",sort_order:6,active:true}],
+    /* offset_days: working days after a schedule starts that this stage falls
+       due. Different values so a suite can prove the route SPREADS rather than
+       landing every inspection on one date. */
+    manufacturing_stages: [{id:1,name:"Assembly",sort_order:5,offset_days:4,active:true},
+                           {id:2,name:"Wiring",sort_order:6,offset_days:6,active:true}],
     departments: [{id:1,name:"Assembly",stage_id:1,sort_order:5},{id:2,name:"Wiring",stage_id:2,sort_order:6}],
     product_families: [{id:1,name:"12 kV metal-clad",active:true},{id:2,name:"22 kV RMU",active:true}],
     defect_codes: [{id:1,code:"DF020",description:"Assembly defect",active:true}],
@@ -186,8 +190,19 @@
       }
       if (fn === "generate_inspections") {
         const wo = DATA.works_orders.find(w => w.id === args.p_works_order);
-        return Promise.resolve({ data: { works_order: wo ? wo.code : "WO-44812", created: 3 },
-          error: null });
+        /* Echo the start date back, so a suite can prove the date reached the
+           database rather than only that the button was pressed. */
+        const start = args.p_start || new Date().toISOString().slice(0, 10);
+        return Promise.resolve({ data: { works_order: wo ? wo.code : "WO-44812",
+          created: 3, first_date: start, last_date: start }, error: null });
+      }
+      if (fn === "reschedule_inspection") {
+        const insp = DATA.inspections.find(i => i.id === args.p_inspection);
+        if (!insp) return Promise.resolve({ data: null, error: { message: "RESCHEDULE_MISSING" } });
+        if (insp.status !== "scheduled") return Promise.resolve({ data: null,
+          error: { message: "RESCHEDULE_STARTED: already started" } });
+        insp.planned_date = args.p_date;
+        return Promise.resolve({ data: { ref: insp.ref, planned_date: args.p_date }, error: null });
       }
       return Promise.resolve({ data: null, error: { message: "unknown rpc " + fn } });
     },

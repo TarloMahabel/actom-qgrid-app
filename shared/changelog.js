@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.15.0";
+window.APP_VERSION = "0.16.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.16.0", d: "2026-08-28", t: "Planned dates on a schedule",
+    items: [
+      "Generating a schedule now asks when the work starts. It used to date every inspection today, so a works order released for panels due in three weeks was overdue by the next day and the overdue count meant nothing.",
+      "Each manufacturing stage carries how many working days into a build its inspection falls due, so a nine-stage route spreads across the weeks instead of landing on one date. Set this under Administration, Reference lists.",
+      "Before generating you see exactly which date each stage will get.",
+      "A planned date can be moved from the Schedule while the inspection has not been started. Weekends are skipped; public holidays are not, so check dates near a long weekend."
+    ]
+  },
   {
     v: "0.15.0", d: "2026-08-28", t: "Printing an inspection report",
     items: [

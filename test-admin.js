@@ -24,7 +24,7 @@ const { loadApp, suite } = require('./test/harness');
      threshold: the mock holds a handful of rows and a fixed number would
      either fail here or pass trivially against real data. */
   const D = w.GRID_TEST_DATA;
-  const expectFields = D.manufacturing_stages.length * 2   // name, sort_order
+  const expectFields = D.manufacturing_stages.length * 3   // name, sort_order, days out
                      + D.departments.length * 3            // name, stage, sort_order
                      + D.product_families.length * 1       // name
                      + D.defect_codes.length * 3;          // code, description, category
@@ -39,6 +39,10 @@ const { loadApp, suite } = require('./test/harness');
      says what it groups as. Blank groups it under its own description. */
   s.check('defect codes say how they group for reporting',
     $('page').innerHTML.includes('Groups as'));
+  /* How far into a build each stage falls due: a division's own lead time,
+     so it is editable data rather than a constant in the code. */
+  s.check('stages carry how many days out they fall due',
+    $('page').innerHTML.includes('Days out'));
   s.check('each list has an add row', d.querySelectorAll('[data-ref-add]').length === 4);
   s.check('each list has a save button', d.querySelectorAll('[data-ref-save]').length === 4);
   s.check('save starts disabled', d.querySelector('[data-ref-save]').disabled);

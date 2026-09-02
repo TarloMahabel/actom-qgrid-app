@@ -71,8 +71,13 @@ const { loadApp, suite } = require('./test/harness');
   s.check('generate sits on the works order', !!d.querySelector('[data-act="gen-wo"]'));
   s.check('how many inspections exist is shown', $('page').innerHTML.includes('generated'));
 
+  /* Generate now opens a dialog to collect the start date first — it used to
+     fire straight away and stamp today on everything. */
   d.querySelector('[data-act="gen-wo"]').click(); await sleep(280);
-  s.check('generate calls the RPC', CALLS.some(c => c[0] === 'rpc' && c[1] === 'generate_inspections'));
+  s.check('generate asks for a start date first', !!$('gStart'));
+  d.querySelector('[data-act="save-generate"]').click(); await sleep(400);
+  s.check('generate then calls the RPC',
+    CALLS.some(c => c[0] === 'rpc' && c[1] === 'generate_inspections'));
 
   s.group('adding uses a labelled form, not a table row');
   d.querySelector('[data-act="add-project"]').click(); await sleep(120);
@@ -539,6 +544,74 @@ const { loadApp, suite } = require('./test/harness');
   await bad.sleep(600);
   s.check('no thumbnail is left behind', !/uploading/.test(bad.$('page').textContent));
   s.check('the count still reads zero', /0 of \d+ required/.test(bad.$('page').textContent));
+
+  s.group('a schedule is planned, not stamped with today');
+  /* Generating used to put current_date on every inspection. A works order
+     released for panels due in three weeks was overdue by Tuesday, and the
+     overdue count — the one number a supervisor acts on — meant nothing. */
+  const pl = await loadApp('inspect', {
+    afterMock: win => {
+      const D = win.GRID_TEST_DATA;
+      D.inspections = [];
+      // a second requirement, so the route has to spread across stages
+      D.inspection_requirements.push({ id: 99, family_id: 1, stage_id: 2, template_id: 't1',
+        level: 'required', sampling: 'first' });
+    }
+  });
+  const plw = pl.window, pld = plw.document;
+  pld.querySelector('#nav button[data-go="sched"]').click(); await pl.sleep(80);
+  pld.querySelector('.tabs button[data-tab="2"]').click(); await pl.sleep(200);
+  pld.querySelector('[data-act="gen-wo"]').click(); await pl.sleep(280);
+
+  s.check('generating asks for a start date', !!pl.$('gStart'));
+  s.check('it defaults to today',
+    pl.$('gStart').value === new Date().toISOString().slice(0, 10));
+  s.check('it previews what will be created',
+    pl.$('gPreview').textContent.includes('inspections'));
+
+  pl.$('gStart').value = '2026-09-14';           // a Monday
+  pl.$('gStart').dispatchEvent(new plw.Event('change', { bubbles: true }));
+  await pl.sleep(250);
+  const preview = pl.$('gPreview').textContent.replace(/\s+/g, ' ');
+  /* Assembly is 4 working days out, Wiring 6. A nine-stage route landing on
+     one date is not a schedule. */
+  s.check('each stage gets its own date',
+    /18 Sept/.test(preview) && /22 Sept/.test(preview), preview.slice(0, 160));
+  s.check('weekends are skipped, not counted',
+    !/19 Sept|20 Sept/.test(preview));   // Sat and Sun
+  s.check('the preview shows how far out each stage is', /\+4/.test(preview));
+  s.check('it says where to change the offsets',
+    preview.includes('Reference lists'));
+
+  pld.querySelector('[data-act="save-generate"]').click(); await pl.sleep(450);
+  const gen = plw.GRID_CALLS.filter(c => c[0] === 'rpc' && c[1] === 'generate_inspections').pop();
+  s.check('the chosen date reaches the database', gen && gen[2].p_start === '2026-09-14',
+    gen ? JSON.stringify(gen[2]) : 'no call');
+
+  s.group('a planned date can be moved afterwards');
+  const rs = await loadApp('inspect');
+  const rd = rs.window.document;
+  rd.querySelector('#nav button[data-go="sched"]').click(); await rs.sleep(120);
+  const dateInput = rd.querySelector('[data-planned]');
+  s.check('a scheduled inspection has an editable date', !!dateInput);
+  if (dateInput) {
+    dateInput.value = '2026-10-01';
+    dateInput.dispatchEvent(new rs.window.Event('change', { bubbles: true }));
+    await rs.sleep(400);
+    const call = rs.window.GRID_CALLS
+      .filter(c => c[0] === 'rpc' && c[1] === 'reschedule_inspection').pop();
+    s.check('moving it goes through the database', !!call);
+    s.check('with the new date', call && call[2].p_date === '2026-10-01');
+  }
+  /* An inspection already under way keeps its date: changing the plan for
+     something in progress rewrites history. */
+  const inprog = await loadApp('inspect', {
+    afterMock: win => { win.GRID_TEST_DATA.inspections.forEach(i => { i.status = 'in_progress'; }); }
+  });
+  const sd4 = inprog.window.document;
+  sd4.querySelector('#nav button[data-go="sched"]').click(); await inprog.sleep(120);
+  s.check('an inspection in progress cannot be rescheduled from the list',
+    !sd4.querySelector('[data-planned]'));
 
   s.group('Generate is enabled exactly when it can work');
   /* The button disabled itself. It was gated on a global count of unmet
