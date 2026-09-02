@@ -478,6 +478,17 @@ function renderCapture() {
     if (f.type === "photo") {
       const shots = (S.capture.photos[f.id] || []);
       const need = f.minp || 1;
+      const cap = Number(f.maxp) || 0;               // 0 = as many as you like
+      const done = shots.filter(p => !p.uploading).length;
+      const atCap = cap > 0 && done >= cap;
+      /* "4 of 2 taken" was the old wording once the minimum was passed, which
+         reads like a limit and made it look as though no more could be added.
+         Below the minimum it is a target; at or above it is a count. */
+      const countText = done < need
+        ? `${done} of ${need} required`
+        : `${done} photo${done === 1 ? "" : "s"} attached` +
+          (need > 1 ? ` · minimum ${need}` : "") +
+          (cap ? ` · maximum ${cap}` : "");
       return `<div>
         ${shots.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:9px">
           ${shots.map((ph, i) => `<div style="position:relative">
@@ -493,17 +504,21 @@ function renderCapture() {
           </div>`).join("")}
         </div>` : ""}
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn sm" data-shoot="${f.id}">
+          <button class="btn sm" data-shoot="${f.id}"
+            ${atCap ? `disabled title="Maximum of ${cap} reached"` : ""}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M4 8h3l2-2h6l2 2h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
-            Take a photo</button>
-          <button class="btn sm" data-pick="${f.id}">
+            ${done ? "Take another" : "Take a photo"}</button>
+          <button class="btn sm" data-pick="${f.id}"
+            ${atCap ? `disabled title="Maximum of ${cap} reached"` : ""}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v13"/></svg>
-            Upload a file</button>
+            ${done ? "Upload another" : "Upload a file"}</button>
+          <span class="cnt">${countText}</span>
         </div>
-        <div class="hint" style="margin-top:7px">${shots.length} of ${need} taken.
-          Photos are resized before upload so they go through on a slow connection.</div>
+        <div class="hint" style="margin-top:7px">Add as many as you need${cap ? `, up to ${cap}` : ""}.
+          The camera takes one at a time; Upload takes several at once. Photos are resized
+          before upload so they go through on a slow connection.</div>
         ${S.capture.photoError && S.capture.photoError.field === f.id
           ? `<div class="note q" style="margin-top:9px;background:var(--bad-bg);
                 border-color:#f2c8c3;color:#8a2f24">
@@ -827,7 +842,13 @@ function propsHtml() {
     <div class="fld"><label>Maximum</label><input data-p="max" value="${esc(it.max ?? "")}"></div></div>
     <div class="note" style="margin-bottom:12px;font-size:11.5px">A value outside the tolerance is a fail. The inspector cannot override it.</div>`;
   if (it.type === "select") extra = `<div class="fld"><label>Options — one per line</label><textarea rows="4" data-p="opts">${esc((it.opts || []).join("\n"))}</textarea></div>`;
-  if (it.type === "photo") extra = `<div class="fld"><label>Minimum photos</label><input type="number" data-p="minp" value="${it.minp || 1}"></div>`;
+  if (it.type === "photo") extra = `<div class="two">
+    <div class="fld"><label>Minimum photos</label>
+      <input type="number" min="0" data-p="minp" value="${it.minp || 1}">
+      <div class="hint">Below this the field counts as unanswered.</div></div>
+    <div class="fld"><label>Maximum</label>
+      <input type="number" min="0" data-p="maxp" value="${it.maxp || ""}" placeholder="no limit">
+      <div class="hint">Leave blank for as many as the inspector needs.</div></div></div>`;
   if (it.type === "instr") extra = `<div class="fld"><label>Equipment category</label><select data-p="cat">
     ${["Any", ...new Set(S.equipment.map(e => e.category))].map(c => `<option ${it.cat === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
     <div class="hint">Instruments out of calibration are blocked at capture, by the database.</div></div>`;
@@ -2039,6 +2060,17 @@ async function addPhotos(fieldId, files) {
   if (!insp) return;
   const list = (S.capture.photos[fieldId] ||= []);
 
+  const field = fieldDef(fieldId);
+  const cap = Number(field && field.maxp) || 0;
+  if (cap > 0) {
+    const room = cap - list.filter(p => !p.uploading).length;
+    if (room <= 0) { toast(`That field takes at most ${cap} photo${cap === 1 ? "" : "s"}.`, "bad"); return; }
+    if (files.length > room) {
+      toast(`Only ${room} more can be added — the rest were not attached.`, "bad");
+      files = Array.from(files).slice(0, room);
+    }
+  }
+
   S.capture.photoError = null;
   for (const file of Array.from(files)) {
     const placeholder = { uploading: true, url: URL.createObjectURL(file) };
@@ -2104,10 +2136,15 @@ async function removePhoto(fieldId, index) {
    result row is what makes the database's completeness check pass — without
    it, submitting failed with "Photo has not been answered" no matter how many
    photos were attached. */
-async function recordPhotoAnswer(fieldId) {
+/* The definition of one field on the inspection currently open. */
+function fieldDef(fieldId) {
   const insp = byId(S.inspections, S.capture.id);
   const rev = insp && byId(S.revisions, insp.template_rev_id);
-  const field = rev && rev.definition.sections.flatMap(x => x.items).find(f => f.id === fieldId);
+  return rev && rev.definition.sections.flatMap(x => x.items).find(f => f.id === fieldId);
+}
+
+async function recordPhotoAnswer(fieldId) {
+  const field = fieldDef(fieldId);
   const n = (S.capture.photos[fieldId] || []).filter(p => !p.uploading).length;
   const need = (field && field.minp) || 1;
 

@@ -374,7 +374,7 @@ const { loadApp, suite } = require('./test/harness');
   s.check('one photo does NOT satisfy a minimum of two',
     !pc.some(c => c[0] === 'upsert' && c[2] && c[2].field_id === 'i7'));
   s.check('progress shows how many are still needed',
-    /1 of 2 taken/.test(ph.$('page').textContent));
+    /1 of 2 required/.test(ph.$('page').textContent));
 
   pick([{ name: 'b.jpg', size: 5e6 }]);
   await ph.sleep(600);
@@ -385,7 +385,7 @@ const { loadApp, suite } = require('./test/harness');
   s.check('thumbnails are shown', (ph.$('page').innerHTML.match(/<img[^>]+src=/g) || []).length >= 2);
 
   pdoc.querySelector('[data-rm-photo]').click(); await ph.sleep(450);
-  s.check('a photo can be removed', /1 of 2 taken/.test(ph.$('page').textContent));
+  s.check('a photo can be removed', /1 of 2 required/.test(ph.$('page').textContent));
   /* Blanked, never deleted. DELETE on inspection_results is revoked from
      every client role — a captured answer is evidence — so clearing one by
      deleting produced "You do not have access to that record" and left the
@@ -395,6 +395,58 @@ const { loadApp, suite } = require('./test/harness');
       c[2] && c[2].outcome === null && c[2].value_text === null));
   s.check('an answer is never deleted, only blanked',
     !pc.some(c => c[0] === 'delete' && c[1] === 'inspection_results'));
+
+  s.group('as many photos as the job needs');
+  /* Multiple photos always worked; the wording did not. Once past the
+     minimum it read "4 of 2 taken", which looks like a limit and made it
+     seem no more could be added. */
+  const many = await loadApp('inspect');
+  const mw = many.window, mdoc = many.window.document;
+  mdoc.querySelector('#nav button[data-go="work"]').click(); await many.sleep(60);
+  mdoc.querySelector('[data-open-capture]').click(); await many.sleep(420);
+  const mpick = files => {
+    mdoc.querySelector('[data-pick]').click();
+    const el = mdoc.getElementById('photoPicker');
+    mw.__setFiles(el, files);
+    el.dispatchEvent(new mw.Event('change', { bubbles: true }));
+  };
+  const label = () => many.$('page').textContent;
+
+  s.check('an empty field states the requirement', /0 of 2 required/.test(label()));
+  mpick([{ name: 'a.jpg', size: 5e6 }]); await many.sleep(700);
+  s.check('below the minimum it counts towards it', /1 of 2 required/.test(label()));
+  mpick([{ name: 'b.jpg', size: 5e6 }, { name: 'c.jpg', size: 5e6 }]); await many.sleep(1200);
+  s.check('several can be chosen at once', mdoc.querySelectorAll('[data-rm-photo]').length === 3);
+  s.check('past the minimum it reports a count, not a target',
+    /3 photos attached/.test(label()) && !/3 of 2/.test(label()));
+  s.check('the buttons invite another', /Take another/.test(label()) && /Upload another/.test(label()));
+  mpick([{ name: 'd.jpg', size: 5e6 }]); await many.sleep(700);
+  s.check('there is no cap by default', mdoc.querySelectorAll('[data-rm-photo]').length === 4);
+  s.check('and it says so', /Add as many as you need/.test(label()));
+
+  s.group('a maximum can be set when a form needs one');
+  const capped = await loadApp('inspect', {
+    afterMock: win => {
+      const rev = win.GRID_TEST_DATA.template_revisions.find(r => r.status === 'published');
+      rev.definition.sections.flatMap(x => x.items)
+        .filter(f => f.type === 'photo').forEach(f => { f.minp = 1; f.maxp = 2; });
+    }
+  });
+  const cd2 = capped.window.document;
+  cd2.querySelector('#nav button[data-go="work"]').click(); await capped.sleep(60);
+  cd2.querySelector('[data-open-capture]').click(); await capped.sleep(420);
+  const cpick = files => {
+    cd2.querySelector('[data-pick]').click();
+    const el = cd2.getElementById('photoPicker');
+    capped.window.__setFiles(el, files);
+    el.dispatchEvent(new capped.window.Event('change', { bubbles: true }));
+  };
+  cpick([{ name: 'a.jpg', size: 5e6 }, { name: 'b.jpg', size: 5e6 }]); await capped.sleep(1200);
+  s.check('the maximum is shown', /maximum 2/.test(capped.$('page').textContent));
+  s.check('the buttons stop at the maximum',
+    cd2.querySelector('[data-pick]').disabled && cd2.querySelector('[data-shoot]').disabled);
+  cpick([{ name: 'c.jpg', size: 5e6 }]); await capped.sleep(700);
+  s.check('and a third is not attached', cd2.querySelectorAll('[data-rm-photo]').length === 2);
 
   s.group('a repaint while the dialog is open does not lose the photo');
   const mid = await loadApp('inspect');
@@ -448,7 +500,7 @@ const { loadApp, suite } = require('./test/harness');
   bin.dispatchEvent(new bad.window.Event('change', { bubbles: true }));
   await bad.sleep(600);
   s.check('no thumbnail is left behind', !/uploading/.test(bad.$('page').textContent));
-  s.check('the count still reads zero', /0 of \d+ taken/.test(bad.$('page').textContent));
+  s.check('the count still reads zero', /0 of \d+ required/.test(bad.$('page').textContent));
 
   s.group('Generate is enabled exactly when it can work');
   /* The button disabled itself. It was gated on a global count of unmet

@@ -22,10 +22,18 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.12.0";
+window.APP_VERSION = "0.12.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.12.1", d: "2026-08-28", t: "As many photos as the job needs",
+    items: [
+      "Several photos could always be attached, but once past the minimum the field read '4 of 2 taken', which looks like a limit. It now reads '4 photos attached', the buttons say 'Take another' and 'Upload another', and the field says to add as many as you need.",
+      "Upload takes several files at once; the camera takes one at a time, as the device does.",
+      "A maximum can now be set on a photo field in the form designer, for a form that needs exactly so many. Leave it blank for no limit."
+    ]
+  },
   {
     v: "0.12.0", d: "2026-08-28", t: "Signature pad",
     items: [
