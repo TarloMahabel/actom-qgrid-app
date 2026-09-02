@@ -35,7 +35,7 @@ const { loadApp, suite } = require('./test/harness');
   s.check('later phases shown but disabled', d.querySelectorAll('#nav button.off').length === 8);
 
   s.group('every module and tab renders');
-  const views = { dash: 2, work: 4, sched: 3, dsn: 1, req: 1, adm: 5 };
+  const views = { dash: 4, work: 4, sched: 3, dsn: 1, req: 1, adm: 5 };
   for (const [id, tabs] of Object.entries(views)) {
     d.querySelector(`#nav button[data-go="${id}"]`).click();
     await sleep(60);

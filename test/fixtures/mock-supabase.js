@@ -59,6 +59,17 @@
     { id:2, profile_id:"u2", skill:"Visual and dimensional inspection", level:2, valid_to:null }
   ],
   inspection_handovers: [],
+  v_faults_by_project: [
+    {period:new Date().toISOString().slice(0,7)+"-01",project_code:"AT9119.1",project_name:"Eskom",category:"Wiring",faults:184,outstanding:12},
+    {period:new Date().toISOString().slice(0,7)+"-01",project_code:"AT9119.1",project_name:"Eskom",category:"Missing Components",faults:71,outstanding:4},
+    {period:new Date().toISOString().slice(0,7)+"-01",project_code:"AT9119.1",project_name:"Eskom",category:"Labelling & Identification",faults:93,outstanding:0},
+    {period:new Date().toISOString().slice(0,7)+"-01",project_code:"AX9090.1",project_name:"City Power",category:"Wiring",faults:62,outstanding:3},
+    {period:new Date().toISOString().slice(0,7)+"-01",project_code:"AX9090.1",project_name:"City Power",category:"Labelling & Identification",faults:50,outstanding:1},
+    {period:new Date().toISOString().slice(0,7)+"-01",project_code:"AL8488",project_name:"Transnet",category:"Missing Components",faults:69,outstanding:9}
+  ],
+  quality_actions: [
+    {id:1,period:new Date().toISOString().slice(0,7)+"-01",seq:1,item:"Wiring Defects",action:"Fault lists shared with supervisors weekly.",deadline:"2026-09-30",status:"monitoring"}
+  ],
   attachments: [],
   inspection_results: [],
     audit_trail: [{at:"2026-08-26T09:00:00Z",actor_name:"Varshan Mahabel",action:"insert",entity:"inspections",entity_id:"n1abcdef"}]

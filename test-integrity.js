@@ -34,6 +34,28 @@ s.check('every migration is stamped in the ledger section',
   migrations.every(f => complete.includes(`('${f}')`)),
   migrations.filter(f => !complete.includes(`('${f}')`)).join(', '));
 
+s.group('migrations are ordered and numbered once');
+/* Two files were briefly numbered 007 — the same change written twice under
+   different names. Both would have been applied, the second failing or
+   silently redoing the first, and the ledger would have carried a number that
+   did not identify one file. */
+const migFiles = fs.readdirSync(path.join(REPO, 'db'))
+  .filter(f => /^\d{3}-.*\.sql$/.test(f)).sort();
+const numbers = migFiles.map(f => f.slice(0, 3));
+const dupes = numbers.filter((n, i) => numbers.indexOf(n) !== i);
+s.check('every migration number is used once', dupes.length === 0,
+  dupes.map(n => migFiles.filter(f => f.startsWith(n)).join(' + ')).join(', '));
+s.check('numbering has no gaps',
+  numbers.every((n, i) => Number(n) === i + 1), numbers.join(','));
+
+/* A migration that needs an earlier one should say which, rather than failing
+   several statements in with a raw "column does not exist". */
+const dependent = ['007', '008', '010', '011', '012'];
+const unguarded = migFiles.filter(f => dependent.includes(f.slice(0, 3)))
+  .filter(f => !read('db/' + f).includes('PREREQUISITES'));
+s.check('migrations that depend on earlier ones check for them',
+  unguarded.length === 0, unguarded.join(', '));
+
 s.group('handlers and markup agree');
 /* Two directions, checked separately, because openModal builds its footer
    from [label, action, variant] triples and those actions never appear as a

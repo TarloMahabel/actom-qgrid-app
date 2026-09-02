@@ -27,7 +27,7 @@ const { loadApp, suite } = require('./test/harness');
   const expectFields = D.manufacturing_stages.length * 2   // name, sort_order
                      + D.departments.length * 3            // name, stage, sort_order
                      + D.product_families.length * 1       // name
-                     + D.defect_codes.length * 2;          // code, description
+                     + D.defect_codes.length * 3;          // code, description, category
   const expectRows = D.manufacturing_stages.length + D.departments.length
                    + D.product_families.length + D.defect_codes.length;
   const editable = d.querySelectorAll('[data-ref]');
@@ -35,6 +35,10 @@ const { loadApp, suite } = require('./test/harness');
     `${editable.length} of ${expectFields}`);
   s.check('defect codes carry no default department',
     !$('page').innerHTML.includes('Default department'));
+  /* Several codes roll up into one line on the faults chart, so each code
+     says what it groups as. Blank groups it under its own description. */
+  s.check('defect codes say how they group for reporting',
+    $('page').innerHTML.includes('Groups as'));
   s.check('each list has an add row', d.querySelectorAll('[data-ref-add]').length === 4);
   s.check('each list has a save button', d.querySelectorAll('[data-ref-save]').length === 4);
   s.check('save starts disabled', d.querySelector('[data-ref-save]').disabled);

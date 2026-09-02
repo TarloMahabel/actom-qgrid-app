@@ -57,6 +57,8 @@ const S = {
   stages: [], departments: [], families: [], defects: [], equipment: [],
   templates: [], revisions: [], requirements: [],
   projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [], competencies: [], handovers: [],
+  faultsByProject: [], actions: [],
+  period: new Date().toISOString().slice(0, 7),
   dash: {},
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
   designer: { open: false, tplId: null, revId: null, def: null, sel: null,
@@ -168,7 +170,7 @@ async function loadData() {
     S.stages = st.data; S.departments = dp.data; S.families = fm.data;
     S.defects = df.data; S.equipment = eq.data;
 
-    const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd, dash] = await Promise.all([
+    const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd, fbp, acts, dash] = await Promise.all([
       supabase.from("inspection_templates").select("*").order("code"),
       supabase.from("template_revisions").select("*").order("rev", { ascending: false }),
       supabase.from("inspection_requirements").select("*"),
@@ -179,9 +181,15 @@ async function loadData() {
       supabase.from("profiles").select("id,full_name,email,role,department_id,active"),
       supabase.from("competencies").select("*"),
       supabase.from("inspection_handovers").select("*").order("at"),
+      supabase.from("v_faults_by_project").select("*"),
+      supabase.from("quality_actions").select("*").order("period", { ascending: false }),
       supabase.from("v_dashboard").select("*").maybeSingle()
     ]);
     for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd]) if (r.error) throw r.error;
+    /* The dashboard views are not load-bearing: a division that has not run
+       migration 012 yet should still be able to capture inspections. */
+    S.faultsByProject = fbp.error ? [] : (fbp.data || []);
+    S.actions = acts.error ? [] : (acts.data || []);
     S.templates = tpl.data; S.revisions = rev.data; S.requirements = req.data;
     S.projects = prj.data; S.worksOrders = wo.data;
     S.inspections = ins.data; S.failedChecks = fc.data;
@@ -229,7 +237,8 @@ function subscribe() {
    ------------------------------------------------------------ */
 const NAV = [
   { g: "Inspections" },
-  { id: "dash",  n: 1, t: "Dashboard",               col: "--m1", tabs: ["Overview", "Yield by stage"] },
+  { id: "dash",  n: 1, t: "Dashboard",               col: "--m1",
+    tabs: ["Overview", "Faults per project", "Actions", "Pass rate by stage"] },
   { id: "work",  n: 2, t: "Inspection workbench",    col: "--m2", tabs: ["My queue", "Capture", "Register", "Failed checks"] },
   { id: "sched", n: 3, t: "Scheduling",              col: "--m3",
     tabs: ["Schedule", "Unassigned", "Projects & works orders"] },
@@ -289,59 +298,190 @@ const unassigned = () => S.inspections.filter(i => !i.assigned_to && i.status ==
 
 /* ---- 1 Dashboard ---- */
 function vDash(m) {
-  const d = S.dash;
-  const overdueCls = d.overdue > 0 ? "alert" : "good";
-  let body;
-  if (S.tab === 0) {
-    body = `<div class="four" style="margin-bottom:13px">
-      <div class="card kpi good"><div class="k">Pass rate — 30 days</div><div class="v">${d.pass_rate_30d ?? "—"}${d.pass_rate_30d != null ? "%" : ""}</div><div class="d">${d.completed_30d ?? 0} inspections completed</div></div>
-      <div class="card kpi ${overdueCls}"><div class="k">Overdue</div><div class="v">${d.overdue ?? 0}</div><div class="d">past their planned date</div></div>
-      <div class="card kpi ${d.unassigned ? "warn" : "good"}"><div class="k">Unassigned</div><div class="v">${d.unassigned ?? 0}</div><div class="d">scheduled with no inspector</div></div>
-      <div class="card kpi ${d.awaiting_disposition ? "alert" : "good"}"><div class="k">Awaiting disposition</div><div class="v">${d.awaiting_disposition ?? 0}</div><div class="d">failed checks with no decision</div></div>
-    </div>
-    ${nextStep() ? readinessCard("Setup is not finished") : ""}
-    <div class="card"><h3>Open work</h3>${
-      T(["Reference", "Inspection", "Stage", "Unit", "Planned", "Inspector", "Status"],
-        S.inspections.filter(i => i.status !== "completed").slice(0, 12).map(i => {
-          const t = tplForRev(i.template_rev_id);
-          return [`<span class="id">${esc(i.ref)}</span>`, esc(t?.name || "—"), esc(stageName(i.stage_id)),
-                  esc(i.unit_ref || "—"), fmtDate(i.planned_date),
-                  esc(byId(S.people, i.assigned_to)?.full_name || "—"),
-                  pill(i.planned_date < today() && i.status === "scheduled" ? "Overdue" : i.status)];
-        })).replace('<div class="card">', "<div>")}</div>`;
-  } else {
-    body = `<div class="card"><h3>Pass rate by stage <span class="cl">rolling 30 days</span></h3>
-      <div class="bd" id="yieldHost"><div class="empty">Loading…</div></div></div>`;
-    loadYield();
-  }
-  return head(m, `Inspection performance for ${esc(S.division?.name || DIVISION.name)}. Every figure is read from a database view, so it cannot drift from the records.`,
-    `<button class="btn" data-act="refresh">Refresh</button>`) + tabbar(m) + body;
+  let body = "";
+  if (S.tab === 0) body = dashOverview();
+  else if (S.tab === 1) body = dashFaults();
+  else if (S.tab === 2) body = dashActions();
+  else { body = `<div class="card"><h3>Pass rate by stage</h3>
+    <div class="bd" id="yieldHost"><div class="empty">Loading…</div></div></div>`; loadYield(); }
+
+  return head(m, "Where the work is, what is failing, and what is being done about it.",
+    S.tab === 1 || S.tab === 2 ? periodPicker() : `<button class="btn" data-act="refresh">Refresh</button>`)
+    + tabbar(m) + body;
 }
-/* Called from render() without await, so a thrown error here becomes an
-   unhandled rejection: nothing on screen, nothing actionable in the console.
-   Checking the returned `error` covered a Postgres error but not a network
-   failure, which throws. */
+
+/* The month everything on these two tabs is about. Defaults to this month;
+   the review is usually held on last month, so it is one click away. */
+function periodPicker() {
+  const months = [];
+  const now = new Date();
+  for (let i = 0; i < 13; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push([d.toISOString().slice(0, 7),
+                 d.toLocaleString("en-ZA", { month: "long", year: "numeric" })]);
+  }
+  return `<select id="period" style="padding:8px 11px;border:1px solid var(--line);
+      border-radius:8px;font-weight:600;font-size:13px">
+      ${months.map(([v, l]) => `<option value="${v}" ${S.period === v ? "selected" : ""}>${esc(l)}</option>`).join("")}
+    </select>
+    <button class="btn" data-act="refresh">Refresh</button>`;
+}
+
+/* Pass rate by stage, loaded on demand rather than with every reload: it is
+   one tab of four and the query aggregates every signed inspection. Lost in a
+   rewrite of this view and restored — test-nav caught it. */
 async function loadYield() {
   const host = $("yieldHost"); if (!host) return;
   let data, error;
   try { ({ data, error } = await supabase.from("v_stage_yield").select("*")); }
   catch (e) { error = e; }
-  if (!$("yieldHost")) return;                       // view changed while loading
+  if (!$("yieldHost")) return;                  // the tab changed while loading
   if (error) { host.innerHTML = `<div class="empty">${esc(explain(error))}</div>`; return; }
-  if (!data?.length) { host.innerHTML = `<div class="empty">No completed inspections in the last 30 days.</div>`; return; }
-  const max = Math.max(...data.map(r => r.inspections));
-  host.innerHTML = `<div class="bars">${data.map(r => `<div class="b">
-      <b>${r.pass_rate ?? 0}%</b>
-      <i style="height:${Math.round(r.inspections / max * 100)}%;background:${
-        r.pass_rate < 90 ? "var(--bad)" : r.pass_rate < 95 ? "var(--warn)" : "var(--brand)"}"></i>
-      <span>${esc(r.stage)}</span></div>`).join("")}</div>
-    <div class="legend"><span><i style="background:var(--bad)"></i>below 90%</span>
-    <span><i style="background:var(--warn)"></i>90–95%</span>
-    <span><i style="background:var(--brand)"></i>above 95%</span>
-    <span style="margin-left:auto">bar height is volume, label is pass rate</span></div>`;
+  if (!data || !data.length) {
+    host.innerHTML = `<div class="empty">Nothing signed off yet, so there is no pass rate to show.</div>`;
+    return;
+  }
+  host.innerHTML = T(["Stage", "Inspections", "Passed", "Pass rate"],
+    data.map(r => [esc(r.stage), String(r.total), String(r.passed),
+      `<b style="color:${r.pass_rate < 95 ? "var(--warn)" : "var(--ok)"}">${r.pass_rate}%</b>`]));
 }
 
-/* ---- 2 Workbench ---- */
+function dashOverview() {
+  const d = S.dash || {};
+  return `<div class="four">
+      <div class="card kpi"><div class="k">Open inspections</div><div class="v">${d.open_inspections ?? 0}</div><div class="d">scheduled or in progress</div></div>
+      <div class="card kpi ${(d.overdue ?? 0) ? "alert" : "good"}"><div class="k">Overdue</div><div class="v">${d.overdue ?? 0}</div><div class="d">past their planned date</div></div>
+      <div class="card kpi ${(d.pass_rate ?? 100) < 95 ? "warn" : "good"}"><div class="k">Pass rate</div><div class="v">${d.pass_rate ?? "—"}%</div><div class="d">signed inspections</div></div>
+      <div class="card kpi ${(d.awaiting_disposition ?? 0) ? "warn" : "good"}"><div class="k">Faults awaiting action</div><div class="v">${d.awaiting_disposition ?? 0}</div><div class="d">not yet cleared</div></div>
+    </div>
+    ${nextStep() ? readinessCard("Setup is not finished") : ""}
+    <div class="card" style="margin-top:14px"><h3>Open work</h3>${
+      T(["Reference", "Inspection", "Stage", "Unit", "Planned", "Inspector", "Status"],
+        S.inspections.filter(i => i.status !== "completed").slice(0, 12).map(i => [
+          `<span class="id">${esc(i.ref)}</span>`,
+          esc(tplForRev(i.template_rev_id)?.name || "—"),
+          esc(stageName(i.stage_id)), esc(i.unit_ref || "—"),
+          esc(i.planned_date || "—"),
+          esc(byId(S.people, i.assigned_to)?.full_name || "unassigned"),
+          pill(i.planned_date < today() && i.status === "scheduled" ? "Overdue" : i.status)]))
+    }</div>`;
+}
+
+function dashFaults() {
+  const rows = (S.faultsByProject || []).filter(r => (r.period || "").slice(0, 7) === S.period);
+  const total = rows.reduce((a, r) => a + r.faults, 0);
+  const outstanding = rows.reduce((a, r) => a + (r.outstanding || 0), 0);
+  const label = new Date(S.period + "-01")
+    .toLocaleString("en-ZA", { month: "long", year: "numeric" });
+
+  return `<div class="card"><h3>Faults per project — top ten
+      <span class="cl">${esc(label)} · ${total} fault${total === 1 ? "" : "s"}${
+        outstanding ? ` · ${outstanding} not yet cleared` : ""}</span></h3>
+    <div class="bd">${faultsChart(rows)}</div></div>
+
+    ${rows.length ? `<div class="card" style="margin-top:13px"><h3>The numbers</h3><div class="bd">
+      ${T(["Project", "Category", "Faults", "Not yet cleared"],
+        rows.slice().sort((a, b) => b.faults - a.faults).map(r => [
+          `<span class="id">${esc(r.project_code || "—")}</span>`,
+          esc(r.category), String(r.faults),
+          r.outstanding ? pill(`${r.outstanding} open`) : pill("all cleared")]))}
+    </div></div>` : ""}`;
+}
+
+function dashActions() {
+  const acts = (S.actions || []).filter(a => (a.period || "").slice(0, 7) === S.period)
+    .sort((a, b) => (a.seq || 0) - (b.seq || 0));
+  const label = new Date(S.period + "-01")
+    .toLocaleString("en-ZA", { month: "long", year: "numeric" });
+  const canEdit = isRole("supervisor", "quality_engineer", "quality_manager", "sysadmin");
+
+  return `<div class="card"><h3>Actions — ${esc(label)}
+      <span class="cl">${acts.filter(a => a.status !== "closed").length} still open</span></h3>
+    <div class="bd">
+      <div class="note" style="margin-bottom:13px">What was decided about the faults above.
+        A Pareto with nothing against it is a chart nobody acts on.</div>
+      ${acts.length ? `<div style="overflow-x:auto"><table><thead><tr>
+          <th style="width:44px">No</th><th style="width:190px">Item</th><th>Action</th>
+          <th style="width:120px">Deadline</th><th style="width:150px">Status</th>
+          ${canEdit ? "<th style=\"width:44px\"></th>" : ""}</tr></thead><tbody>
+        ${acts.map((a, i) => `<tr style="cursor:default">
+          <td>${i + 1}</td>
+          <td><b>${esc(a.item)}</b></td>
+          <td style="font-size:12.6px;white-space:normal">${esc(a.action)}</td>
+          <td>${a.deadline ? esc(a.deadline) : "—"}</td>
+          <td>${canEdit
+            ? `<select data-action-set="${a.id}|status"
+                 style="padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px">
+                 ${[["open", "Open"], ["monitoring", "Ongoing / monitoring"], ["closed", "Closed"]]
+                   .map(([v, l]) => `<option value="${v}" ${a.status === v ? "selected" : ""}>${l}</option>`).join("")}
+               </select>`
+            : pill(a.status)}</td>
+          ${canEdit ? `<td><button class="btn sm danger" data-act="del-action" data-id="${a.id}">×</button></td>` : ""}
+        </tr>`).join("")}
+      </tbody></table></div>` : `<div class="empty">No actions recorded for ${esc(label)}.</div>`}
+      ${canEdit ? `<div style="margin-top:13px">
+        <button class="btn pri" data-act="add-action">+ Add an action</button></div>` : ""}
+    </div></div>`;
+}
+
+function actionModal() {
+  openModal("Add an action", `
+    <div class="fld"><label>Item</label>
+      <input id="aItem" placeholder="e.g. Wiring defects"></div>
+    <div class="fld"><label>Action</label>
+      <textarea id="aAction" rows="4"
+        placeholder="What will be done, by whom, and how it will be checked"></textarea></div>
+    <div class="two">
+      <div class="fld"><label>Deadline</label><input id="aDeadline" type="date"></div>
+      <div class="fld"><label>Status</label><select id="aStatus">
+        <option value="open">Open</option>
+        <option value="monitoring">Ongoing / monitoring</option>
+        <option value="closed">Closed</option></select></div>
+    </div>
+    <div class="note">Recorded against ${esc(new Date(S.period + "-01")
+      .toLocaleString("en-ZA", { month: "long", year: "numeric" }))}.</div>`,
+    [["Cancel", "close"], ["Add", "save-action", "pri"]], {});
+}
+
+async function saveAction() {
+  const item = $("aItem").value.trim(), action = $("aAction").value.trim();
+  if (!item || !action) { toast("An item and an action are both required.", "bad"); return; }
+  busy(true);
+  try {
+    const seq = (S.actions || []).filter(a => (a.period || "").slice(0, 7) === S.period).length + 1;
+    const { error } = await supabase.from("quality_actions").insert({
+      period: S.period + "-01", seq, item, action,
+      deadline: $("aDeadline").value || null, status: $("aStatus").value,
+      created_by: S.profile.id
+    });
+    if (error) throw error;
+    closeModal(); await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function setActionField(id, column, value) {
+  busy(true);
+  try {
+    const { error } = await supabase.from("quality_actions")
+      .update({ [column]: value }).eq("id", id);
+    if (error) throw error;
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function deleteAction(id) {
+  if (!confirm("Remove this action from the record?")) return;
+  busy(true);
+  try {
+    const { error } = await supabase.from("quality_actions").delete().eq("id", id);
+    if (error) throw error;
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
 function vWork(m) {
   let body = "";
   if (S.tab === 0) {
@@ -1016,8 +1156,12 @@ const REF_LISTS = [
        not exist yet — the failed check already knows its department from the
        inspection that raised it, so the column added a decision with nothing
        depending on it. The column stays in the schema; nothing writes to it. */
-    cols: [{ f: "code", label: "Code", type: "text", w: "110px" },
-           { f: "description", label: "Description", type: "text" }] }
+    cols: [{ f: "code", label: "Code", type: "text", w: "100px" },
+           { f: "description", label: "Description", type: "text" },
+           /* Several codes roll up into one line on the faults chart —
+              incorrect and missing labels are both Labelling & Identification.
+              Blank groups the code under its own description. */
+           { f: "category", label: "Groups as", type: "text", w: "210px" }] }
 ];
 
 const ALL_LISTS = () => REF_LISTS;
@@ -1601,6 +1745,94 @@ async function clearAnswer(fieldId) {
 }
 
 
+
+
+/* ---------------------------------------------------------------
+   Faults per project.
+
+   A stacked bar per project, tallest first, segmented by defect
+   category — the chart the monthly quality review is built around.
+
+   Drawn as SVG by hand rather than with a charting library: nothing in
+   this app loads code from the internet, and the whole thing is under a
+   hundred lines. It also means the bars use the same palette as the rest
+   of the estate instead of a library's defaults.
+   --------------------------------------------------------------- */
+const CAT_COLOURS = ["#7ab648", "#f5b323", "#3c4f66", "#f2e600", "#e2711d",
+                     "#6b3fa0", "#2b6099", "#b03a30", "#0f7878", "#8593a9"];
+
+function faultsChart(rows, opts) {
+  opts = opts || {};
+  const top = opts.top || 10;
+
+  const byProject = {};
+  for (const r of rows) {
+    const key = r.project_code || "No project";
+    (byProject[key] ||= { code: key, total: 0, cats: {} });
+    byProject[key].cats[r.category] = (byProject[key].cats[r.category] || 0) + r.faults;
+    byProject[key].total += r.faults;
+  }
+  const projects = Object.values(byProject).sort((a, b) => b.total - a.total).slice(0, top);
+  if (!projects.length) {
+    return `<div class="empty">No faults recorded in this period. That is either very good
+      news or nothing has been captured yet — the Register will tell you which.</div>`;
+  }
+
+  /* Categories ordered by how much they contribute overall, so the biggest
+     problem is the same colour at the bottom of every bar and the eye can
+     follow it across projects. */
+  const catTotals = {};
+  for (const p of projects)
+    for (const [c, n] of Object.entries(p.cats)) catTotals[c] = (catTotals[c] || 0) + n;
+  const cats = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a]);
+  const colour = c => CAT_COLOURS[cats.indexOf(c) % CAT_COLOURS.length];
+
+  const W = 980, H = 360, padL = 46, padR = 14, padT = 34, padB = 58;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const max = Math.max(...projects.map(p => p.total));
+  const step = plotW / projects.length;
+  const barW = Math.min(76, step * 0.62);
+  const y = v => padT + plotH - (v / max) * plotH;
+
+  // gridlines at sensible round numbers
+  const tickAt = Math.pow(10, Math.floor(Math.log10(max))) / 2;
+  const ticks = [];
+  for (let v = 0; v <= max; v += tickAt) ticks.push(v);
+
+  const bars = projects.map((p, i) => {
+    const cx = padL + step * i + step / 2;
+    let acc = 0;
+    const segs = cats.filter(c => p.cats[c]).map(c => {
+      const n = p.cats[c];
+      const y0 = y(acc + n), y1 = y(acc);
+      acc += n;
+      const h = y1 - y0;
+      return `<rect x="${cx - barW / 2}" y="${y0}" width="${barW}" height="${h}"
+                fill="${colour(c)}"><title>${esc(p.code)} · ${esc(c)}: ${n}</title></rect>
+        ${h > 13 ? `<text x="${cx}" y="${y0 + h / 2 + 3.5}" text-anchor="middle"
+             font-size="10.5" font-weight="600"
+             fill="${["#f2e600", "#7ab648"].includes(colour(c)) ? "#16304f" : "#fff"}">${n}</text>` : ""}`;
+    }).join("");
+    return `${segs}
+      <text x="${cx}" y="${y(p.total) - 8}" text-anchor="middle" font-size="14"
+        font-weight="700" fill="var(--brand-dk)">${p.total}</text>
+      <text x="${cx}" y="${H - padB + 18}" text-anchor="middle" font-size="11"
+        font-weight="600" fill="var(--ink)">${esc(p.code)}</text>`;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+      ${ticks.map(v => `<line x1="${padL}" x2="${W - padR}" y1="${y(v)}" y2="${y(v)}"
+          stroke="var(--line)" stroke-width="1"/>
+        <text x="${padL - 8}" y="${y(v) + 4}" text-anchor="end" font-size="10"
+          fill="var(--muted)">${v}</text>`).join("")}
+      <line x1="${padL}" x2="${W - padR}" y1="${y(0)}" y2="${y(0)}" stroke="var(--ink-2)" stroke-width="1"/>
+      ${bars}
+    </svg>
+    <div class="legend" style="margin-top:12px;justify-content:center">
+      ${cats.map(c => `<span><i style="background:${colour(c)}"></i>${esc(c)}
+        <b style="color:var(--ink)">${catTotals[c]}</b></span>`).join("")}
+    </div>`;
+}
 
 /* ---------------------------------------------------------------
    Signature pad.
@@ -2713,7 +2945,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-fc],[data-rm-photo],[data-sig-clear],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
+  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-action-set],[data-fc],[data-rm-photo],[data-sig-clear],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
   if (!t) return;
   const d = t.dataset;
 
@@ -2816,6 +3048,9 @@ document.addEventListener("click", async e => {
     case "edit-project": return projectModal(byId(S.projects, Number(t.dataset.id)));
     case "del-project": return deleteProject(Number(t.dataset.id));
     case "save-project": return saveProject();
+    case "add-action": return actionModal();
+    case "save-action": return saveAction();
+    case "del-action": return deleteAction(t.dataset.id);
     case "hand-over": return handoverModal(t.dataset.id);
     case "save-handover": return saveHandover();
     case "add-wo": return worksOrderModal(Number(t.dataset.id), null);
@@ -2869,6 +3104,11 @@ document.addEventListener("change", e => {
     return saveFault(fid, id, col, e.target.value);
   }
   if (d.faultNone !== undefined) return setNoFaults(d.faultNone, e.target.checked);
+  if (e.target.id === "period") { S.period = e.target.value; return render(); }
+  if (d.actionSet) {
+    const [id, col] = d.actionSet.split("|");
+    return setActionField(id, col, e.target.value);
+  }
   if (d.fc) {
     const [id, col] = d.fc.split("|");
     return setFaultProgress(id, col, e.target.value);

@@ -12,6 +12,22 @@
 --  a heading.
 -- ============================================================
 
+-- ------------------------------------------------------------
+--  PREREQUISITES. Run migrations in order.
+--
+--  Without this, a missing earlier migration shows up as a raw error
+--  about a column that does not exist, several statements in, with
+--  nothing saying which file to run first.
+-- ------------------------------------------------------------
+do $prereq$
+begin
+  if not exists (select 1 from information_schema.columns
+                where table_name = 'division_profile' and column_name = 'require_second_approver') then
+    raise exception '007 needs 004-publish-approval-optional.sql first.';
+  end if;
+end $prereq$;
+
+
 create or replace function publish_template_revision(p_rev uuid)
 returns jsonb language plpgsql security invoker as $$
 declare

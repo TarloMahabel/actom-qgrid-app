@@ -22,10 +22,26 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.13.0";
+window.APP_VERSION = "0.14.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.14.1", d: "2026-08-28", t: "Database update order",
+    items: [
+      "A database update that needs an earlier one now says which file to run first, instead of failing with a message about a missing column.",
+      "Two update files had been given the same number. Corrected, and the tests now refuse a repeated or skipped number."
+    ]
+  },
+  {
+    v: "0.14.0", d: "2026-08-28", t: "Faults per project, and the actions arising",
+    items: [
+      "New Faults per project tab on the dashboard: the top ten projects for a month as a stacked bar chart, broken down by defect category, with totals on each bar and a table of the numbers underneath.",
+      "Defect codes can be grouped for reporting. Incorrect labels and missing labels both show as Labelling & Identification on the chart, while each keeps its own code on the record. Set this under Administration, Reference lists.",
+      "New Actions tab: what was decided about the faults, with an owner, a deadline and a status. It is kept month by month instead of being retyped into a slide.",
+      "A month picker on both tabs, so last month's review is one click away."
+    ]
+  },
   {
     v: "0.13.0", d: "2026-08-28", t: "Who cleared a fault, and who verified it",
     items: [

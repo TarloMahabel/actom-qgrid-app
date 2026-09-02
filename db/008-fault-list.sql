@@ -32,6 +32,22 @@
 --  both kinds side by side, and Phase 2 reads one table.
 -- ============================================================
 
+-- ------------------------------------------------------------
+--  PREREQUISITES. Run migrations in order.
+--
+--  Without this, a missing earlier migration shows up as a raw error
+--  about a column that does not exist, several statements in, with
+--  nothing saying which file to run first.
+-- ------------------------------------------------------------
+do $prereq$
+begin
+  if not exists (select 1 from information_schema.columns
+                where table_name = 'division_profile' and column_name = 'require_second_approver') then
+    raise exception '008 needs 004-publish-approval-optional.sql first.';
+  end if;
+end $prereq$;
+
+
 -- result_id is only meaningful for a defect found AT a checkpoint. A fault
 -- typed into a fault list is not attached to one.
 alter table failed_checks alter column result_id drop not null;

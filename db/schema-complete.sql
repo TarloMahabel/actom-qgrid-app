@@ -11,7 +11,7 @@
 --  Paste into the Supabase SQL editor of a NEW, EMPTY project and run.
 --  Order matters; do not run sections out of sequence.
 --
---  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-published-revision.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 009-photo-storage.sql, 010-handover.sql, 011-fault-clearing.sql
+--  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 009-photo-storage.sql, 010-handover.sql, 011-fault-clearing.sql, 012-dashboard.sql
 --
 --  This script is for a fresh project. It is not idempotent: running it
 --  twice will fail on "type user_role already exists", which is the
@@ -1145,93 +1145,24 @@ grant execute on function publish_template_revision, submit_inspection to authen
 
 
 -- ============================================================
---  SECTION 7 — 007-no-empty-published-revision.sql
+--  SECTION 7 — 007-no-empty-templates.sql
 -- ============================================================
-
-create or replace function publish_template_revision(p_rev uuid)
-returns jsonb language plpgsql security invoker as $$
-declare
-  v_tpl uuid; v_author uuid; v_rev smallint; v_require boolean;
-  v_rows int; v_fields int;
-begin
-  if not has_role('quality_manager', 'sysadmin') then
-    raise exception 'PUBLISH_ROLE: only a Quality Manager or System Administrator may publish a template';
-  end if;
-
-  select template_id, created_by, rev into v_tpl, v_author, v_rev
-    from template_revisions where id = p_rev;
-  if v_tpl is null then raise exception 'PUBLISH_MISSING: revision not found'; end if;
-
-  -- Count answerable fields. Sections and instructions are not questions.
-  select count(*) into v_fields
-    from template_revisions tr,
-         jsonb_array_elements(tr.definition->'sections') s,
-         jsonb_array_elements(s->'items') f
-   where tr.id = p_rev
-     and coalesce(f->>'type', '') not in ('section', 'info');
-
-  if coalesce(v_fields, 0) = 0 then
-    raise exception 'PUBLISH_EMPTY: this revision has no questions on it. An inspection generated from it could not be filled in.';
-  end if;
-
-  select require_second_approver into v_require from division_profile where id;
-
-  if coalesce(v_require, false) and v_author = auth.uid() then
-    raise exception 'PUBLISH_SELF: this division requires a second approver, so the person who built a template cannot publish it.';
-  end if;
-
-  update template_revisions
-     set status = 'superseded'
-   where template_id = v_tpl and status = 'published';
-
-  update template_revisions
-     set status = 'published',
-         approved_by = auth.uid(),
-         effective_from = current_date
-   where id = p_rev;
-
-  get diagnostics v_rows = row_count;
-  if v_rows = 0 then
-    raise exception 'PUBLISH_BLOCKED: row level security prevented the update. Your role may not edit this revision.';
-  end if;
-
-  return jsonb_build_object('template_id', v_tpl, 'rev', v_rev, 'status', 'published',
-                            'fields', v_fields,
-                            'self_approved', v_author = auth.uid());
-end $$;
-
-grant execute on function publish_template_revision to authenticated;
 
 -- ------------------------------------------------------------
---  Anything already published empty is a live trap: it will keep
---  generating unfillable inspections. Report them so they can be dealt
---  with, rather than changing status underneath a running division.
+--  PREREQUISITES. Run migrations in order.
+--
+--  Without this, a missing earlier migration shows up as a raw error
+--  about a column that does not exist, several statements in, with
+--  nothing saying which file to run first.
 -- ------------------------------------------------------------
-do $$
-declare r record; n int := 0;
+do $prereq$
 begin
-  for r in
-    select t.code, tr.rev
-      from template_revisions tr
-      join inspection_templates t on t.id = tr.template_id
-     where tr.status = 'published'
-       and (select count(*)
-              from jsonb_array_elements(tr.definition->'sections') s,
-                   jsonb_array_elements(s->'items') f
-             where coalesce(f->>'type','') not in ('section','info')) = 0
-  loop
-    n := n + 1;
-    raise warning 'Published revision with no questions: % rev % — inspections generated from it cannot be filled in.', r.code, r.rev;
-  end loop;
-  if n > 0 then
-    raise warning '% published revision(s) have no questions. Add fields, publish a new revision, and move any unstarted inspections onto it.', n;
+  if not exists (select 1 from information_schema.columns
+                where table_name = 'division_profile' and column_name = 'require_second_approver') then
+    raise exception '007 needs 004-publish-approval-optional.sql first.';
   end if;
-end $$;
+end $prereq$;
 
-
--- ============================================================
---  SECTION 8 — 007-no-empty-templates.sql
--- ============================================================
 
 create or replace function publish_template_revision(p_rev uuid)
 returns jsonb language plpgsql security invoker as $$
@@ -1288,8 +1219,24 @@ grant execute on function publish_template_revision to authenticated;
 
 
 -- ============================================================
---  SECTION 9 — 008-fault-list.sql
+--  SECTION 8 — 008-fault-list.sql
 -- ============================================================
+
+-- ------------------------------------------------------------
+--  PREREQUISITES. Run migrations in order.
+--
+--  Without this, a missing earlier migration shows up as a raw error
+--  about a column that does not exist, several statements in, with
+--  nothing saying which file to run first.
+-- ------------------------------------------------------------
+do $prereq$
+begin
+  if not exists (select 1 from information_schema.columns
+                where table_name = 'division_profile' and column_name = 'require_second_approver') then
+    raise exception '008 needs 004-publish-approval-optional.sql first.';
+  end if;
+end $prereq$;
+
 
 -- result_id is only meaningful for a defect found AT a checkpoint. A fault
 -- typed into a fault list is not attached to one.
@@ -1439,7 +1386,7 @@ grant execute on function submit_inspection to authenticated;
 
 
 -- ============================================================
---  SECTION 10 — 009-photo-storage.sql
+--  SECTION 9 — 009-photo-storage.sql
 -- ============================================================
 
 -- 1. Detaching a photo from an inspection.
@@ -1525,8 +1472,24 @@ end $verify$;
 
 
 -- ============================================================
---  SECTION 11 — 010-handover.sql
+--  SECTION 10 — 010-handover.sql
 -- ============================================================
+
+-- ------------------------------------------------------------
+--  PREREQUISITES. Run migrations in order.
+--
+--  Without this, a missing earlier migration shows up as a raw error
+--  about a column that does not exist, several statements in, with
+--  nothing saying which file to run first.
+-- ------------------------------------------------------------
+do $prereq$
+begin
+  if not exists (select 1 from information_schema.routines
+                where routine_name = 'has_role') then
+    raise exception '010 needs 001-init-inspections.sql first.';
+  end if;
+end $prereq$;
+
 
 -- Who first opened it. assigned_to moves on a handover; this does not.
 alter table inspections
@@ -1675,8 +1638,24 @@ grant select on v_inspection_people to authenticated;
 
 
 -- ============================================================
---  SECTION 12 — 011-fault-clearing.sql
+--  SECTION 11 — 011-fault-clearing.sql
 -- ============================================================
+
+-- ------------------------------------------------------------
+--  PREREQUISITES. Run migrations in order.
+--
+--  Without this, a missing earlier migration shows up as a raw error
+--  about a column that does not exist, several statements in, with
+--  nothing saying which file to run first.
+-- ------------------------------------------------------------
+do $prereq$
+begin
+  if not exists (select 1 from information_schema.columns
+                where table_name = 'failed_checks' and column_name = 'source') then
+    raise exception '011 needs 008-fault-list.sql first (failed_checks.source is missing).';
+  end if;
+end $prereq$;
+
 
 alter table failed_checks
   add column if not exists cleared_by   uuid references profiles(id),
@@ -1741,6 +1720,119 @@ create policy fc_progress on failed_checks for update
     has_role('inspector', 'supervisor', 'quality_engineer', 'quality_manager', 'sysadmin')
   )
   with check (true);
+
+
+-- ============================================================
+--  SECTION 12 — 012-dashboard.sql
+-- ============================================================
+
+-- ------------------------------------------------------------
+--  PREREQUISITES. Run migrations in order.
+--
+--  Without this, a missing earlier migration shows up as a raw error
+--  about a column that does not exist, several statements in, with
+--  nothing saying which file to run first.
+-- ------------------------------------------------------------
+do $prereq$
+begin
+  if not exists (select 1 from information_schema.columns
+                where table_name = 'failed_checks' and column_name = 'verified_by') then
+    raise exception '012 needs 011-fault-clearing.sql first (failed_checks.verified_by is missing).';
+  end if;
+  if not exists (select 1 from information_schema.columns
+                where table_name = 'failed_checks' and column_name = 'source') then
+    raise exception '012 needs 008-fault-list.sql first (failed_checks.source is missing).';
+  end if;
+end $prereq$;
+
+
+alter table defect_codes
+  add column if not exists category text;
+
+comment on column defect_codes.category is
+  'How this code is grouped for reporting. Several codes share a category — '
+  'incorrect and missing labels are both Labelling & Identification. Codes '
+  'remain the unit of record; the category is only presentation.';
+
+-- Anything without a category groups under its own description, so nothing
+-- disappears from a chart because somebody has not categorised it yet.
+update defect_codes set category = description where category is null;
+
+-- ------------------------------------------------------------
+--  Faults per project, by category and month.
+--
+--  Counts BOTH kinds of defect — a failed checkpoint and a line typed on
+--  a fault list — because splitting them would mean two charts of the
+--  same thing.
+-- ------------------------------------------------------------
+create or replace view v_faults_by_project with (security_invoker = on) as
+select date_trunc('month', f.created_at)::date        as period,
+       p.id                                           as project_id,
+       p.code                                         as project_code,
+       p.name                                         as project_name,
+       coalesce(d.category, d.description, 'Uncoded') as category,
+       count(*)                                       as faults,
+       count(*) filter (where f.verified_by is null)  as outstanding
+  from failed_checks f
+  join inspections i on i.id = f.inspection_id
+  left join projects p on p.id = i.project_id
+  left join defect_codes d on d.id = f.defect_code_id
+ group by 1, 2, 3, 4, 5;
+
+grant select on v_faults_by_project to authenticated;
+
+-- ------------------------------------------------------------
+--  Actions arising from the review.
+-- ------------------------------------------------------------
+create table if not exists quality_actions (
+  id          bigserial primary key,
+  period      date not null,                 -- the month it was raised for
+  seq         smallint,
+  item        text not null check (length(btrim(item)) > 0),
+  action      text not null check (length(btrim(action)) > 0),
+  owner_id    uuid references profiles(id),
+  deadline    date,
+  status      text not null default 'open'
+              check (status in ('open', 'monitoring', 'closed')),
+  created_by  uuid references profiles(id),
+  created_at  timestamptz not null default now(),
+  closed_at   timestamptz
+);
+create index if not exists quality_actions_period_idx on quality_actions (period, seq);
+
+comment on table quality_actions is
+  'What was decided about the faults, month by month. A Pareto with no '
+  'actions against it is a chart nobody acts on.';
+
+alter table quality_actions enable row level security;
+
+create policy qa_read on quality_actions for select
+  using (auth.uid() is not null);
+
+create policy qa_write on quality_actions for insert
+  with check (has_role('quality_engineer', 'quality_manager', 'supervisor', 'sysadmin'));
+
+create policy qa_edit on quality_actions for update
+  using (has_role('quality_engineer', 'quality_manager', 'supervisor', 'sysadmin'))
+  with check (true);
+
+create policy qa_remove on quality_actions for delete
+  using (has_role('quality_manager', 'sysadmin'));
+
+-- Closing an action stamps when, from the database rather than the browser.
+create or replace function stamp_action_closed()
+returns trigger language plpgsql as $$
+begin
+  if new.status is distinct from old.status then
+    new.closed_at := case when new.status = 'closed' then now() else null end;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_action_closed on quality_actions;
+create trigger trg_action_closed
+  before update on quality_actions
+  for each row execute function stamp_action_closed();
 
 
 -- ============================================================
@@ -1821,12 +1913,12 @@ insert into public.qgrid_migrations (filename) values
   ('004-publish-approval-optional.sql'),
   ('005-lock-ref-sequences.sql'),
   ('006-fix-silent-publish.sql'),
-  ('007-no-empty-published-revision.sql'),
   ('007-no-empty-templates.sql'),
   ('008-fault-list.sql'),
   ('009-photo-storage.sql'),
   ('010-handover.sql'),
-  ('011-fault-clearing.sql')
+  ('011-fault-clearing.sql'),
+  ('012-dashboard.sql')
 on conflict (filename) do nothing;
 
 

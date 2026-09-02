@@ -20,6 +20,22 @@
 --  appear on one inspection.
 -- ============================================================
 
+-- ------------------------------------------------------------
+--  PREREQUISITES. Run migrations in order.
+--
+--  Without this, a missing earlier migration shows up as a raw error
+--  about a column that does not exist, several statements in, with
+--  nothing saying which file to run first.
+-- ------------------------------------------------------------
+do $prereq$
+begin
+  if not exists (select 1 from information_schema.routines
+                where routine_name = 'has_role') then
+    raise exception '010 needs 001-init-inspections.sql first.';
+  end if;
+end $prereq$;
+
+
 -- Who first opened it. assigned_to moves on a handover; this does not.
 alter table inspections
   add column if not exists started_by uuid references profiles(id);

@@ -18,6 +18,22 @@
 --  never show the fault was resolved.
 -- ============================================================
 
+-- ------------------------------------------------------------
+--  PREREQUISITES. Run migrations in order.
+--
+--  Without this, a missing earlier migration shows up as a raw error
+--  about a column that does not exist, several statements in, with
+--  nothing saying which file to run first.
+-- ------------------------------------------------------------
+do $prereq$
+begin
+  if not exists (select 1 from information_schema.columns
+                where table_name = 'failed_checks' and column_name = 'source') then
+    raise exception '011 needs 008-fault-list.sql first (failed_checks.source is missing).';
+  end if;
+end $prereq$;
+
+
 alter table failed_checks
   add column if not exists cleared_by   uuid references profiles(id),
   add column if not exists cleared_at   timestamptz,

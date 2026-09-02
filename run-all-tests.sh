@@ -34,7 +34,7 @@ run_suite test-boot
 
 echo
 echo "=== Front-end suites (jsdom, real app files, mock backend) ==="
-for t in test-nav test-capture test-designer test-requirements test-admin; do
+for t in test-nav test-capture test-designer test-requirements test-admin test-dashboard; do
   run_suite "$t"
 done
 
