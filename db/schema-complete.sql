@@ -11,7 +11,7 @@
 --  Paste into the Supabase SQL editor of a NEW, EMPTY project and run.
 --  Order matters; do not run sections out of sequence.
 --
---  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-published-revision.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 009-photo-storage.sql, 010-handover.sql
+--  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-published-revision.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 009-photo-storage.sql, 010-handover.sql, 011-fault-clearing.sql
 --
 --  This script is for a fresh project. It is not idempotent: running it
 --  twice will fail on "type user_role already exists", which is the
@@ -1675,7 +1675,76 @@ grant select on v_inspection_people to authenticated;
 
 
 -- ============================================================
---  SECTION 12 — Group reference data
+--  SECTION 12 — 011-fault-clearing.sql
+-- ============================================================
+
+alter table failed_checks
+  add column if not exists cleared_by   uuid references profiles(id),
+  add column if not exists cleared_at   timestamptz,
+  add column if not exists verified_by  uuid references profiles(id),
+  add column if not exists verified_at  timestamptz;
+
+comment on column failed_checks.cleared_by is
+  'Who did the work that put the fault right.';
+comment on column failed_checks.verified_by is
+  'Who checked the work afterwards. Independent verification is the point, '
+  'so the same person doing both is recorded and shown, not silently accepted.';
+
+-- Timestamps written by the database, not sent by the client.
+create or replace function stamp_fault_progress()
+returns trigger language plpgsql as $$
+begin
+  if new.cleared_by is distinct from old.cleared_by then
+    new.cleared_at := case when new.cleared_by is null then null else now() end;
+  end if;
+  if new.verified_by is distinct from old.verified_by then
+    new.verified_at := case when new.verified_by is null then null else now() end;
+  end if;
+
+  -- Verification is a check ON the clearing. Recording it before there is
+  -- anything to check is an ordering mistake, not a preference.
+  if new.verified_by is not null and new.cleared_by is null then
+    raise exception 'FAULT_ORDER: record who cleared the fault before recording who verified it';
+  end if;
+
+  return new;
+end $$;
+
+drop trigger if exists trg_fault_progress on failed_checks;
+create trigger trg_fault_progress
+  before update on failed_checks
+  for each row execute function stamp_fault_progress();
+
+-- A fault that is cleared and verified is closed. Kept as a view so the
+-- Failed checks queue and any later report agree on what "outstanding" means.
+create or replace view v_fault_status with (security_invoker = on) as
+select f.*,
+       c.full_name as cleared_by_name,
+       v.full_name as verified_by_name,
+       case
+         when f.verified_by is not null then 'verified'
+         when f.cleared_by  is not null then 'cleared, awaiting verification'
+         else 'outstanding'
+       end as progress,
+       (f.cleared_by is not null and f.cleared_by = f.verified_by) as self_verified
+  from failed_checks f
+  left join profiles c on c.id = f.cleared_by
+  left join profiles v on v.id = f.verified_by;
+
+grant select on v_fault_status to authenticated;
+
+-- Clearing and verifying continue after the inspection is signed, so the
+-- update policy cannot be tied to an open inspection.
+drop policy if exists fc_progress on failed_checks;
+create policy fc_progress on failed_checks for update
+  using (
+    has_role('inspector', 'supervisor', 'quality_engineer', 'quality_manager', 'sysadmin')
+  )
+  with check (true);
+
+
+-- ============================================================
+--  SECTION 13 — Group reference data
 -- ============================================================
 
 insert into manufacturing_stages (name, sort_order) values
@@ -1700,7 +1769,7 @@ on conflict (code) do nothing;
 
 
 -- ============================================================
---  SECTION 13 — Division seed — EDIT BEFORE RUNNING
+--  SECTION 14 — Division seed — EDIT BEFORE RUNNING
 -- ============================================================
 
 insert into division_profile (code, name, hold_points)
@@ -1730,7 +1799,7 @@ on conflict (family_id, stage_id) do nothing;
 
 
 -- ============================================================
---  SECTION 14 — Migration ledger stamp
+--  SECTION 15 — Migration ledger stamp
 --
 --  Running this script bypasses scripts/migrate.mjs, so the ledger it
 --  reads would be empty and the next run would try to apply everything
@@ -1756,12 +1825,13 @@ insert into public.qgrid_migrations (filename) values
   ('007-no-empty-templates.sql'),
   ('008-fault-list.sql'),
   ('009-photo-storage.sql'),
-  ('010-handover.sql')
+  ('010-handover.sql'),
+  ('011-fault-clearing.sql')
 on conflict (filename) do nothing;
 
 
 -- ============================================================
---  SECTION 15 — Verification
+--  SECTION 16 — Verification
 --  Run these and check the results before going any further.
 -- ============================================================
 

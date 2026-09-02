@@ -382,7 +382,7 @@ function vWork(m) {
       }));
   }
   else {
-    const cols = ["Reference", "Inspection", "Found", "Defect", "What", "Recorded"]
+    const cols = ["Reference", "Inspection", "Found", "Defect", "What", "Progress"]
       .concat(HP() ? ["Hold point"] : []).concat(["Disposition", ""]);
     body = T(cols, S.failedChecks.map(f => {
       const insp = byId(S.inspections, f.inspection_id);
@@ -393,7 +393,23 @@ function vWork(m) {
         f.description
           ? `${esc(f.description)}${f.location ? `<div class="sub">${esc(f.location)}</div>` : ""}`
           : `<span style="color:var(--muted)">a checkpoint failed</span>`,
-        new Date(f.created_at).toLocaleString("en-ZA")];
+        /* Clearing and verification are usually recorded here, days after the
+           inspection was signed — this is where the work actually lands. */
+        (() => {
+          const people = S.people.filter(p => p.active);
+          const sel = (col, val, disabled) => `<select data-fc="${f.id}|${col}" ${disabled ? "disabled" : ""}
+              style="padding:4px 6px;border:1px solid var(--line);border-radius:6px;font-size:11.5px;
+                     background:${disabled ? "#f4f6f9" : "#fff"};max-width:150px">
+              <option value="">— not yet —</option>
+              ${people.map(p => `<option value="${p.id}" ${String(val) === String(p.id) ? "selected" : ""}>${esc(p.full_name)}</option>`).join("")}
+            </select>`;
+          return `<div style="display:flex;flex-direction:column;gap:4px">
+            <label style="font-size:10.5px;color:var(--muted)">Cleared ${sel("cleared_by", f.cleared_by, false)}</label>
+            <label style="font-size:10.5px;color:var(--muted)">Verified ${sel("verified_by", f.verified_by, !f.cleared_by)}</label>
+            ${f.cleared_by && f.cleared_by === f.verified_by
+              ? `<span class="tag ncr">same person</span>` : ""}
+          </div>`;
+        })()];
       const hp = HP() ? [f.is_hold ? pill("Hold point") : "—"] : [];
       return base.concat(hp, [pill(f.disposition || "awaiting"),
         f.disposition === "awaiting" && isRole("supervisor", "quality_engineer", "quality_manager")
@@ -1855,7 +1871,37 @@ async function loadCaptureFaults(inspectionId) {
 function faultTable(f) {
   const rows = S.capture.faults[f.id] || [];
   const none = (S.capture.results[f.id] || {}).value_text === "no faults found";
-  const cols = "70px 150px 1fr 150px 110px 44px";
+  const cols = "58px 130px 1fr 150px 105px 40px";
+  const people = S.people.filter(p => p.active);
+
+  /* Cleared and verified sit on a second line under each fault rather than
+     as two more columns. Eight columns is unreadable on a tablet, and these
+     two are usually filled in later anyway — often after the inspection is
+     signed — so they are a separate act, not part of describing the fault. */
+  const progress = r => {
+    const sel = (col, value, disabled) => `<select data-fault="${f.id}|${r.id}|${col}"
+        ${disabled ? "disabled" : ""}
+        style="padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px;
+               background:${disabled ? "#f4f6f9" : "#fff"};min-width:150px">
+        <option value="">— not yet —</option>
+        ${people.map(p => `<option value="${p.id}" ${String(value) === String(p.id) ? "selected" : ""}>${esc(p.full_name)}</option>`).join("")}
+      </select>`;
+    const selfVerified = r.cleared_by && r.cleared_by === r.verified_by;
+    return `<div style="grid-column:1/-1;display:flex;gap:14px;flex-wrap:wrap;align-items:center;
+          padding:2px 2px 9px 60px">
+      <label style="display:flex;gap:7px;align-items:center;font-size:11.5px;color:var(--ink-2)">
+        Cleared by ${sel("cleared_by", r.cleared_by, false)}
+        ${r.cleared_at ? `<span class="sub" style="margin:0">${new Date(r.cleared_at).toLocaleDateString("en-ZA")}</span>` : ""}
+      </label>
+      <label style="display:flex;gap:7px;align-items:center;font-size:11.5px;color:var(--ink-2)">
+        Verified by ${sel("verified_by", r.verified_by, !r.cleared_by)}
+        ${r.verified_at ? `<span class="sub" style="margin:0">${new Date(r.verified_at).toLocaleDateString("en-ZA")}</span>` : ""}
+      </label>
+      ${!r.cleared_by ? `<span class="sub" style="margin:0">Verification is a check on the clearing — record who cleared it first.</span>` : ""}
+      ${selfVerified ? `<span class="tag ncr">Cleared and verified by the same person</span>` : ""}
+      ${r.verified_by ? pill("Verified") : r.cleared_by ? pill("Awaiting verification") : ""}
+    </div>`;
+  };
 
   return `<div>
     ${rows.length ? `
@@ -1865,7 +1911,7 @@ function faultTable(f) {
         <div>Where on the panel</div><div>Severity</div><div></div>
       </div>
       ${rows.map((r, i) => `<div style="display:grid;grid-template-columns:${cols};gap:8px;
-            align-items:center;padding:3px 2px">
+            align-items:center;padding:3px 2px;border-top:1px solid var(--line-2)">
         <span class="id">${i + 1}</span>
         <select data-fault="${f.id}|${r.id}|defect_code_id"
           style="padding:6px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px">
@@ -1883,6 +1929,7 @@ function faultTable(f) {
           ${SEVERITIES.map(([v, l]) => `<option value="${v}" ${r.severity === v ? "selected" : ""}>${l}</option>`).join("")}
         </select>
         <button class="btn sm danger" data-fault-del="${f.id}|${r.id}" title="Remove this line">×</button>
+        ${progress(r)}
       </div>`).join("")}
     ` : ""}
 
@@ -1897,7 +1944,26 @@ function faultTable(f) {
         ? `${rows.length} fault${rows.length === 1 ? "" : "s"} recorded`
         : none ? "Recorded as clean" : "Add a fault, or confirm there are none"}</span>
     </div>
+    ${rows.length ? `<div class="note" style="margin-top:11px">Cleared and verified are usually
+      filled in later, once the work has been done. They stay editable from
+      <b>Failed checks</b> after this inspection is signed.</div>` : ""}
   </div>`;
+}
+
+/* Recording who cleared or verified a fault, from the Failed checks queue.
+   Separate from saveFault because there is no capture form open here — the
+   fault may belong to an inspection signed weeks ago. */
+async function setFaultProgress(id, column, value) {
+  busy(true);
+  try {
+    const patch = { [column]: value || null };
+    // Withdrawing the clearing withdraws the verification with it.
+    if (column === "cleared_by" && !value) patch.verified_by = null;
+    const { error } = await supabase.from("failed_checks").update(patch).eq("id", id);
+    if (error) throw error;
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
 }
 
 async function addFault(fieldId) {
@@ -1926,7 +1992,18 @@ function saveFault(fieldId, id, column, value) {
   const rows = S.capture.faults[fieldId] || [];
   const row = rows.find(r => String(r.id) === String(id));
   if (!row) return;
-  row[column] = column === "defect_code_id" ? (value ? Number(value) : null) : value;
+  row[column] = column === "defect_code_id" ? (value ? Number(value) : null)
+    : /_by$/.test(column) ? (value || null)
+    : value;
+
+  /* Clearing who cleared it also clears the verification: a verification is a
+     check ON the clearing, and leaving it behind would assert that somebody
+     verified work nobody is recorded as having done. */
+  if (column === "cleared_by" && !row[column] && row.verified_by) {
+    row.verified_by = null;
+    supabase.from("failed_checks").update({ verified_by: null }).eq("id", id)
+      .then(({ error }) => { if (error) toast(explain(error), "bad"); });
+  }
   const key = `${id}|${column}`;
   clearTimeout(faultTimers[key]);
   faultTimers[key] = setTimeout(async () => {
@@ -1936,6 +2013,7 @@ function saveFault(fieldId, id, column, value) {
       if (error) throw error;
       const el = $("saveState");
       if (el) el.textContent = "Saved " + new Date().toLocaleTimeString("en-ZA");
+      render();
     } catch (e) { toast(explain(e), "bad"); }
   }, 500);
 }
@@ -2635,7 +2713,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-rm-photo],[data-sig-clear],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
+  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-fc],[data-rm-photo],[data-sig-clear],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
   if (!t) return;
   const d = t.dataset;
 
@@ -2791,6 +2869,10 @@ document.addEventListener("change", e => {
     return saveFault(fid, id, col, e.target.value);
   }
   if (d.faultNone !== undefined) return setNoFaults(d.faultNone, e.target.checked);
+  if (d.fc) {
+    const [id, col] = d.fc.split("|");
+    return setFaultProgress(id, col, e.target.value);
+  }
   if (d.comp) {
     const [pid, skill] = d.comp.split("|");
     return setCompetency(pid, skill, e.target.value);

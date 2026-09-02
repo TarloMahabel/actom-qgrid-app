@@ -235,6 +235,44 @@ const { loadApp, suite } = require('./test/harness');
   s.check('a line can be removed on its own',
     fd.querySelectorAll('[data-fault-del]').length === 1);
 
+  s.group('who cleared a fault and who verified it');
+  /* Its own app: the handover group above navigates away, and reusing that
+     document meant these checks were querying a page with no fault list on
+     it — they failed for a reason that had nothing to do with the feature. */
+  const cv = await loadApp('inspect');
+  const cw = cv.window, cvd = cv.window.document;
+  cvd.querySelector('#nav button[data-go="work"]').click(); await cv.sleep(60);
+  cvd.querySelector('[data-open-capture]').click(); await cv.sleep(420);
+  cvd.querySelector('[data-fault-add]').click(); await cv.sleep(500);
+  const flTxt = () => cv.$('page').textContent;
+  s.check('each line records who cleared it', flTxt().includes('Cleared by'));
+  s.check('and who verified it', flTxt().includes('Verified by'));
+
+  const sel = suffix => Array.from(cvd.querySelectorAll('[data-fault]'))
+    .find(x => x.dataset.fault.endsWith(suffix));
+  /* Verification is a check ON the clearing. Recording it first would assert
+     that somebody checked work nobody is recorded as having done. */
+  s.check('verified cannot be set before cleared', sel('|verified_by').disabled);
+  s.check('and it says why', flTxt().includes('record who cleared it first'));
+
+  sel('|cleared_by').value = 'u2';
+  sel('|cleared_by').dispatchEvent(new cw.Event('change', { bubbles: true }));
+  await cv.sleep(900);
+  s.check('cleared by is saved',
+    cw.GRID_CALLS.some(c => c[0] === 'update' && c[1] === 'failed_checks' &&
+      'cleared_by' in (c[2] || {})));
+  s.check('verified then becomes available', !sel('|verified_by').disabled);
+  s.check('the line shows it is awaiting verification',
+    flTxt().includes('Awaiting verification'));
+
+  sel('|verified_by').value = 'u2';
+  sel('|verified_by').dispatchEvent(new cw.Event('change', { bubbles: true }));
+  await cv.sleep(900);
+  /* Allowed, because a small shop may have nobody else — but never silent.
+     Independent verification is the point of having two columns. */
+  s.check('the same person doing both is flagged, not hidden',
+    flTxt().includes('same person'));
+
   s.group('no faults is stated, not assumed');
   /* An empty section and a clean panel must not look the same in a quality
      record: "nobody looked" and "nothing was wrong" are different facts. */

@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.12.1";
+window.APP_VERSION = "0.13.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.13.0", d: "2026-08-28", t: "Who cleared a fault, and who verified it",
+    items: [
+      "Every fault line now records who cleared the fault and who verified the work, chosen from the people on the system rather than typed in.",
+      "The dates are set by the system when each is recorded, not typed by hand.",
+      "Verification cannot be recorded before clearing — it is a check on the clearing, so there has to be something to check.",
+      "The same person clearing and verifying is allowed but shown on the line, because independent verification is the point of having both.",
+      "Both can be recorded from Failed checks after the inspection is signed, which is usually when the work is actually done."
+    ]
+  },
   {
     v: "0.12.1", d: "2026-08-28", t: "As many photos as the job needs",
     items: [
