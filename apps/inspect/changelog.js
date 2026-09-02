@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.11.0";
+window.APP_VERSION = "0.12.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.12.0", d: "2026-08-28", t: "Signature pad",
+    items: [
+      "The signature field is now a pad you sign on with a finger, a stylus or a mouse. It previously showed a note saying signing happened on submit, and there was nothing to sign.",
+      "A form with an empty signature will not submit, and says which signature is missing.",
+      "The drawing is saved with the inspection and appears on the record. Who signed and when still come from your sign-in, not from the drawing — the pad is the mark that goes on a certificate.",
+      "A signature is not lost if the screen refreshes while you are part way through the form."
+    ]
+  },
   {
     v: "0.11.0", d: "2026-08-28", t: "Handing an inspection to someone else",
     items: [

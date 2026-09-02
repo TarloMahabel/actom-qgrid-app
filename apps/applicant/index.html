@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#06182B">
+<meta name="description" content="Apply for an ACTOM apprenticeship or learnership.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Apprenticeship applications &middot; ACTOM</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="stylesheet" href="./tokens.css?v=1">
+<link rel="stylesheet" href="./styles.css?v=1">
+</head>
+<body>
+
+<!-- ============================================================ sign-in -->
+<div id="signin" class="signin hidden">
+  <div class="signin-shell">
+
+    <!-- Career panel. Hidden on narrow screens, where the applicant wants
+         the form, not the pitch. -->
+    <div class="signin-pitch">
+      <div data-actom-logo="light" data-logo-height="52"></div>
+      <p class="pitch-tagline">Powering South Africa since 1903</p>
+
+      <h1 class="pitch-head">Learn a trade.<br>Build a career.</h1>
+      <p class="pitch-lede">
+        ACTOM apprentices train on the switchgear, transformers and protection systems
+        that keep the country's lights on. You earn while you learn, you qualify with a
+        recognised national trade certificate, and you finish with a skill that travels.
+      </p>
+
+
+      <!-- Transmission line running along the base of the panel. -->
+      <svg class="pitch-line" viewBox="0 0 600 90" aria-hidden="true">
+        <path class="pl-conductor" d="M20 30 Q95 62 170 30 Q245 62 320 30 Q395 62 470 30 Q545 62 620 30"/>
+        <g class="pl-pylon">
+          <path d="M20 30 L20 78 M8 78 L32 78 M11 52 L29 52 M20 30 L11 52 M20 30 L29 52"/>
+          <path d="M170 30 L170 78 M158 78 L182 78 M161 52 L179 52 M170 30 L161 52 M170 30 L179 52"/>
+          <path d="M320 30 L320 78 M308 78 L332 78 M311 52 L329 52 M320 30 L311 52 M320 30 L329 52"/>
+          <path d="M470 30 L470 78 M458 78 L482 78 M461 52 L479 52 M470 30 L461 52 M470 30 L479 52"/>
+        </g>
+      </svg>
+    </div>
+
+    <!-- Sign-in card, inside its own panel: the flex centring belongs to
+         the wrapper, not the card, or the card's children lay out as a row. -->
+    <div class="signin-panel">
+    <div class="signin-card">
+      <div class="signin-card-mark" data-actom-logo="dark" data-logo-height="34"></div>
+      <p class="small muted" style="margin-top:-.2rem">Powering South Africa since 1903</p>
+
+      <h1 style="margin-top:1.2rem">Apply for an apprenticeship</h1>
+      <p class="small muted">We send a six-digit code to your email address. No password to remember, and you can come back later to finish — nothing is lost if you run out of data.</p>
+
+    <div id="signinError" class="notice notice-err hidden" role="alert"></div>
+
+    <div id="stepEmail">
+      <div class="field">
+        <label for="emailInput">Email address</label>
+        <input type="email" id="emailInput" autocomplete="email" inputmode="email"
+               placeholder="you@example.com" required>
+      </div>
+      <button class="btn" id="sendCodeBtn" style="width:100%">Send my code</button>
+    </div>
+
+    <div id="stepCode" class="hidden">
+      <p class="small">Code sent to <strong id="sentTo"></strong>. It expires in 10 minutes.</p>
+      <div class="field">
+        <label for="codeInput">Six-digit code</label>
+        <input type="text" id="codeInput" class="otp-input" inputmode="numeric"
+               autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}">
+      </div>
+      <button class="btn" id="verifyBtn" style="width:100%">Verify and continue</button>
+      <button class="btn btn-ghost btn-sm" id="backToEmail" style="width:100%;margin-top:.6rem">Use a different email</button>
+    </div>
+
+    <p class="small muted" style="margin-top:1.4rem;border-top:1px solid var(--line);padding-top:.9rem">
+      ACTOM processes your information under the Protection of Personal Information Act.
+      Read the <a href="#" id="privacyLink">privacy notice</a> before you apply.
+    </p>
+    </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== portal -->
+<div id="portal" class="hidden">
+  <header class="masthead">
+    <div class="masthead-inner">
+      <div data-actom-logo="light" data-logo-height="34"></div>
+      <p class="tagline">Apprenticeship<br>applications</p>
+      <div class="spacer"></div>
+      <div class="who">
+        <span id="whoEmail"></span>
+        <button class="btn btn-on-dark btn-sm" id="signOutBtn">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="loader" class="loader">
+      <svg viewBox="0 0 140 60" aria-hidden="true">
+        <path class="conductor" d="M8 20 Q35 42 62 20 Q89 42 116 20" fill="none" stroke-width="3"/>
+        <g stroke="#9DB0C0" stroke-width="2" fill="none">
+          <path d="M8 20 L8 52 M2 52 L14 52 M3 32 L13 32"/>
+          <path d="M62 20 L62 52 M56 52 L68 52 M57 32 L67 32"/>
+          <path d="M116 20 L116 52 M110 52 L122 52 M111 32 L121 32"/>
+        </g>
+      </svg>
+      <p>Energising</p>
+    </div>
+
+    <div id="content" class="hidden"></div>
+  </main>
+
+  <div class="footer">
+    ACTOM (Pty) Ltd &middot; Questions about your application:
+    <a href="mailto:apprenticeships@actom.co.za">apprenticeships@actom.co.za</a><br>
+    Privacy queries and data requests:
+    <a href="mailto:informationofficer@actom.co.za">informationofficer@actom.co.za</a>
+  </div>
+</div>
+
+<div id="autosave" class="autosave" role="status" aria-live="polite">Saved</div>
+
+<script src="./vendor/supabase.js"></script>
+<script src="./config.js?v=1"></script>
+<script src="./logo.js?v=1"></script>
+<script src="./app.js?v=1"></script>
+</body>
+</html>

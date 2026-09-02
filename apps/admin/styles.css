@@ -1,0 +1,307 @@
+/* =====================================================================
+   ACTOM Apprenticeship Portal — reviewer console styles
+   Internal. Desktop density. Ships no progress-line or upload-drop styles.
+
+   Edit here, then run shared/sync.sh to push into both apps and the demo.
+   Never edit the copies under apps/ or demo/ — sync.sh overwrites them.
+   ===================================================================== */
+
+/* ---------------------------------------------------------------- head */
+.masthead {
+  background: linear-gradient(150deg, var(--actom-blue-lite), var(--actom-blue-dim));
+  color: #fff;
+  padding: 1rem 1.25rem;
+  position: relative;
+  overflow: hidden;
+}
+.masthead::after {
+  /* A single conductor running the width of the header. */
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 3px;
+  background: rgba(255,255,255,.28);
+}
+.masthead-inner {
+  max-width: 1760px; margin: 0 auto;
+  display: flex; align-items: center; gap: .9rem; flex-wrap: wrap;
+}
+.wordmark {
+  font-family: var(--display);
+  font-size: 1.55rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.wordmark span { color: var(--cyan); }
+.masthead .tagline {
+  font-size: .8rem; color: #A9C3D6; margin: 0;
+  border-left: 1px solid rgba(255,255,255,.22); padding-left: .9rem;
+}
+.masthead .spacer { flex: 1; }
+.masthead .who { font-size: .82rem; color: #C8DCEA; }
+
+/* Container widths come from tokens.css. The console is a working tool
+   on desk monitors, so it runs wider than the applicant form. */
+.wrap-wide { max-width: 1760px; padding: 20px 26px; }
+
+/* --------------------------------------------------------------- tables */
+table.data { width: 100%; border-collapse: collapse; font-size: .9rem; }
+table.data th {
+  font-family: var(--display); text-transform: uppercase; letter-spacing: .06em;
+  font-size: .76rem; color: var(--ink-soft); text-align: left;
+  padding: .55rem .6rem; border-bottom: 2px solid var(--line); white-space: nowrap;
+}
+table.data td { padding: .55rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.data tbody tr:hover { background: #F7FAFC; }
+
+.tag {
+  display: inline-block; font-size: .74rem; font-weight: 600;
+  padding: .12rem .5rem; border-radius: 10px;
+  background: #E8EEF4; color: var(--ink-soft); white-space: nowrap;
+}
+.tag-submitted   { background: #E4EEF8; color: var(--blue-dark); }
+.tag-under_review{ background: var(--warn-bg); color: var(--warn); }
+.tag-shortlisted { background: #E5F4EC; color: var(--ok); }
+.tag-declined    { background: var(--err-bg); color: var(--err); }
+.tag-withdrawn   { background: #ECEFF2; color: var(--ink-faint); }
+.tag-draft       { background: #ECEFF2; color: var(--ink-faint); }
+
+/* --------------------------------------------------------- detail layout */
+.split { display: grid; gap: 1.1rem; }
+@media (min-width: 1000px) { .split { grid-template-columns: 380px 1fr; align-items: start; } }
+
+/* ------------------------------------------------- table text fit */
+/* Tables: let cells wrap instead of forcing horizontal scroll, except
+   where a value is meaningless when broken. */
+table.data { table-layout: auto; }
+table.data td { overflow-wrap: anywhere; }
+table.data td.nowrap, table.data th.nowrap { white-space: nowrap; }
+table.data td .mono { overflow-wrap: anywhere; }
+
+/* =========================================================== drawer nav
+   A slide-out rail: logo lockup, icon rows with count badges, active
+   highlight, and a pin so it can stay open on a wide screen. Matches the
+   ACTOM Sales CRM pattern so anyone moving between the tools recognises
+   it immediately. */
+
+.burger {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 34px;
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.32);
+  border-radius: var(--radius);
+  cursor: pointer; padding: 0;
+}
+.burger:hover { background: rgba(255,255,255,.22); }
+.burger:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.burger-icon { display: grid; gap: 3px; width: 16px; }
+.burger-icon i { display: block; height: 2px; border-radius: 1px; background: #fff; }
+
+.drawer-scrim {
+  position: fixed; inset: 0; background: rgba(20,50,80,.38);
+  z-index: 60; opacity: 0; transition: opacity .2s;
+}
+.drawer-scrim[hidden] { display: none; }
+
+.drawer {
+  position: fixed; top: 0; left: 0; bottom: 0;
+  width: 286px; z-index: 61;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  transform: translateX(-100%);
+  transition: transform .22s cubic-bezier(.2,.8,.2,1);
+  box-shadow: 0 0 44px rgba(20,50,80,.16);
+}
+.drawer.is-open { transform: none; }
+
+/* Pinned: the rail stays put and the page sits beside it. */
+body.drawer-pinned .drawer { transform: none; box-shadow: none; }
+@media (min-width: 1100px) {
+  body.drawer-pinned .masthead,
+  body.drawer-pinned main,
+  body.drawer-pinned .footer { margin-left: 286px; }
+  body.drawer-pinned .drawer-scrim { display: none; }
+}
+
+.drawer-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 14px; border-bottom: 1px solid var(--line);
+}
+.drawer-head .actom-logo { height: 42px; }
+.drawer-title { font-size: 15px; font-weight: 680; flex: 1; min-width: 0; }
+.drawer-pin {
+  width: 34px; height: 34px; flex: none;
+  display: grid; place-items: center;
+  background: var(--surface-soft); border: 1px solid transparent;
+  border-radius: var(--radius); cursor: pointer; color: var(--ink-soft);
+}
+.drawer-pin:hover { background: var(--surface-mid); }
+.drawer-pin[aria-pressed="true"] {
+  background: var(--line-soft); color: var(--actom-blue); border-color: var(--line);
+}
+.drawer-pin svg { width: 17px; height: 17px; }
+@media (max-width: 1099px) { .drawer-pin { display: none; } }
+
+.drawer-nav { padding: 10px; overflow-y: auto; flex: 1; }
+.nav-link {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; text-align: left;
+  background: none; border: none; border-radius: 9px;
+  padding: 11px 12px; margin-bottom: 2px;
+  font-family: var(--sans); font-size: 14.5px; font-weight: 550;
+  color: var(--ink); cursor: pointer;
+  transition: background .13s, color .13s;
+}
+.nav-link:hover { background: var(--surface-soft); }
+.nav-link:focus-visible { outline: 2px solid var(--actom-blue); outline-offset: -2px; }
+.nav-link svg { width: 21px; height: 21px; flex: none; color: var(--ink-faint); }
+.nav-link .lbl { flex: 1; min-width: 0; }
+
+.nav-link[aria-current="true"] {
+  background: #eaf1f9; color: var(--actom-blue); font-weight: 650;
+}
+.nav-link[aria-current="true"] svg { color: var(--actom-blue); }
+
+.nav-count {
+  flex: none; min-width: 24px; height: 22px;
+  display: grid; place-items: center; padding: 0 7px;
+  border-radius: 11px; background: var(--surface-mid);
+  font-size: 11.5px; font-weight: 600; color: var(--ink-soft);
+}
+.nav-link[aria-current="true"] .nav-count { background: #d9e7f5; color: var(--actom-blue-dim); }
+.nav-count.is-alert { background: var(--err); color: #fff; }
+
+.nav-dot {
+  flex: none; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--err);
+}
+
+.drawer-foot { border-top: 1px solid var(--line); padding: 10px; }
+.drawer-sep { height: 1px; background: var(--line); margin: 8px 6px; }
+
+/* ================================================ console density
+   A reviewer works this screen for an hour at a time on a desk monitor.
+   Space goes to rows and columns, not margins. */
+
+/* Filters on one line: three selects plus search, rather than a block
+   of stacked fields taking a third of the viewport. */
+.filter-bar {
+  display: grid;
+  grid-template-columns: 190px 220px 220px minmax(220px, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+@media (max-width: 1100px) {
+  .filter-bar { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .filter-bar { grid-template-columns: 1fr; }
+}
+.filter-bar .field { margin-bottom: 0; }
+.filter-bar label, .filter-bar .field-label {
+  font-size: 11px; font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-soft); margin-bottom: 4px;
+}
+.filter-actions {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line);
+}
+.filter-actions .spacer { flex: 1; }
+.filter-summary { font-size: 12.5px; color: var(--ink-soft); }
+.filter-summary strong { color: var(--ink); font-weight: 650; }
+
+/* Denser rows, and a header that stays put while scrolling a long list. */
+.table-card { padding: 0; overflow: hidden; }
+.table-scroll { overflow: auto; max-height: calc(100vh - 340px); }
+table.data th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--line);
+  padding: 10px 14px;
+}
+table.data td { padding: 9px 14px; font-size: 13.5px; }
+table.data tbody tr { cursor: pointer; }
+table.data tbody tr:hover { background: #f4f8fc; }
+
+.cell-name { font-weight: 600; }
+.cell-sub { display: block; font-size: 11.5px; color: var(--ink-faint); font-weight: 400; }
+.col-num { text-align: right; white-space: nowrap; }
+.rank-chip {
+  display: inline-grid; place-items: center; min-width: 26px; height: 22px;
+  padding: 0 6px; border-radius: 6px; background: var(--surface-mid);
+  font-size: 11.5px; font-weight: 650; color: var(--ink-soft);
+}
+.rank-chip.is-top { background: #e2eefa; color: var(--actom-blue-dim); }
+
+/* Detail view: three columns on a wide monitor rather than two. */
+@media (min-width: 1500px) {
+  .split { grid-template-columns: 400px minmax(0, 1fr) 340px; }
+}
+
+/* The row is the click target, so the last cell is an affordance rather
+   than a control — a chevron, which cannot wrap the way a button label
+   does in a narrow column. */
+.cell-go { width: 40px; text-align: right; color: var(--ink-faint); }
+.cell-go svg { width: 17px; height: 17px; vertical-align: middle; }
+tr:hover .cell-go { color: var(--actom-blue); }
+table.data td, table.data th { vertical-align: middle; }
+table.data .btn { white-space: nowrap; }
+
+/* ============================================================ dashboard */
+.stat-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, 1fr); }
+@media (min-width: 760px)  { .stat-grid { grid-template-columns: repeat(4, 1fr); } }
+
+.stat {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+.stat .lbl {
+  font-size: 11px; font-weight: 600; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ink-soft);
+}
+.stat .num {
+  font-size: 34px; font-weight: 700; line-height: 1.1;
+  letter-spacing: -.02em; margin: 6px 0 2px;
+}
+.stat .sub { font-size: 12.5px; color: var(--ink-faint); }
+.stat.is-action { border-color: #b9d4ec; background: #f6faff; }
+.stat.is-action .num { color: var(--actom-blue); }
+.stat.is-warn .num { color: var(--err); }
+
+.dash-cols { display: grid; gap: 14px; }
+@media (min-width: 1200px) { .dash-cols { grid-template-columns: minmax(0,1.5fr) minmax(0,1fr); } }
+
+/* Fill bar: applications against positions, per trade. */
+.fill { display: grid; grid-template-columns: minmax(0,1fr) 96px 62px; gap: 12px;
+        align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.fill:last-child { border-bottom: none; }
+.fill-name { font-size: 13.5px; font-weight: 550; }
+.fill-name span { display: block; font-size: 11.5px; color: var(--ink-faint); font-weight: 400; }
+.fill-bar { height: 8px; border-radius: 4px; background: var(--surface-mid); overflow: hidden; }
+.fill-bar > i { display: block; height: 100%; border-radius: 4px;
+                background: linear-gradient(90deg, var(--actom-blue-lite), var(--actom-blue)); }
+.fill-bar > i.is-thin { background: var(--err); }
+.fill-num { text-align: right; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.fill-num span { color: var(--ink-faint); font-weight: 400; }
+
+/* Equity split: aggregate only, never a person. */
+.eq-row { display: grid; grid-template-columns: 120px minmax(0,1fr) 44px;
+          gap: 10px; align-items: center; padding: 7px 0; font-size: 13px; }
+.eq-bar { height: 7px; border-radius: 4px; background: var(--surface-mid); overflow: hidden; }
+.eq-bar > i { display: block; height: 100%; background: var(--actom-steel); border-radius: 4px; }
+.eq-num { text-align: right; font-weight: 600; }
+
+.dash-note { font-size: 12px; color: var(--ink-faint); margin-top: 10px; }
+
+/* Journey step editor rows in Form setup. Title, detail, remove. */
+.journey-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
+  gap: .5rem;
+  align-items: start;
+  margin-bottom: .5rem;
+}
+@media (max-width: 700px) {
+  .journey-row { grid-template-columns: 1fr; }
+}

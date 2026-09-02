@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#06182B">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Apprentice applications &middot; ACTOM review</title>
+<link rel="stylesheet" href="./tokens.css?v=1">
+<link rel="stylesheet" href="./styles.css?v=1">
+</head>
+<body>
+
+<div id="signin" class="signin hidden">
+  <div class="signin-card">
+    <div data-actom-logo="dark" data-logo-height="34"></div>
+    <p class="small muted" style="margin-top:-.2rem">Apprentice application review</p>
+    <h1 style="margin-top:1.2rem">Staff sign-in</h1>
+    <p class="small muted">Use your ACTOM account. Access is granted per trade by IT and HR.</p>
+    <div id="signinError" class="notice notice-err hidden" role="alert"></div>
+    <button class="btn" id="entraBtn" style="width:100%">Sign in with ACTOM account</button>
+    <p class="small muted" style="margin-top:1.4rem;border-top:1px solid var(--line);padding-top:.9rem">
+      This system holds special personal information. Every ID number you unlock and every
+      document you open is recorded against your name.
+    </p>
+  </div>
+</div>
+
+<div id="pending" class="signin hidden">
+  <div class="signin-card">
+    <div data-actom-logo="dark" data-logo-height="34"></div>
+    <h1 style="margin-top:1.2rem">Access not yet active</h1>
+    <p>Your account is recognised but has not been activated for application review.
+       Ask IT to activate it and assign your trades.</p>
+    <p class="small muted mono" id="pendingWho"></p>
+    <button class="btn btn-ghost btn-sm" id="pendingOut">Sign out</button>
+  </div>
+</div>
+
+<div id="portal" class="hidden">
+
+  <!-- Slide-out navigation. Pinnable on a wide screen so it behaves like
+       a rail rather than an overlay. -->
+  <div class="drawer-scrim" id="drawerScrim" hidden></div>
+  <nav class="drawer" id="drawer" aria-label="Sections">
+    <div class="drawer-head">
+      <div data-actom-logo="dark" data-logo-height="42"></div>
+      <span class="drawer-title">Apprentice<br>review</span>
+      <button class="drawer-pin" id="drawerPin" aria-pressed="false"
+              title="Keep the menu open" aria-label="Keep the menu open">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 4h6l-1 6 3 3H7l3-3-1-6Z"/><path d="M12 13v7"/>
+        </svg>
+      </button>
+    </div>
+    <div class="drawer-nav" id="drawerNav"></div>
+    <div class="drawer-foot" id="drawerFoot"></div>
+  </nav>
+
+  <header class="masthead">
+    <div class="masthead-inner">
+      <button class="burger" id="navBtn" aria-label="Open the menu"
+              aria-expanded="false" aria-controls="drawer">
+        <span class="burger-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+      </button>
+      <div data-actom-logo="light" data-logo-height="34"></div>
+      <p class="tagline">Apprentice<br>application review</p>
+      <div class="spacer"></div>
+      <div class="who">
+        <span id="whoEmail"></span> <span class="tag" id="whoRole"></span>
+        <button class="btn btn-on-dark btn-sm" id="signOutBtn">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap wrap-wide">
+    <div id="loader" class="loader">
+      <svg viewBox="0 0 140 60" aria-hidden="true">
+        <path class="conductor" d="M8 20 Q35 42 62 20 Q89 42 116 20" fill="none" stroke-width="3"/>
+        <g stroke="#9DB0C0" stroke-width="2" fill="none">
+          <path d="M8 20 L8 52 M2 52 L14 52 M3 32 L13 32"/>
+          <path d="M62 20 L62 52 M56 52 L68 52 M57 32 L67 32"/>
+          <path d="M116 20 L116 52 M110 52 L122 52 M111 32 L121 32"/>
+        </g>
+      </svg>
+      <p>Loading</p>
+    </div>
+    <div id="content" class="hidden"></div>
+  </main>
+
+  <div class="footer">
+    ACTOM (Pty) Ltd &middot; Handle applicant information under the ACTOM Information Security Policy
+    (HQ&ndash;ISC&ndash;001) and the Acceptable Use Policy (HQ&ndash;AUP&ndash;001).
+  </div>
+</div>
+
+<div id="autosave" class="autosave" role="status" aria-live="polite"></div>
+
+<script src="./vendor/supabase.js"></script>
+<script src="./config.js?v=1"></script>
+<script src="./logo.js?v=1"></script>
+<script src="./changelog.js?v=1"></script>
+<script src="./formsetup.js?v=1"></script>
+<script src="./admin.js?v=1"></script>
+</body>
+</html>

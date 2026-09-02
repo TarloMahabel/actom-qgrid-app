@@ -79,6 +79,12 @@ async function loadApp(app, opts) {
 
   // jsdom leaves a few browser globals out; the app expects them.
   if (!w.structuredClone) w.structuredClone = v => JSON.parse(JSON.stringify(v));
+  /* jsdom implements none of these. confirm() in particular gates every
+     destructive action in the app, so without it a suite silently exercises
+     nothing past the first prompt. */
+  w.confirm = opts.confirm || (() => true);
+  w.alert = () => {};
+  w.scrollTo = () => {};
 
   /* jsdom has no canvas and no real image decoding, so photo resizing cannot
      run as written. Stub the three pieces it uses — Image, canvas.toBlob and
@@ -115,6 +121,29 @@ async function loadApp(app, opts) {
     });
   };
 
+  /* jsdom has no PointerEvent. The app listens for pointer events so a
+     finger, a stylus and a mouse behave identically; without a constructor
+     the signature pad cannot be driven from a test at all. */
+  if (!w.PointerEvent) {
+    w.PointerEvent = class extends w.Event {
+      constructor(type, init = {}) {
+        super(type, init);
+        this.clientX = init.clientX || 0;
+        this.clientY = init.clientY || 0;
+        this.pointerId = init.pointerId || 1;
+      }
+    };
+  }
+  /* Drive a signature stroke the way a finger would. */
+  w.__sign = (canvas, points) => {
+    canvas.dispatchEvent(new w.PointerEvent('pointerdown',
+      { bubbles: true, clientX: points[0][0], clientY: points[0][1] }));
+    for (const [x, y] of points.slice(1)) {
+      w.dispatchEvent(new w.PointerEvent('pointermove', { clientX: x, clientY: y }));
+    }
+    w.dispatchEvent(new w.PointerEvent('pointerup', {}));
+  };
+
   w.URL.createObjectURL = () => 'blob:test/photo';
   w.URL.revokeObjectURL = () => {};
   class FakeImage {
@@ -123,18 +152,24 @@ async function loadApp(app, opts) {
     get src() { return 'blob:test/photo'; }
   }
   w.Image = FakeImage;
-  const realCreate = w.document.createElement.bind(w.document);
-  w.document.createElement = tag => {
-    const el = realCreate(tag);
-    if (tag === 'canvas') {
-      el.getContext = () => ({ drawImage() {} });
-      el.toBlob = (cb) => cb({ size: 240000, type: 'image/jpeg' });
-    }
-    return el;
+  /* Patch the PROTOTYPE, not just createElement. The signature pad arrives
+     through innerHTML, so it is a real jsdom HTMLCanvasElement with no 2d
+     context at all — stubbing createElement alone left it untestable, which
+     is how the field shipped as a placeholder for eleven versions. */
+  w.HTMLCanvasElement.prototype.getContext = function () {
+    return {
+      drawImage() {}, clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {},
+      stroke() {}, fillRect() {}, closePath() {}, save() {}, restore() {},
+      set lineWidth(v) {}, set lineCap(v) {}, set lineJoin(v) {}, set strokeStyle(v) {},
+      set fillStyle(v) {}
+    };
   };
-  w.confirm = opts.confirm || (() => true);
-  w.alert   = () => {};
-  w.scrollTo = () => {};
+  w.HTMLCanvasElement.prototype.toBlob = function (cb, type) {
+    cb({ size: type === 'image/png' ? 4200 : 240000, type: type || 'image/jpeg' });
+  };
+  w.HTMLCanvasElement.prototype.getBoundingClientRect = function () {
+    return { left: 0, top: 0, width: 640, height: 200, right: 640, bottom: 200 };
+  };
 
   const srcs = Array.from(w.document.querySelectorAll('script[src]'))
     .map(s => s.getAttribute('src'));

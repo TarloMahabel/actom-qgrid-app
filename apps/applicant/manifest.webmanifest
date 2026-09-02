@@ -1,0 +1,10 @@
+{
+  "name": "ACTOM Apprenticeship Applications",
+  "short_name": "ACTOM Apply",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#06182B",
+  "theme_color": "#06182B",
+  "description": "Apply for an ACTOM apprenticeship or learnership."
+}

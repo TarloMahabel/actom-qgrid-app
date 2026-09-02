@@ -44,9 +44,15 @@ const { loadApp, suite } = require('./test/harness');
   const pf = CALLS.filter(c => c[0] === 'upsert' && c[2].field_id === 'i4').pop();
   s.check('pass/fail written through', pf && pf[2].outcome === 'fail');
   s.check('failure warned about before submit', $('page').innerHTML.includes('failure'));
-  d.querySelector('[data-act="submit-inspection"]').click(); await sleep(300);
+  /* Sign first: an unsigned form is refused now, which is the point of the
+     signature group further down. */
+  w.__sign(d.querySelector('[data-sig]'), [[20, 40], [80, 70], [150, 50]]);
+  await sleep(700);
+  d.querySelector('[data-act="submit-inspection"]').click(); await sleep(400);
   s.check('submit goes through the RPC, not client-side writes',
     CALLS.some(c => c[0] === 'rpc' && c[1] === 'submit_inspection'));
+  s.check('the drawn signature is uploaded with it',
+    CALLS.some(c => c[0] === 'storage.upload' && /signature-/.test(c[2])));
   s.group('projects and works orders read as one ordered flow');
   d.querySelector('#nav button[data-go="sched"]').click(); await sleep(80);
   const woTab = d.querySelector('.tabs button[data-tab="2"]');
@@ -87,6 +93,53 @@ const { loadApp, suite } = require('./test/harness');
   const insW = CALLS.filter(c => c[0] === 'insert' && c[1] === 'works_orders').pop();
   s.check('saving inserts the works order', insW && insW[2].code === 'WO-99999',
     insW ? JSON.stringify(insW[2]) : 'no call');
+
+  s.group('the signature is drawn, not implied');
+  /* The field used to be a label reading "signing happens when you submit
+     below". The submit does carry the real control — an authenticated
+     identity, a timestamp and a hash — but a test certificate handed to a
+     customer needs a visible mark, and an inspector expects to make one. */
+  const sg = await loadApp('inspect');
+  const sw = sg.window, sd = sw.document;
+  sd.querySelector('#nav button[data-go="work"]').click(); await sg.sleep(60);
+  sd.querySelector('[data-open-capture]').click(); await sg.sleep(420);
+
+  const pad = sd.querySelector('[data-sig]');
+  s.check('there is a pad to sign on', !!pad);
+  s.check('it says the identity comes from the sign-in, not the drawing',
+    sg.$('page').textContent.includes('come from your sign-in'));
+  s.check('clear is disabled before anything is drawn',
+    sd.querySelector('[data-sig-clear]').disabled);
+
+  sw.__sign(pad, [[20, 40], [60, 70], [120, 45], [180, 80]]);
+  await sg.sleep(800);
+  s.check('drawing marks the field signed', sg.$('page').textContent.includes('Signed'));
+  s.check('and records an answer',
+    sw.GRID_CALLS.some(c => c[0] === 'upsert' && c[2] && c[2].value_text === 'signed'));
+  s.check('clear becomes available', !sd.querySelector('[data-sig-clear]').disabled);
+
+  /* A canvas bitmap does not survive a re-render. Strokes are held in state
+     and repainted, or an unrelated refresh would silently wipe a signature. */
+  sd.querySelector('.tabs button[data-tab="0"]').click(); await sg.sleep(80);
+  sd.querySelector('.tabs button[data-tab="1"]').click(); await sg.sleep(200);
+  s.check('a signature survives a re-render', sg.$('page').textContent.includes('Signed'));
+
+  sd.querySelector('[data-sig-clear]').click(); await sg.sleep(400);
+  s.check('clearing resets the pad', sg.$('page').textContent.includes('Sign in the box above'));
+
+  s.group('submitting requires the form to be signed');
+  const us = await loadApp('inspect');
+  const ud = us.window.document;
+  ud.querySelector('#nav button[data-go="work"]').click(); await us.sleep(60);
+  ud.querySelector('[data-open-capture]').click(); await us.sleep(420);
+  const submit = ud.querySelector('[data-act="submit-inspection"]');
+  if (submit) {
+    submit.click(); await us.sleep(350);
+    s.check('an unsigned form is not submitted',
+      !us.window.GRID_CALLS.some(c => c[0] === 'rpc' && c[1] === 'submit_inspection'));
+    s.check('and it names the field that is empty',
+      (ud.querySelector('.toast') || {}).textContent.includes('Inspector signature'));
+  }
 
   s.group('an inspection can be handed to someone else');
   /* An inspector starts a panel and is then off sick. Somebody has to finish

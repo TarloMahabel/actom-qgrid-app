@@ -61,7 +61,7 @@ const S = {
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
   designer: { open: false, tplId: null, revId: null, def: null, sel: null,
               preview: false, dirty: false, busy: null, result: null },
-  capture: { id: null, results: {}, photos: {}, faults: {}, photoError: null, pickerField: null }
+  capture: { id: null, results: {}, photos: {}, faults: {}, photoError: null, pickerField: null, sig: {} }
 };
 
 /* CHANGELOG lives in changelog.js so a release note is a one-line edit
@@ -514,7 +514,7 @@ function renderCapture() {
           : ""}
       </div>`;
     }
-    if (f.type === "sign") return `<div class="drop" style="border-color:var(--brand);color:var(--brand-dk)">Signing happens when you submit below</div>`;
+    if (f.type === "sign") return signaturePad(f);
     return `<div class="ro">${esc(f.type)}</div>`;
   };
 
@@ -1162,7 +1162,7 @@ async function loadAudit() {
    5. Actions (writes)
    ------------------------------------------------------------ */
 async function openCapture(id) {
-  S.capture = { id, results: {}, photos: {}, faults: {}, photoError: null };
+  S.capture = { id, results: {}, photos: {}, faults: {}, photoError: null, sig: {} };
   let insp = byId(S.inspections, id);
   busy(true);
   try {
@@ -1277,15 +1277,25 @@ async function upgradeInspection(id) {
 
 async function submitInspection() {
   const insp = byId(S.inspections, S.capture.id);
+  const rev = byId(S.revisions, insp.template_rev_id);
+  const signFields = (rev?.definition?.sections || [])
+    .flatMap(sec => sec.items).filter(f => f.type === "sign");
+  const unsigned = signFields.filter(f => !(S.capture.sig[f.id] || {}).strokes?.length
+                                       && !(S.capture.sig[f.id] || {}).url);
+  if (unsigned.length) {
+    toast(`Sign the form before submitting — ${unsigned[0].label} is empty.`, "bad");
+    return;
+  }
   if (!confirm(`Sign and submit ${insp.ref}? This locks the record.`)) return;
   busy(true);
   try {
+    await uploadSignatures();
     const { data, error } = await supabase.rpc("submit_inspection",
       { p_inspection: S.capture.id, p_signature: S.profile.email });
     if (error) throw error;
     toast(`${data.ref} submitted — ${data.result}${data.failed_checks ? `, ${data.failed_checks} failed check(s)` : ""}${data.works_order_held ? ", works order held" : ""}`,
       data.result === "pass" ? "ok" : "");
-    S.capture = { id: null, results: {}, photos: {}, faults: {}, photoError: null };
+    S.capture = { id: null, results: {}, photos: {}, faults: {}, photoError: null, sig: {} };
     S.tab = 0;
     await reload();
   } catch (e) { toast(explain(e), "bad"); }
@@ -1553,6 +1563,154 @@ async function clearAnswer(fieldId) {
   }
 }
 
+
+
+/* ---------------------------------------------------------------
+   Signature pad.
+
+   The signature field used to be a label saying "signing happens when you
+   submit below". The submit does carry the real control — an authenticated
+   identity, a timestamp and a hash of the record — and that is a stronger
+   thing than a drawing: a squiggle proves nothing about who made it.
+
+   But a drawn signature is what appears on a test certificate handed to a
+   customer, and it is what an inspector expects to do. So both: the login
+   still establishes WHO, and the drawing is captured as the visible mark
+   on the record. The wording under the pad says exactly that rather than
+   implying the drawing is the security.
+
+   Strokes are held in state, not left on the canvas. Any render repaints
+   the page and a canvas bitmap does not survive that — a signature drawn
+   and then wiped by an unrelated refresh would be the worst kind of bug
+   on this screen.
+   --------------------------------------------------------------- */
+function signaturePad(f) {
+  const sig = S.capture.sig[f.id] || {};
+  const drawn = (sig.strokes || []).length > 0;
+  const saved = !!sig.url;
+
+  if (saved && !drawn) {
+    return `<div>
+      <img src="${esc(sig.url)}" alt="signature"
+      style="max-width:340px;border:1px solid var(--line);border-radius:8px;background:#fff;display:block">
+      <div class="hint" style="margin-top:6px">Signed by ${esc(sig.by || S.profile.full_name)}.</div>
+    </div>`;
+  }
+
+  return `<div>
+    <canvas data-sig="${f.id}" width="640" height="200"
+      style="width:100%;max-width:420px;height:auto;aspect-ratio:640/200;display:block;
+             border:1px dashed ${drawn ? "var(--brand)" : "#c8d6e3"};border-radius:8px;
+             background:#fff;touch-action:none;cursor:crosshair"></canvas>
+    <div style="display:flex;gap:9px;align-items:center;margin-top:7px;flex-wrap:wrap">
+      <button class="btn sm" data-sig-clear="${f.id}" ${drawn ? "" : "disabled"}>Clear</button>
+      <span class="cnt">${drawn ? "Signed" : "Sign in the box above"}</span>
+    </div>
+    <div class="hint" style="margin-top:6px">Your name and the time come from your sign-in;
+      the drawing is the mark that appears on the certificate.</div>
+  </div>`;
+}
+
+/* Canvas bitmaps do not survive a re-render, so the strokes are redrawn from
+   state every time. Called at the end of render(). */
+function paintSignatures() {
+  for (const canvas of document.querySelectorAll("[data-sig]")) {
+    const sig = S.capture.sig[canvas.dataset.sig];
+    const ctx = canvas.getContext && canvas.getContext("2d");
+    if (!ctx) continue;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.strokeStyle = "#16304f";
+    for (const stroke of (sig && sig.strokes) || []) {
+      if (stroke.length < 2) continue;
+      ctx.beginPath();
+      ctx.moveTo(stroke[0].x, stroke[0].y);
+      for (const pt of stroke.slice(1)) ctx.lineTo(pt.x, pt.y);
+      ctx.stroke();
+    }
+  }
+}
+
+/* Pointer events, so a finger, a stylus and a mouse all work the same. */
+function startStroke(canvas, e) {
+  const fid = canvas.dataset.sig;
+  const sig = (S.capture.sig[fid] ||= { strokes: [] });
+  const at = ev => {
+    const r = canvas.getBoundingClientRect();
+    return { x: (ev.clientX - r.left) * (canvas.width / r.width),
+             y: (ev.clientY - r.top) * (canvas.height / r.height) };
+  };
+  const stroke = [at(e)];
+  sig.strokes.push(stroke);
+
+  const move = ev => {
+    stroke.push(at(ev));
+    const ctx = canvas.getContext("2d");
+    if (!ctx || stroke.length < 2) return;
+    /* Draw the new segment only. Repainting every stroke on every pointer
+       move makes the line lag behind the finger on a tablet. */
+    const a = stroke[stroke.length - 2], b = stroke[stroke.length - 1];
+    ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.strokeStyle = "#16304f";
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", up);
+    if (stroke.length < 2) sig.strokes.pop();          // a tap is not a signature
+    recordSignatureAnswer(fid);
+    render();
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", up);
+}
+
+function clearSignature(fieldId) {
+  S.capture.sig[fieldId] = { strokes: [] };
+  recordSignatureAnswer(fieldId);
+  render();
+}
+
+async function recordSignatureAnswer(fieldId) {
+  const sig = S.capture.sig[fieldId];
+  if (sig && (sig.strokes || []).length) {
+    saveAnswer(fieldId, { value_text: "signed", outcome: "pass" });
+  } else {
+    await clearAnswer(fieldId);
+  }
+}
+
+/* Uploaded on submit, not on every stroke: the mark that matters is the one
+   present when the record was signed. */
+async function uploadSignatures() {
+  for (const [fieldId, sig] of Object.entries(S.capture.sig || {})) {
+    if (!sig || !(sig.strokes || []).length || sig.url) continue;
+    const canvas = document.querySelector(`[data-sig="${fieldId}"]`);
+    if (!canvas || !canvas.toBlob) continue;
+    const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+    if (!blob) continue;
+    const path = `inspections/${S.capture.id}/${fieldId}/signature-${Date.now()}.png`;
+    try {
+      const { error: upErr } = await supabase.storage
+        .from("inspection-photos").upload(path, blob, { contentType: "image/png" });
+      if (upErr) throw upErr;
+      const { error: rowErr } = await supabase.from("attachments").insert({
+        inspection_id: S.capture.id, storage_path: path,
+        kind: "signature", uploaded_by: S.profile.id
+      });
+      if (rowErr) throw rowErr;
+      sig.url = null;   // re-read on next open through the normal attachment load
+    } catch (e) {
+      /* Rethrown with the field named, so the caller's message says which
+         signature failed rather than showing a bare storage error. Submitting
+         must NOT continue: a record signed without its mark is worse than one
+         that refused to submit. */
+      throw new Error(`The signature could not be saved (${explain(e)}). Nothing was submitted.`);
+    }
+  }
+}
 
 /* ---------------------------------------------------------------
    Handover.
@@ -2434,12 +2592,13 @@ function render() {
   const pr = S.dash.pass_rate_30d;
   $("chipYield").classList.toggle("hidden", pr == null);
   $("chipYield").textContent = `Pass rate ${pr}%`;
+  paintSignatures();     // canvas bitmaps do not survive a re-render
 }
 
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-rm-photo],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
+  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-rm-photo],[data-sig-clear],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
   if (!t) return;
   const d = t.dataset;
 
@@ -2461,6 +2620,7 @@ document.addEventListener("click", async e => {
   }
   if (d.dispose) return disposeFailedCheck(d.dispose);
   if (d.rmPhoto) { const [fid, i] = d.rmPhoto.split(":"); return removePhoto(fid, Number(i)); }
+  if (d.sigClear) return clearSignature(d.sigClear);
   if (d.pick || d.shoot) {
     S.capture.pickerField = d.pick || d.shoot;
     $(d.shoot ? "cameraPicker" : "photoPicker").click();
@@ -2605,6 +2765,10 @@ document.addEventListener("change", e => {
 
 $("modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
 $("mClose").addEventListener("click", closeModal);
+document.addEventListener("pointerdown", e => {
+  const canvas = e.target.closest && e.target.closest("[data-sig]");
+  if (canvas) { e.preventDefault(); startStroke(canvas, e); }
+});
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 $("btnSignIn").addEventListener("click", async () => {
   try { await signIn(); }

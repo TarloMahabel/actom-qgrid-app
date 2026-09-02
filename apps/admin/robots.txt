@@ -1,0 +1,3 @@
+# The reviewer console is internal. Nothing here should ever be indexed.
+User-agent: *
+Disallow: /
