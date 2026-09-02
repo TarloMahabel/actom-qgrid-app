@@ -58,6 +58,7 @@
     { id:1, profile_id:"u1", skill:"Routine testing sign-off", level:3, valid_to:null },
     { id:2, profile_id:"u2", skill:"Visual and dimensional inspection", level:2, valid_to:null }
   ],
+  inspection_handovers: [],
   attachments: [],
   inspection_results: [],
     audit_trail: [{at:"2026-08-26T09:00:00Z",actor_name:"Varshan Mahabel",action:"insert",entity:"inspections",entity_id:"n1abcdef"}]
@@ -150,6 +151,21 @@
                     insp.signed_at = new Date().toISOString(); }
         return Promise.resolve({ data: { ref: insp ? insp.ref : "INS-26-1191",
           result: "fail", failed_checks: 1, works_order_held: false }, error: null });
+      }
+      if (fn === "hand_over_inspection") {
+        const insp = DATA.inspections.find(i => i.id === args.p_inspection);
+        if (!insp) return Promise.resolve({ data: null, error: { message: "HANDOVER_MISSING" } });
+        if (insp.signed_at) return Promise.resolve({ data: null,
+          error: { message: "INS_SIGNED: already signed" } });
+        if (!args.p_reason || !args.p_reason.trim()) return Promise.resolve({ data: null,
+          error: { message: "HANDOVER_REASON: a reason is required" } });
+        const from = insp.assigned_to;
+        DATA.inspection_handovers.push({ id: "h" + (++client._seq), inspection_id: insp.id,
+          from_profile: from, to_profile: args.p_to, handed_by: "u1",
+          reason: args.p_reason, at: new Date().toISOString() });
+        insp.started_by = insp.started_by || from;
+        insp.assigned_to = args.p_to;
+        return Promise.resolve({ data: { ref: insp.ref, from, to: args.p_to }, error: null });
       }
       if (fn === "generate_inspections") {
         const wo = DATA.works_orders.find(w => w.id === args.p_works_order);

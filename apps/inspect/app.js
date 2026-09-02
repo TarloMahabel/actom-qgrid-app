@@ -56,7 +56,7 @@ const S = {
   view: "dash", tab: 0,
   stages: [], departments: [], families: [], defects: [], equipment: [],
   templates: [], revisions: [], requirements: [],
-  projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [], competencies: [],
+  projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [], competencies: [], handovers: [],
   dash: {},
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
   designer: { open: false, tplId: null, revId: null, def: null, sel: null,
@@ -168,7 +168,7 @@ async function loadData() {
     S.stages = st.data; S.departments = dp.data; S.families = fm.data;
     S.defects = df.data; S.equipment = eq.data;
 
-    const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, dash] = await Promise.all([
+    const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd, dash] = await Promise.all([
       supabase.from("inspection_templates").select("*").order("code"),
       supabase.from("template_revisions").select("*").order("rev", { ascending: false }),
       supabase.from("inspection_requirements").select("*"),
@@ -178,13 +178,15 @@ async function loadData() {
       supabase.from("failed_checks").select("*").order("created_at", { ascending: false }).limit(200),
       supabase.from("profiles").select("id,full_name,email,role,department_id,active"),
       supabase.from("competencies").select("*"),
+      supabase.from("inspection_handovers").select("*").order("at"),
       supabase.from("v_dashboard").select("*").maybeSingle()
     ]);
-    for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl, comp]) if (r.error) throw r.error;
+    for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd]) if (r.error) throw r.error;
     S.templates = tpl.data; S.revisions = rev.data; S.requirements = req.data;
     S.projects = prj.data; S.worksOrders = wo.data;
     S.inspections = ins.data; S.failedChecks = fc.data;
-    S.people = ppl.data || []; S.competencies = comp.data || []; S.dash = dash.data || {};
+    S.people = ppl.data || []; S.competencies = comp.data || [];
+    S.handovers = hnd.data || []; S.dash = dash.data || {};
   } catch (e) {
     console.error(e);
     toast(explain(e), "bad");
@@ -350,7 +352,11 @@ function vWork(m) {
         return [`<span class="id">${esc(i.ref)}</span>`, esc(t?.name || "—"), esc(stageName(i.stage_id)),
           esc(i.unit_ref || "—"), fmtDate(i.planned_date),
           pill(i.planned_date < today() && i.status === "scheduled" ? "Overdue" : i.status),
-          `<button class="btn sm pri" data-open-capture="${i.id}">${i.status === "in_progress" ? "Resume" : "Start"}</button>`];
+          `<div style="display:flex;gap:6px;justify-content:flex-end">
+             ${canHandOver() ? `<button class="btn sm" data-act="hand-over" data-id="${i.id}"
+                title="Reassign to someone else, with a reason">Hand over</button>` : ""}
+             <button class="btn sm pri" data-open-capture="${i.id}">${i.status === "in_progress" ? "Resume" : "Start"}</button>
+           </div>`];
       }))
       : emptyBecause("Nothing assigned to you",
           "Nothing assigned to you. Scheduled work appears here automatically.");
@@ -361,10 +367,16 @@ function vWork(m) {
     body = T(["Reference", "Template", "Stage", "Unit", "Inspector", "Completed", "Result"],
       done.slice(0, 60).map(i => {
         const r = byId(S.revisions, i.template_rev_id), t = tplForRev(i.template_rev_id);
+        /* Two names on one inspection is a fact the register has to show, not
+           hide behind whoever signed it. */
+        const startedBy = byId(S.people, i.started_by);
+        const signedBy = byId(S.people, i.signed_by);
+        const handed = startedBy && i.started_by !== i.signed_by;
         return [`<span class="id">${esc(i.ref)}</span>`,
           `<span class="id">${esc(t?.code || "—")} rev ${r?.rev ?? "?"}</span>`,
           esc(stageName(i.stage_id)), esc(i.unit_ref || "—"),
-          esc(byId(S.people, i.signed_by)?.full_name || "—"),
+          `${esc(signedBy?.full_name || "—")}${handed
+            ? `<div class="sub">started by ${esc(startedBy.full_name)}</div>` : ""}`,
           i.completed_at ? new Date(i.completed_at).toLocaleString("en-ZA") : "—",
           pill(i.result || "—")];
       }));
@@ -506,7 +518,7 @@ function renderCapture() {
     return `<div class="ro">${esc(f.type)}</div>`;
   };
 
-  return `<div class="grid" style="grid-template-columns:1fr 300px">
+  return handoverNote(insp.id) + `<div class="grid" style="grid-template-columns:1fr 300px">
     <div><div class="card" style="margin-bottom:13px"><h3>${esc(insp.ref)} · ${esc(tpl?.name || "")} <span class="cl">rev ${rev?.rev}</span></h3><div class="bd">
       <div class="three">
         <div class="fld"><label>Project</label><div class="ro">${esc(byId(S.projects, insp.project_id)?.code || "—")}</div></div>
@@ -1541,6 +1553,92 @@ async function clearAnswer(fieldId) {
   }
 }
 
+
+/* ---------------------------------------------------------------
+   Handover.
+
+   An inspector starts a panel and is then off sick. Somebody has to
+   finish it. What this does NOT do is let two people share an inspection
+   or let a supervisor sign in another person's name — a signature says
+   who did the work, and blurring that is the one thing a quality record
+   cannot afford.
+
+   Instead the inspection is reassigned, with a reason, and the record
+   keeps all three names: who started it, who it moved to, and who signed.
+   --------------------------------------------------------------- */
+const canHandOver = () =>
+  isRole("supervisor", "planner", "quality_engineer", "quality_manager", "sysadmin");
+
+function handoverModal(inspectionId) {
+  const insp = byId(S.inspections, inspectionId);
+  const current = byId(S.people, insp.assigned_to);
+  const tpl = tplForRev(insp.template_rev_id);
+  const required = tpl ? (tpl.min_competency || 0) : 0;
+
+  openModal(`Hand over ${insp.ref}`, `
+    <div class="two">
+      <div class="fld"><label>Currently with</label>
+        <div class="ro">${esc(current ? current.full_name : "nobody")}</div></div>
+      <div class="fld"><label>Status</label><div class="ro">${esc(insp.status)}</div></div>
+    </div>
+    <div class="fld"><label>Hand over to</label>
+      <select id="hoTo">
+        <option value="">— choose —</option>
+        ${S.people.filter(p => p.active && p.id !== insp.assigned_to).map(p => {
+          const lvl = topLevel(p.id);
+          const short = lvl < required;
+          return `<option value="${p.id}">${esc(p.full_name)} — ${esc(p.role)}` +
+                 `${short ? ` (competency ${lvl}, needs ${required})` : ""}</option>`;
+        }).join("")}
+      </select>
+      <div class="hint">Anyone can continue the capture. Only someone holding
+        competency level ${required} can sign it off.</div></div>
+    <div class="fld"><label>Why</label>
+      <textarea id="hoReason" rows="3"
+        placeholder="e.g. T. Nkosi is off sick, panel is needed for despatch today"></textarea>
+      <div class="hint">Required. Two names on one inspection is defensible only
+        if the record also says why.</div></div>
+    <div class="note">Answers already captured stay as they are, recorded against
+      whoever captured them. The person who signs is recorded as having signed.</div>`,
+    [["Cancel", "close"], ["Hand over", "save-handover", "pri"]], { id: inspectionId });
+}
+
+async function saveHandover() {
+  const to = $("hoTo").value, reason = $("hoReason").value.trim();
+  if (!to) { toast("Choose who it goes to.", "bad"); return; }
+  if (!reason) { toast("A reason is required.", "bad"); return; }
+  busy(true);
+  try {
+    const { data, error } = await supabase.rpc("hand_over_inspection", {
+      p_inspection: modalCtx.id, p_to: to, p_reason: reason
+    });
+    if (error) throw error;
+    const who = byId(S.people, to);
+    toast(`${data.ref} handed to ${who ? who.full_name : "them"}.`, "ok");
+    closeModal();
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+/* Shown on the capture screen when the inspection has changed hands, so the
+   person completing it knows what they picked up and why. */
+function handoverNote(inspectionId) {
+  const hs = S.handovers.filter(h => h.inspection_id === inspectionId);
+  if (!hs.length) return "";
+  const last = hs[hs.length - 1];
+  const from = byId(S.people, last.from_profile);
+  const by = byId(S.people, last.handed_by);
+  return `<div class="note q" style="margin-bottom:13px">
+    <b>Handed over${from ? ` from ${esc(from.full_name)}` : ""}.</b>
+    ${esc(last.reason)}
+    <div class="sub" style="margin-top:4px">By ${esc(by ? by.full_name : "?")} on
+      ${new Date(last.at).toLocaleString("en-ZA")}${hs.length > 1
+        ? ` · ${hs.length} handovers on this inspection` : ""}.
+      Answers already captured stay recorded against whoever captured them.</div>
+  </div>`;
+}
+
 /* ---------------------------------------------------------------
    Fault lists.
 
@@ -2443,6 +2541,8 @@ document.addEventListener("click", async e => {
     case "edit-project": return projectModal(byId(S.projects, Number(t.dataset.id)));
     case "del-project": return deleteProject(Number(t.dataset.id));
     case "save-project": return saveProject();
+    case "hand-over": return handoverModal(t.dataset.id);
+    case "save-handover": return saveHandover();
     case "add-wo": return worksOrderModal(Number(t.dataset.id), null);
     case "edit-wo": return worksOrderModal(null, byId(S.worksOrders, Number(t.dataset.id)));
     case "save-wo": return saveWorksOrder();

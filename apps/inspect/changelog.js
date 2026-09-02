@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.10.5";
+window.APP_VERSION = "0.11.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.11.0", d: "2026-08-28", t: "Handing an inspection to someone else",
+    items: [
+      "An inspection that has been started can be handed to another inspector by a supervisor, planner, Quality Engineer or Quality Manager. A reason is required.",
+      "Answers already captured stay as they are, recorded against whoever captured them. The person who signs is recorded as having signed, in their own name — nobody signs for anybody else.",
+      "The record keeps all three: who started it, who it was handed to, and who signed. The register shows 'started by' when they differ, and the person picking it up sees why it was handed over.",
+      "A signed inspection cannot be handed over. If it is wrong it needs an amendment, not a new owner."
+    ]
+  },
   {
     v: "0.10.5", d: "2026-08-28", t: "Removing a photo",
     items: [

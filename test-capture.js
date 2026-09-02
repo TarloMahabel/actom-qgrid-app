@@ -88,6 +88,54 @@ const { loadApp, suite } = require('./test/harness');
   s.check('saving inserts the works order', insW && insW[2].code === 'WO-99999',
     insW ? JSON.stringify(insW[2]) : 'no call');
 
+  s.group('an inspection can be handed to someone else');
+  /* An inspector starts a panel and is then off sick. Somebody has to finish
+     it. What must NOT happen is two people sharing one inspection, or a
+     supervisor signing in another person's name — a signature says who did
+     the work. So: reassignment, with a reason, and all three names kept. */
+  const ho = await loadApp('inspect');
+  const hw = ho.window, hd = hw.document;
+  hd.querySelector('#nav button[data-go="work"]').click(); await ho.sleep(80);
+  const hoBtn = hd.querySelector('[data-act="hand-over"]');
+  s.check('handing over is offered on the queue', !!hoBtn);
+  hoBtn.click(); await ho.sleep(150);
+  s.check('it asks who it goes to', !!ho.$('hoTo'));
+  s.check('it asks why', !!ho.$('hoReason'));
+  s.check('it says the competency needed to sign',
+    ho.$('mBody').textContent.includes('can sign it off'));
+  s.check('it says captured answers stay as they are',
+    ho.$('mBody').textContent.includes('stay as they are'));
+
+  hd.querySelector('[data-act="save-handover"]').click(); await ho.sleep(200);
+  s.check('it refuses without a person',
+    !hw.GRID_CALLS.some(c => c[0] === 'rpc' && c[1] === 'hand_over_inspection'));
+
+  ho.$('hoTo').value = 'u2';
+  hd.querySelector('[data-act="save-handover"]').click(); await ho.sleep(200);
+  s.check('it refuses without a reason',
+    !hw.GRID_CALLS.some(c => c[0] === 'rpc' && c[1] === 'hand_over_inspection'));
+
+  ho.$('hoReason').value = 'T. Nkosi off sick, panel needed for despatch';
+  hd.querySelector('[data-act="save-handover"]').click(); await ho.sleep(500);
+  const call = hw.GRID_CALLS.filter(c => c[0] === 'rpc' && c[1] === 'hand_over_inspection').pop();
+  s.check('the handover is recorded', !!call);
+  s.check('with the reason', call && /off sick/.test(call[2].p_reason));
+  s.check('a handover record exists', hw.GRID_TEST_DATA.inspection_handovers.length === 1);
+  s.check('the inspection moves to the new person',
+    hw.GRID_TEST_DATA.inspections.some(i => i.assigned_to === 'u2'));
+  s.check('who started it is remembered',
+    hw.GRID_TEST_DATA.inspections.some(i => i.started_by && i.started_by !== i.assigned_to));
+
+  /* And the person picking it up is told what they inherited. */
+  hd.querySelector('#nav button[data-go="work"]').click(); await ho.sleep(80);
+  const resume = hd.querySelector('[data-open-capture]');
+  if (resume) {
+    resume.click(); await ho.sleep(420);
+    const txt = ho.$('page').textContent;
+    s.check('the capture screen says it was handed over', txt.includes('Handed over'));
+    s.check('and shows the reason', txt.includes('off sick'));
+  }
+
   s.group('a panel can carry many faults');
   /* A checksheet answers fixed questions, one answer each. A fault list is
      the other shape: one panel, however many faults are found. The form
