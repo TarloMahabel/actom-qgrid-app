@@ -71,7 +71,13 @@
     {id:1,period:new Date().toISOString().slice(0,7)+"-01",seq:1,item:"Wiring Defects",action:"Fault lists shared with supervisors weekly.",deadline:"2026-09-30",status:"monitoring"}
   ],
   attachments: [],
+  /* EMPTY by default. Answers for the signed inspection used to live here so
+     the printed report had content — but the mock's .eq() does not filter, so
+     every capture suite saw them as answers already recorded on the inspection
+     it was opening. test-report seeds its own instead. */
   inspection_results: [],
+  attachments: [],
+
     audit_trail: [{at:"2026-08-26T09:00:00Z",actor_name:"Varshan Mahabel",action:"insert",entity:"inspections",entity_id:"n1abcdef"}]
   };
 

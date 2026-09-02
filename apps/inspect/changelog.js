@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.14.1";
+window.APP_VERSION = "0.15.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.15.0", d: "2026-08-28", t: "Printing an inspection report",
+    items: [
+      "Every completed inspection can be printed, from the Register or from the inspection itself once it is signed. Print or save as PDF.",
+      "The report carries what makes it evidence: the panel, the project and works order, the checksheet code and the revision it was captured against, every answer with the tolerance it was judged against, the instrument used, all faults with who cleared and verified them, the photographs, the signature, and who signed and when.",
+      "A measurement prints its reading, not just pass or fail — the reading is what an auditor checks against the tolerance.",
+      "It prints in black and white and keeps sections off page breaks, so a shop-floor printer produces something readable."
+    ]
+  },
   {
     v: "0.14.1", d: "2026-08-28", t: "Database update order",
     items: [

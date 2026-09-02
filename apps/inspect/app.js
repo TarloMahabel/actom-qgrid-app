@@ -57,7 +57,7 @@ const S = {
   stages: [], departments: [], families: [], defects: [], equipment: [],
   templates: [], revisions: [], requirements: [],
   projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [], competencies: [], handovers: [],
-  faultsByProject: [], actions: [],
+  faultsByProject: [], actions: [], report: null,
   period: new Date().toISOString().slice(0, 7),
   dash: {},
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
@@ -504,7 +504,7 @@ function vWork(m) {
   else if (S.tab === 1) body = renderCapture();
   else if (S.tab === 2) {
     const done = S.inspections.filter(i => i.status === "completed");
-    body = T(["Reference", "Template", "Stage", "Unit", "Inspector", "Completed", "Result"],
+    body = T(["Reference", "Template", "Stage", "Unit", "Inspector", "Completed", "Result", ""],
       done.slice(0, 60).map(i => {
         const r = byId(S.revisions, i.template_rev_id), t = tplForRev(i.template_rev_id);
         /* Two names on one inspection is a fact the register has to show, not
@@ -518,7 +518,9 @@ function vWork(m) {
           `${esc(signedBy?.full_name || "—")}${handed
             ? `<div class="sub">started by ${esc(startedBy.full_name)}</div>` : ""}`,
           i.completed_at ? new Date(i.completed_at).toLocaleString("en-ZA") : "—",
-          pill(i.result || "—")];
+          pill(i.result || "—"),
+          `<button class="btn sm" data-act="print-report" data-id="${i.id}"
+             title="Open the printable report">Report</button>`];
       }));
   }
   else {
@@ -689,7 +691,13 @@ function renderCapture() {
     return `<div class="ro">${esc(f.type)}</div>`;
   };
 
-  return handoverNote(insp.id) + `<div class="grid" style="grid-template-columns:1fr 300px">
+  return (insp.signed_at ? `<div class="note" style="margin-bottom:13px;background:var(--ok-bg);
+      border-color:#bfe4d1;color:#12613f;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <b>Signed and locked.</b> Nothing on this inspection can be changed.
+      <span style="flex:1"></span>
+      <button class="btn sm" data-act="print-report" data-id="${insp.id}">Printable report</button>
+    </div>` : "")
+    + handoverNote(insp.id) + `<div class="grid" style="grid-template-columns:1fr 300px">
     <div><div class="card" style="margin-bottom:13px"><h3>${esc(insp.ref)} · ${esc(tpl?.name || "")} <span class="cl">rev ${rev?.rev}</span></h3><div class="bd">
       <div class="three">
         <div class="fld"><label>Project</label><div class="ro">${esc(byId(S.projects, insp.project_id)?.code || "—")}</div></div>
@@ -1746,6 +1754,212 @@ async function clearAnswer(fieldId) {
 
 
 
+
+
+/* ---------------------------------------------------------------
+   The printed report.
+
+   This is the artefact that leaves the building: the thing a customer
+   receives with a panel and an auditor asks to see. So it carries the
+   facts that make it evidence, not just the answers —
+
+     the template code AND the revision the inspection was captured
+     against, because "which version of the checksheet was this" is the
+     first question asked about an old record;
+     who signed it, when, and a fragment of the signature hash, so a
+     printed page can be tied back to the row it came from;
+     every fault with its clearing and verification;
+     the photographs, and the drawn signature.
+
+   Printed through the browser rather than generated as a PDF on a
+   server. It works on a tablet, "Save as PDF" produces a file, and it
+   needs no service to keep running. The trade-off is that the browser
+   adds its own header and footer, which is why the report prints its own
+   reference and page furniture rather than relying on them.
+   --------------------------------------------------------------- */
+async function openReport(id) {
+  S.report = { id, loading: true };
+  S.view = "print";
+  buildNav(); render();
+  busy(true);
+  try {
+    const [res, flt, att, hnd] = await Promise.all([
+      supabase.from("inspection_results").select("*").eq("inspection_id", id),
+      supabase.from("failed_checks").select("*").eq("inspection_id", id).order("seq"),
+      supabase.from("attachments").select("*").eq("inspection_id", id),
+      supabase.from("inspection_handovers").select("*").eq("inspection_id", id).order("at")
+    ]);
+    for (const r of [res, flt, att]) if (r.error) throw r.error;
+
+    /* Private bucket, so the images need signed URLs. Long expiry: somebody
+       may leave the report open before pressing print. */
+    const paths = (att.data || []).map(a => a.storage_path);
+    let signed = [];
+    if (paths.length) {
+      const sr = await supabase.storage.from("inspection-photos").createSignedUrls(paths, 7200);
+      signed = sr.data || [];
+    }
+    const url = {};
+    for (const x of signed) url[x.path] = x.signedUrl;
+
+    S.report = {
+      id, loading: false,
+      results: res.data || [],
+      faults: flt.data || [],
+      photos: (att.data || []).filter(a => a.kind === "photo")
+        .map(a => ({ ...a, url: url[a.storage_path] })),
+      signatures: (att.data || []).filter(a => a.kind === "signature")
+        .map(a => ({ ...a, url: url[a.storage_path] })),
+      handovers: hnd.error ? [] : (hnd.data || [])
+    };
+  } catch (e) {
+    S.report = { id, loading: false, error: explain(e) };
+  } finally { busy(false); render(); }
+}
+
+function vPrint() {
+  const rep = S.report || {};
+  const insp = byId(S.inspections, rep.id);
+  if (!insp) return `<div class="card"><div class="empty">That inspection is not loaded.</div></div>`;
+
+  const rev = byId(S.revisions, insp.template_rev_id);
+  const tpl = tplForRev(insp.template_rev_id);
+  const project = byId(S.projects, insp.project_id);
+  const wo = byId(S.worksOrders, insp.works_order_id);
+  const signer = byId(S.people, insp.signed_by);
+  const starter = byId(S.people, insp.started_by);
+  const answer = fid => (rep.results || []).find(r => r.field_id === fid);
+
+  if (rep.loading) return `<div class="card"><div class="empty">Loading the report…</div></div>`;
+  if (rep.error) return `<div class="card"><div class="bd">
+    <div class="note q">Could not load the report. ${esc(rep.error)}</div></div></div>`;
+
+  const field = f => {
+    if (f.type === "section" || f.type === "info") return "";
+    const a = answer(f.id);
+    /* Type first, outcome second. A measurement whose outcome happens to be
+       "pass" printed the word Pass and threw the reading away — and the
+       reading is the evidence: an auditor checks 70 Nm against 66-74, not
+       somebody's word for it. */
+    const shown = !a ? "—"
+      : ["measure", "number"].includes(f.type)
+        ? (a.value_num != null ? String(a.value_num) : (a.value_text || "—"))
+      : f.type === "faultlist" ? (a.value_text || "—")
+      : a.outcome && ["pass", "fail", "na"].includes(a.outcome)
+        ? { pass: "Pass", fail: "Fail", na: "N/A" }[a.outcome]
+      : a.value_text || (a.value_num != null ? String(a.value_num) : "—");
+    /* A measurement also carries its verdict, since the tolerance may have
+       changed in a later revision and the verdict at the time is the fact. */
+    const verdict = ["measure", "number"].includes(f.type) && a && a.outcome
+      ? { pass: "within tolerance", fail: "OUT OF TOLERANCE", na: "n/a" }[a.outcome] : "";
+    const equip = a && a.equipment_id ? byId(S.equipment, a.equipment_id) : null;
+    const outOfTol = f.type === "measure" && a && a.value_num != null &&
+      ((f.min != null && a.value_num < f.min) || (f.max != null && a.value_num > f.max));
+    return `<tr>
+      <td style="width:52%">${esc(f.label)}${f.req ? ' <span class="req">*</span>' : ""}
+        ${f.type === "measure" && (f.min != null || f.max != null)
+          ? `<div class="sub">tolerance ${esc(f.min ?? "—")} to ${esc(f.max ?? "—")} ${esc(f.unit || "")}</div>` : ""}</td>
+      <td style="width:28%"><b>${esc(shown)}</b>${f.unit && ["measure", "number"].includes(f.type) ? " " + esc(f.unit) : ""}
+        ${verdict ? `<div class="sub">${esc(verdict)}</div>` : ""}
+        ${outOfTol ? ' <span class="tag ncr">out of tolerance</span>' : ""}</td>
+      <td style="width:20%">${equip ? `${esc(equip.asset_no)}<div class="sub">${esc(equip.name)}</div>` : ""}</td>
+    </tr>`;
+  };
+
+  const sections = (rev?.definition?.sections || []).map(sec => {
+    const rows = (sec.items || []).map(field).filter(Boolean).join("");
+    if (!rows) return "";
+    return `<div class="rsec"><h4>${esc(sec.title)}</h4>
+      <table class="rtab"><tbody>${rows}</tbody></table></div>`;
+  }).join("");
+
+  const faults = (rep.faults || []);
+  const faultBlock = !faults.length ? "" : `<div class="rsec"><h4>Faults recorded</h4>
+    <table class="rtab"><thead><tr><th>No</th><th>Code</th><th>Fault</th><th>Where</th>
+      <th>Severity</th><th>Cleared by</th><th>Verified by</th></tr></thead><tbody>
+      ${faults.map((f, i) => `<tr>
+        <td>${i + 1}</td>
+        <td>${esc(byId(S.defects, f.defect_code_id)?.code || "—")}</td>
+        <td>${esc(f.description || (f.source === "checkpoint" ? "a checkpoint failed" : "—"))}</td>
+        <td>${esc(f.location || "—")}</td>
+        <td>${esc(f.severity || "—")}</td>
+        <td>${esc(byId(S.people, f.cleared_by)?.full_name || "not yet")}
+          ${f.cleared_at ? `<div class="sub">${new Date(f.cleared_at).toLocaleDateString("en-ZA")}</div>` : ""}</td>
+        <td>${esc(byId(S.people, f.verified_by)?.full_name || "not yet")}
+          ${f.verified_at ? `<div class="sub">${new Date(f.verified_at).toLocaleDateString("en-ZA")}</div>` : ""}</td>
+      </tr>`).join("")}
+    </tbody></table></div>`;
+
+  const photos = (rep.photos || []).filter(p => p.url);
+  const photoBlock = !photos.length ? "" : `<div class="rsec"><h4>Photographs</h4>
+    <div class="rphotos">${photos.map(p =>
+      `<figure><img src="${esc(p.url)}" alt=""><figcaption>${esc(p.storage_path.split("/")[2] || "")}</figcaption></figure>`).join("")}</div></div>`;
+
+  const sig = (rep.signatures || []).find(x => x.url);
+
+  return `<div class="report" id="report">
+    <div class="rhead">
+      <div class="rlogo">${window.ACTOM_LOGO ? window.ACTOM_LOGO.onLight(46) : ""}</div>
+      <div class="rtitle">
+        <h2>Inspection report</h2>
+        <div class="sub">${esc(DIVISION.name)} · ACTOM (Pty) Ltd</div>
+      </div>
+      <div class="rref">
+        <div class="id">${esc(insp.ref)}</div>
+        <div class="sub">${insp.result ? esc(insp.result.toUpperCase()) : esc(insp.status)}</div>
+      </div>
+    </div>
+
+    <table class="rmeta"><tbody>
+      <tr><th>Project</th><td>${esc(project?.code || "—")} ${esc(project?.name || "")}</td>
+          <th>Customer</th><td>${esc(project?.customer || "—")}</td></tr>
+      <tr><th>Works order</th><td>${esc(wo?.code || "—")}</td>
+          <th>Unit / panel</th><td>${esc(insp.unit_ref || "—")}</td></tr>
+      <tr><th>Stage</th><td>${esc(stageName(insp.stage_id))}</td>
+          <th>Checksheet</th><td>${esc(tpl?.code || "—")} — ${esc(tpl?.name || "")}
+            <b>rev ${rev?.rev ?? "?"}</b></td></tr>
+      <tr><th>Planned</th><td>${esc(insp.planned_date || "—")}</td>
+          <th>Completed</th><td>${insp.completed_at
+            ? new Date(insp.completed_at).toLocaleString("en-ZA") : "not yet"}</td></tr>
+    </tbody></table>
+
+    ${sections || `<div class="note q">This checksheet revision has no questions on it.</div>`}
+    ${faultBlock}
+    ${photoBlock}
+
+    <div class="rsec rsign">
+      <h4>Signed off</h4>
+      <div class="rsignrow">
+        <div>
+          ${sig ? `<img class="rsigimg" src="${esc(sig.url)}" alt="signature">`
+            : insp.signed_at
+              /* A signed record with no drawing must not print "not signed" —
+                 that contradicts the record. It happens legitimately: records
+                 signed before the pad existed, or a drawing that failed to
+                 upload. Say which is missing. */
+              ? `<div class="rsigbox">signed electronically —<br>no drawn signature on file</div>`
+              : `<div class="rsigbox">not signed</div>`}
+          <div class="rsigline">${esc(signer?.full_name || "—")}</div>
+          <div class="sub">${esc(signer?.role || "")}${signer && signer.email ? " · " + esc(signer.email) : ""}</div>
+        </div>
+        <div class="rfacts">
+          <div><span>Signed</span> ${insp.signed_at
+            ? new Date(insp.signed_at).toLocaleString("en-ZA") : "—"}</div>
+          ${starter && insp.started_by !== insp.signed_by
+            ? `<div><span>Started by</span> ${esc(starter.full_name)}</div>` : ""}
+          ${(rep.handovers || []).length
+            ? `<div><span>Handed over</span> ${rep.handovers.length} time${rep.handovers.length === 1 ? "" : "s"}
+                 — ${esc(rep.handovers[rep.handovers.length - 1].reason)}</div>` : ""}
+          <div><span>Record</span> ${esc((insp.signature_hash || "").slice(0, 12) || "—")}</div>
+          <div><span>Printed</span> ${new Date().toLocaleString("en-ZA")} by ${esc(S.profile.full_name)}</div>
+        </div>
+      </div>
+      <div class="rfoot">Identity and timestamp come from the signatory's ACTOM account.
+        This page is a rendering of record ${esc(insp.ref)}; the record itself cannot be
+        altered once signed.</div>
+    </div>
+  </div>`;
+}
 
 /* ---------------------------------------------------------------
    Faults per project.
@@ -2916,6 +3130,19 @@ function closeModal() { $("modal").classList.remove("open"); modalCtx = {}; }
    ------------------------------------------------------------ */
 const VIEWS = { dash: vDash, work: vWork, sched: vSched, dsn: vDsn, req: vReq, adm: vAdm };
 function render() {
+  /* The report is its own view, not a tab: it has to be able to fill the page
+     and print without the surrounding chrome. */
+  if (S.view === "print") {
+    document.body.classList.add("printing");
+    $("page").innerHTML = `
+      <div class="printbar">
+        <button class="btn" data-act="close-report">← Back to the register</button>
+        <span style="flex:1"></span>
+        <button class="btn pri" data-act="do-print">Print / save as PDF</button>
+      </div>` + vPrint();
+    return;
+  }
+  document.body.classList.remove("printing");
   const m = NAV.find(x => x.id === S.view);
   if (!m || (setupIds.includes(m.id) && !canConfigure())) { S.view = "dash"; S.tab = 0; return render(); }
   $("page").innerHTML = VIEWS[S.view](m) + foot();
@@ -3051,6 +3278,10 @@ document.addEventListener("click", async e => {
     case "add-action": return actionModal();
     case "save-action": return saveAction();
     case "del-action": return deleteAction(t.dataset.id);
+    case "print-report": return openReport(t.dataset.id);
+    case "do-print": return window.print();
+    case "close-report":
+      S.report = null; S.view = "work"; S.tab = 2; buildNav(); return render();
     case "hand-over": return handoverModal(t.dataset.id);
     case "save-handover": return saveHandover();
     case "add-wo": return worksOrderModal(Number(t.dataset.id), null);
