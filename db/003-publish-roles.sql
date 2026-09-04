@@ -70,4 +70,7 @@ begin
   return jsonb_build_object('template_id', v_tpl, 'rev', v_rev, 'status', 'published');
 end $$;
 
-grant execute on function publish_template_revision to authenticated;
+-- Argument lists stated: a grant on a bare function name breaks the
+-- moment that function gains an overload, and the error names the
+-- grant rather than the overload that caused it.
+grant execute on function publish_template_revision(uuid) to authenticated;

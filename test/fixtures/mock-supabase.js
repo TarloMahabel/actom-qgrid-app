@@ -74,12 +74,66 @@
   quality_actions: [
     {id:1,period:new Date().toISOString().slice(0,7)+"-01",seq:1,item:"Wiring Defects",action:"Fault lists shared with supervisors weekly.",deadline:"2026-09-30",status:"monitoring"}
   ],
+  root_causes: [
+    {id:1,code:"RC-PROC",name:"Procedure not followed",category:"Method",active:true,sort_order:10},
+    {id:2,code:"RC-SUPP",name:"Supplier defect",category:"Material",active:true,sort_order:110}
+  ],
+  v_ncr_list: [
+    {id:"nc1",ref:"NCR-26-0001",legacy_ref:"026/001",status:"open",severity:"major",
+     disposition:"not_yet_decided",origin:"internal",part_description:"LV door label holes",
+     part_no:"187572",qty:15,qty_unit:"units",raised_at:"2026-08-01T08:00:00Z",closed_at:null,
+     cost_total:null,supplier:null,department:"Assembly",project_code:"P-26118",
+     raised_by_name:"Varshan Mahabel",person_responsible_name:null,root_cause:null,
+     cause_category:null,inspection_ref:null,actions:0,actions_open:0,age_days:27},
+    {id:"nc2",ref:"NCR-26-0002",legacy_ref:"M026/046",status:"verified",severity:"minor",
+     disposition:"rework",origin:"supplier",part_description:"C20 MCB",part_no:"336380",
+     qty:1,qty_unit:"units",raised_at:"2026-07-15T08:00:00Z",closed_at:null,cost_total:9350,
+     supplier:"Schneider Electric",department:"Wiring",project_code:"P-26118",
+     raised_by_name:"Varshan Mahabel",person_responsible_name:"Thabo Nkosi",
+     root_cause:"Supplier defect",cause_category:"Material",inspection_ref:"INS-26-1189",
+     actions:1,actions_open:0,age_days:44}
+  ],
+  ncrs: {id:"nc1",ref:"NCR-26-0001",details:"LV door label holes punched in the wrong place.",
+         containment:"Quarantined 15 doors.",root_cause_id:null,root_cause_detail:null,
+         disposition:"not_yet_decided",person_responsible:null,cost_total:null},
+  ncr_actions: [
+    {id:1,ncr_id:"nc2",seq:1,action:"Machine setter to double-check the first-off.",
+     owner_id:"u2",due_date:"2026-09-30",done_by:"u2",done_at:"2026-08-20T09:00:00Z",
+     verified_by:"u1",verified_at:"2026-08-22T09:00:00Z"}
+  ],
   attachments: [],
   /* EMPTY by default. Answers for the signed inspection used to live here so
      the printed report had content — but the mock's .eq() does not filter, so
      every capture suite saw them as answers already recorded on the inspection
      it was opening. test-report seeds its own instead. */
   inspection_results: [],
+  root_causes: [
+    {id:1,code:"RC-PROC",name:"Procedure not followed",category:"Method",active:true,sort_order:10},
+    {id:2,code:"RC-SUPP",name:"Supplier defect",category:"Material",active:true,sort_order:110}
+  ],
+  v_ncr_list: [
+    {id:"nc1",ref:"NCR-26-0001",legacy_ref:"026/001",status:"open",severity:"major",
+     disposition:"not_yet_decided",origin:"internal",part_description:"LV door label holes",
+     part_no:"187572",qty:15,qty_unit:"units",raised_at:"2026-08-01T08:00:00Z",closed_at:null,
+     cost_total:null,supplier:null,department:"Assembly",project_code:"P-26118",
+     raised_by_name:"Varshan Mahabel",person_responsible_name:null,root_cause:null,
+     cause_category:null,inspection_ref:null,actions:0,actions_open:0,age_days:27},
+    {id:"nc2",ref:"NCR-26-0002",legacy_ref:"M026/046",status:"verified",severity:"minor",
+     disposition:"rework",origin:"supplier",part_description:"C20 MCB",part_no:"336380",
+     qty:1,qty_unit:"units",raised_at:"2026-07-15T08:00:00Z",closed_at:null,cost_total:9350,
+     supplier:"Schneider Electric",department:"Wiring",project_code:"P-26118",
+     raised_by_name:"Varshan Mahabel",person_responsible_name:"Thabo Nkosi",
+     root_cause:"Supplier defect",cause_category:"Material",inspection_ref:"INS-26-1189",
+     actions:1,actions_open:0,age_days:44}
+  ],
+  ncrs: {id:"nc1",ref:"NCR-26-0001",details:"LV door label holes punched in the wrong place.",
+         containment:"Quarantined 15 doors.",root_cause_id:null,root_cause_detail:null,
+         disposition:"not_yet_decided",person_responsible:null,cost_total:null},
+  ncr_actions: [
+    {id:1,ncr_id:"nc2",seq:1,action:"Machine setter to double-check the first-off.",
+     owner_id:"u2",due_date:"2026-09-30",done_by:"u2",done_at:"2026-08-20T09:00:00Z",
+     verified_by:"u1",verified_at:"2026-08-22T09:00:00Z"}
+  ],
   attachments: [],
 
     audit_trail: [{at:"2026-08-26T09:00:00Z",actor_name:"Varshan Mahabel",action:"insert",entity:"inspections",entity_id:"n1abcdef"}]
@@ -172,6 +226,18 @@
                     insp.signed_at = new Date().toISOString(); }
         return Promise.resolve({ data: { ref: insp ? insp.ref : "INS-26-1191",
           result: "fail", failed_checks: 1, works_order_held: false }, error: null });
+      }
+      if (fn === "close_ncr") {
+        const n = DATA.v_ncr_list.find(x => x.id === args.p_ncr);
+        if (!n) return Promise.resolve({ data: null, error: { message: "NCR_MISSING" } });
+        if (!n.root_cause) return Promise.resolve({ data: null,
+          error: { message: "NCR_NO_CAUSE: cannot be closed without a root cause" } });
+        if (!n.actions) return Promise.resolve({ data: null,
+          error: { message: "NCR_NO_ACTION: cannot be closed without a corrective action" } });
+        if (n.actions_open) return Promise.resolve({ data: null,
+          error: { message: "NCR_UNVERIFIED: corrective actions not yet verified" } });
+        n.status = "closed"; n.closed_at = new Date().toISOString();
+        return Promise.resolve({ data: { ref: n.ref, status: "closed" }, error: null });
       }
       if (fn === "hand_over_inspection") {
         const insp = DATA.inspections.find(i => i.id === args.p_inspection);

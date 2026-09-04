@@ -140,7 +140,10 @@ begin
   return jsonb_build_object('ref', v_insp.ref, 'from', v_from, 'to', p_to);
 end $$;
 
-grant execute on function hand_over_inspection to authenticated;
+-- Argument lists stated: a grant on a bare function name breaks the
+-- moment that function gains an overload, and the error names the
+-- grant rather than the overload that caused it.
+grant execute on function hand_over_inspection(uuid, uuid, text) to authenticated;
 
 -- ------------------------------------------------------------
 --  Answers follow the CURRENT assignee.

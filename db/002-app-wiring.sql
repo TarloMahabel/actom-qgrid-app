@@ -262,4 +262,7 @@ select
     where status = 'completed' and completed_at > now() - interval '30 days')               as pass_rate_30d;
 
 grant select on v_dashboard, v_stage_yield, v_open_work to authenticated;
-grant execute on function publish_template_revision, submit_inspection, generate_inspections to authenticated;
+-- Argument lists stated: a grant on a bare function name breaks the
+-- moment that function gains an overload, and the error names the
+-- grant rather than the overload that caused it.
+grant execute on function publish_template_revision(uuid), submit_inspection(uuid, text), generate_inspections(bigint, date) to authenticated;

@@ -27,7 +27,7 @@ const GROUPS = [
   ["Static checks", ["test-security", "test-hook", "test-deploy", "test-integrity", "test-version"]],
   ["Boot path (real vendored client, no mock)", ["test-boot"]],
   ["Front-end suites (jsdom, real app files, mock backend)",
-   ["test-nav", "test-capture", "test-designer", "test-requirements", "test-admin", "test-dashboard", "test-report"]]
+   ["test-nav", "test-capture", "test-designer", "test-requirements", "test-admin", "test-dashboard", "test-report", "test-ncr"]]
 ];
 
 let failed = [];

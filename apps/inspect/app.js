@@ -58,6 +58,7 @@ const S = {
   templates: [], revisions: [], requirements: [],
   projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [], competencies: [], handovers: [],
   faultsByProject: [], actions: [], report: null,
+  ncrs: [], ncrActions: [], rootCauses: [], ncrOpen: null,
   period: new Date().toISOString().slice(0, 7),
   dash: {},
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
@@ -170,7 +171,8 @@ async function loadData() {
     S.stages = st.data; S.departments = dp.data; S.families = fm.data;
     S.defects = df.data; S.equipment = eq.data;
 
-    const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd, fbp, acts, dash] = await Promise.all([
+    const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd, fbp, acts,
+           ncr, ncra, rcs, dash] = await Promise.all([
       supabase.from("inspection_templates").select("*").order("code"),
       supabase.from("template_revisions").select("*").order("rev", { ascending: false }),
       supabase.from("inspection_requirements").select("*"),
@@ -183,6 +185,9 @@ async function loadData() {
       supabase.from("inspection_handovers").select("*").order("at"),
       supabase.from("v_faults_by_project").select("*"),
       supabase.from("quality_actions").select("*").order("period", { ascending: false }),
+      supabase.from("v_ncr_list").select("*").order("raised_at", { ascending: false }),
+      supabase.from("ncr_actions").select("*").order("seq"),
+      supabase.from("root_causes").select("*").eq("active", true).order("sort_order"),
       supabase.from("v_dashboard").select("*").maybeSingle()
     ]);
     for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd]) if (r.error) throw r.error;
@@ -190,6 +195,11 @@ async function loadData() {
        migration 012 yet should still be able to capture inspections. */
     S.faultsByProject = fbp.error ? [] : (fbp.data || []);
     S.actions = acts.error ? [] : (acts.data || []);
+    /* Not load-bearing: a division that has not run migration 014 must still
+       be able to capture inspections. */
+    S.ncrs = ncr.error ? [] : (ncr.data || []);
+    S.ncrActions = ncra.error ? [] : (ncra.data || []);
+    S.rootCauses = rcs.error ? [] : (rcs.data || []);
     S.templates = tpl.data; S.revisions = rev.data; S.requirements = req.data;
     S.projects = prj.data; S.worksOrders = wo.data;
     S.inspections = ins.data; S.failedChecks = fc.data;
@@ -245,10 +255,12 @@ const NAV = [
   { g: "Setup" },
   { id: "dsn",   n: 4, t: "Form designer",           col: "--m4", tabs: [] },
   { id: "req",   n: 5, t: "Inspection requirements", col: "--m5", tabs: ["Requirements matrix"] },
-  { id: "adm",   n: 6, t: "Administration",          col: "--m6",
+  { id: "ncr",   n: 6, t: "NCR management",           col: "--m4",
+    tabs: ["Register", "Repeat causes", "By department", "By supplier"] },
+  { id: "adm",   n: 7, t: "Administration",          col: "--m6",
     tabs: ["Users & roles", "Competency", "Reference lists", "Options", "Audit trail"] },
   { g: "Later phases" },
-  ...["NCR management","Calibration","Document control","Training & competency",
+  ...["Calibration","Document control","Training & competency",
       "Supplier quality","Customer quality","Audits & compliance","Performance analytics"]
      .map(t => ({ off: 1, t }))
 ];
@@ -553,9 +565,21 @@ function vWork(m) {
           </div>`;
         })()];
       const hp = HP() ? [f.is_hold ? pill("Hold point") : "—"] : [];
+      /* Raising an NCR from here is the point of the two modules being in one
+         app: the inspection, the panel, the defect code and the photographs
+         are already recorded. In the spreadsheet an inspection and its NCR
+         were two records with nothing joining them. */
+      const raised = S.ncrs.find(x => x.id && f.id && x.inspection_ref &&
+                                      String(x.failed_check_id) === String(f.id));
       return base.concat(hp, [pill(f.disposition || "awaiting"),
-        f.disposition === "awaiting" && isRole("supervisor", "quality_engineer", "quality_manager")
-          ? `<button class="btn sm" data-dispose="${f.id}">Disposition</button>` : ""]);
+        `<div style="display:flex;gap:6px;justify-content:flex-end">
+           ${raised
+             ? pill("NCR " + esc(raised.ref))
+             : `<button class="btn sm" data-act="raise-ncr" data-id="${f.id}"
+                  title="Raise an NCR, carrying the inspection and panel across">Raise NCR</button>`}
+           ${f.disposition === "awaiting" && isRole("supervisor", "quality_engineer", "quality_manager")
+             ? `<button class="btn sm" data-dispose="${f.id}">Disposition</button>` : ""}
+         </div>`]);
     }));
   }
   return head(m, "Your queue, the capture form, and where a failed check goes next.",
@@ -1972,6 +1996,563 @@ function vPrint() {
   </div>`;
 }
 
+
+/* ---------------------------------------------------------------
+   NCR management (Module 3).
+
+   Shaped by what the spreadsheet register it replaces actually
+   contained, rather than by its column list. In 475 records: details
+   99% filled, containment 91%, but person responsible 49%, corrective
+   action 19%, root cause 1%, material and labour cost 0%. 368 of 475
+   still open.
+
+   So the register half is easy and already works. The closing half is
+   what this makes structural: a status derived from the facts, a coded
+   root cause, corrective actions as owned rows, and a close that refuses
+   without both.
+   --------------------------------------------------------------- */
+const NCR_STATES = [
+  ["open",             "Open",              "raised, nothing done yet"],
+  ["contained",        "Contained",         "immediate action recorded"],
+  ["cause_identified", "Cause identified",  "root cause recorded"],
+  ["action_agreed",    "Action agreed",     "corrective action owned"],
+  ["action_done",      "Action done",       "carried out, not yet verified"],
+  ["verified",         "Verified",          "checked and effective"],
+  ["closed",           "Closed",            ""]
+];
+const ncrStateLabel = st => (NCR_STATES.find(x => x[0] === st) || [st, st])[1];
+const SEVERITIES_NCR = [["minor", "Minor"], ["major", "Major"], ["critical", "Critical"]];
+const DISPOSITIONS = [
+  ["not_yet_decided", "Not yet decided"], ["rework", "Rework"], ["scrap", "Scrap"],
+  ["return_to_supplier", "Return to supplier"], ["concession", "Concession"],
+  ["use_as_is", "Use as is"]
+];
+const ORIGINS = [
+  ["internal", "Found internally"], ["inspection", "From an inspection"],
+  ["fault_list", "From a fault list"], ["supplier", "Supplier"],
+  ["site", "On site"], ["customer", "Customer complaint"], ["audit", "Audit finding"]
+];
+
+function vNcr(m) {
+  if (S.ncrOpen) return ncrDetail(m);
+  let body;
+  if (S.tab === 0) body = ncrRegister();
+  else if (S.tab === 1) body = ncrRepeat();
+  else if (S.tab === 2) body = ncrByGroup("department");
+  else body = ncrByGroup("supplier");
+
+  return head(m, "A non-conformance is recorded, its cause found, and something changed so it does not recur.",
+    `<button class="btn" data-act="refresh">Refresh</button>
+     <button class="btn pri" data-act="new-ncr">Raise an NCR</button>`)
+    + tabbar(m) + body;
+}
+
+function ncrRegister() {
+  const rows = S.ncrs;
+  if (!rows.length) {
+    return `<div class="card"><div class="bd" style="text-align:center;padding:36px 20px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px">No NCRs yet</div>
+      <p style="color:var(--ink-2);font-size:13px;max-width:470px;margin:0 auto 18px">
+        Raise one here, or from a failed check in the Inspection workbench — doing it
+        that way carries the inspection, the panel and the photographs across with it.</p>
+      <button class="btn pri" data-act="new-ncr">Raise an NCR</button></div></div>`;
+  }
+
+  const open = rows.filter(r => r.status !== "closed");
+  const noCause = open.filter(r => !r.root_cause);
+  const noAction = open.filter(r => !r.actions);
+  const overdue = open.filter(r => r.age_days > 30);
+  const cost = rows.reduce((a, r) => a + Number(r.cost_total || 0), 0);
+
+  return `<div class="four" style="margin-bottom:14px">
+      <div class="card kpi"><div class="k">Open</div><div class="v">${open.length}</div>
+        <div class="d">of ${rows.length} raised</div></div>
+      <div class="card kpi ${noCause.length ? "warn" : "good"}"><div class="k">No root cause</div>
+        <div class="v">${noCause.length}</div><div class="d">cannot be closed</div></div>
+      <div class="card kpi ${noAction.length ? "warn" : "good"}"><div class="k">No corrective action</div>
+        <div class="v">${noAction.length}</div><div class="d">nothing stops recurrence</div></div>
+      <div class="card kpi ${overdue.length ? "alert" : "good"}"><div class="k">Open over 30 days</div>
+        <div class="v">${overdue.length}</div>
+        <div class="d">${cost ? "R" + cost.toLocaleString("en-ZA") + " recorded" : "no cost recorded"}</div></div>
+    </div>
+
+    ${noCause.length || noAction.length ? `<div class="note q" style="margin-bottom:13px">
+      The two figures that matter are the middle ones. An NCR with no root cause cannot
+      be closed, and one with no corrective action has not changed anything — the register
+      this replaces sat at 1% root cause and 19% corrective action across 475 records.</div>` : ""}
+
+    <div class="card"><h3>Register <span class="cl">${rows.length}</span></h3><div class="bd">
+      ${T(["Reference", "Raised", "What", "Department", "Severity", "Cause", "Actions", "Progress", ""],
+        rows.slice(0, 120).map(r => [
+          `<span class="id">${esc(r.ref || "—")}</span>${r.legacy_ref
+            ? `<div class="sub">was ${esc(r.legacy_ref)}</div>` : ""}`,
+          `${fmtDate(r.raised_at)}<div class="sub">${r.age_days} day${r.age_days === 1 ? "" : "s"} old</div>`,
+          `${esc((r.part_description || "").slice(0, 46))}
+            <div class="sub">${esc(r.project_code || "")}${r.inspection_ref
+              ? ` · from ${esc(r.inspection_ref)}` : ""}${r.supplier ? ` · ${esc(r.supplier)}` : ""}</div>`,
+          esc(r.department || "not allocated"),
+          pill(r.severity || "—"),
+          r.root_cause ? esc(r.root_cause) : `<span style="color:var(--warn)">not identified</span>`,
+          r.actions ? `${r.actions - r.actions_open}/${r.actions} verified`
+                    : `<span style="color:var(--warn)">none</span>`,
+          pill(ncrStateLabel(r.status)),
+          `<button class="btn sm" data-act="open-ncr" data-id="${r.id}">Open</button>`]))}
+    </div></div>`;
+}
+
+function ncrRepeat() {
+  const rows = (S.ncrs || []);
+  if (!rows.length) return `<div class="card"><div class="empty">Nothing raised yet.</div></div>`;
+
+  /* Grouped by cause, month by month. This is the one analysis in the old
+     workbook that earns its keep, and the one whose formulas had already
+     broken — Repeat NCRs CALC shows a #REF!. */
+  const byCause = {};
+  for (const r of rows) {
+    const c = r.root_cause || "Cause not identified";
+    (byCause[c] ||= { cause: c, total: 0, open: 0, cost: 0, months: {} });
+    byCause[c].total++;
+    if (r.status !== "closed") byCause[c].open++;
+    byCause[c].cost += Number(r.cost_total || 0);
+    const mo = (r.raised_at || "").slice(0, 7);
+    byCause[c].months[mo] = (byCause[c].months[mo] || 0) + 1;
+  }
+  const months = [...new Set(rows.map(r => (r.raised_at || "").slice(0, 7)))].sort().slice(-6);
+  const causes = Object.values(byCause).sort((a, b) => b.total - a.total);
+
+  return `<div class="card"><h3>Repeat causes
+      <span class="cl">${causes.length} distinct · last ${months.length} months</span></h3>
+    <div class="bd">
+      <div class="note" style="margin-bottom:13px">A cause that keeps appearing means the
+        corrective action against it did not work. That is the question this table answers,
+        and the reason to record a cause at all.</div>
+      ${T(["Cause", ...months.map(m => new Date(m + "-01").toLocaleString("en-ZA", { month: "short" })),
+           "Total", "Still open", "Cost"],
+        causes.map(c => [
+          c.cause === "Cause not identified"
+            ? `<span style="color:var(--warn)">${esc(c.cause)}</span>` : esc(c.cause),
+          ...months.map(m => String(c.months[m] || 0)),
+          `<b>${c.total}</b>`,
+          c.open ? pill(`${c.open} open`) : pill("all closed"),
+          c.cost ? "R" + c.cost.toLocaleString("en-ZA") : "—"]))}
+    </div></div>`;
+}
+
+function ncrByGroup(kind) {
+  const rows = S.ncrs.filter(r => kind === "supplier" ? r.supplier : true);
+  const key = r => kind === "supplier" ? r.supplier : (r.department || "Not allocated");
+  const groups = {};
+  for (const r of rows) {
+    const k = key(r);
+    (groups[k] ||= { k, total: 0, open: 0, cost: 0 });
+    groups[k].total++;
+    if (r.status !== "closed") groups[k].open++;
+    groups[k].cost += Number(r.cost_total || 0);
+  }
+  const list = Object.values(groups).sort((a, b) => b.total - a.total);
+  if (!list.length) {
+    return `<div class="card"><div class="empty">${kind === "supplier"
+      ? "No supplier NCRs yet. Set the origin to Supplier and name them, and they appear here."
+      : "Nothing raised yet."}</div></div>`;
+  }
+  return `<div class="card"><h3>${kind === "supplier" ? "By supplier" : "By responsible department"}
+      <span class="cl">${list.length}</span></h3><div class="bd">
+      ${kind === "supplier" ? `<div class="note" style="margin-bottom:13px">In the old
+        register a supplier was recorded inside a column called Department, so a supplier
+        and an internal department were the same kind of thing. Here it is its own field.</div>` : ""}
+      ${T([kind === "supplier" ? "Supplier" : "Department", "NCRs", "Still open", "Cost recorded"],
+        list.map(g => [esc(g.k), String(g.total),
+          g.open ? pill(`${g.open} open`) : pill("all closed"),
+          g.cost ? "R" + g.cost.toLocaleString("en-ZA") : "—"]))}
+    </div></div>`;
+}
+
+
+/* The NCR itself, as three stages rather than one long form. Containment
+   is already done well; cause and corrective action are the two the old
+   register never captured, so they get equal weight on screen instead of
+   being the last two columns of twenty-nine. */
+function ncrDetail(m) {
+  const n = S.ncrs.find(x => x.id === S.ncrOpen);
+  if (!n) { S.ncrOpen = null; return vNcr(m); }
+  const full = S.ncrFull || {};
+  const acts = S.ncrActions.filter(a => a.ncr_id === n.id)
+    .sort((a, b) => (a.seq || 0) - (b.seq || 0));
+  const canEdit = n.status !== "closed" &&
+    isRole("inspector", "supervisor", "quality_engineer", "quality_manager", "sysadmin");
+  const canClose = isRole("quality_engineer", "quality_manager", "sysadmin");
+
+  const stageIndex = NCR_STATES.findIndex(x => x[0] === n.status);
+  const trail = `<div class="card" style="margin-bottom:13px"><div class="bd">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+      ${NCR_STATES.map(([code, label, hint], i) => `
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="width:20px;height:20px;border-radius:50%;display:grid;place-items:center;
+                font-size:10.5px;font-weight:700;color:#fff;
+                background:${i <= stageIndex ? "var(--ok)" : "var(--muted)"}"
+            title="${esc(hint)}">${i <= stageIndex ? "✓" : i + 1}</span>
+          <span style="font-size:12px;font-weight:${i === stageIndex ? "700" : "500"};
+                color:${i <= stageIndex ? "var(--ink)" : "var(--muted)"}">${esc(label)}</span>
+          ${i < NCR_STATES.length - 1 ? `<span style="color:var(--line);margin:0 2px">→</span>` : ""}
+        </div>`).join("")}
+    </div></div></div>`;
+
+  const fld = (label, value, hint) => `<div class="fld"><label>${esc(label)}</label>
+    <div class="ro">${value || "—"}</div>${hint ? `<div class="hint">${esc(hint)}</div>` : ""}</div>`;
+
+  /* Literal id attributes, so the integrity check that every referenced id is
+     created can actually see them. Built through a helper they were invisible
+     to it, and that check has caught two real faults already. */
+  const sel = (id, options, current, disabled) => `<select id="${id}" ${disabled ? "disabled" : ""}>
+    ${options.map(([v, l]) => `<option value="${v}" ${String(current) === String(v) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
+
+  return head(m, `${esc(n.part_description || "")}`,
+    `<button class="btn" data-act="close-ncr-view">← Register</button>
+     ${/* A printable NCR is step 6 of the plan and is not built yet. Better no
+           button than one that does nothing — a dead control is the fault this
+           build has hit most often. */ ""}
+     ${canClose && n.status !== "closed"
+       ? `<button class="btn pri" data-act="do-close-ncr" data-id="${n.id}">Close this NCR</button>` : ""}`)
+    + `<div class="filters"><span class="cnt">
+        <b class="id">${esc(n.ref)}</b>${n.legacy_ref ? ` · was ${esc(n.legacy_ref)}` : ""} ·
+        ${pill(ncrStateLabel(n.status))} · ${pill(n.severity)} ·
+        raised ${fmtDate(n.raised_at)} by ${esc(n.raised_by_name || "—")} ·
+        ${n.age_days} day${n.age_days === 1 ? "" : "s"} old
+        ${n.inspection_ref ? ` · from inspection ${esc(n.inspection_ref)}` : ""}
+      </span></div>`
+    + trail
+    + `<div class="two">
+      <div class="card"><h3>What happened</h3><div class="bd">
+        ${fld("Part", esc(n.part_description))}
+        ${fld("Part number", esc(n.part_no || ""))}
+        ${fld("Quantity", n.qty ? `${n.qty} ${esc(n.qty_unit || "")}` : "")}
+        ${fld("Project", esc(n.project_code || ""))}
+        ${fld("Origin", esc((ORIGINS.find(o => o[0] === n.origin) || ["", n.origin])[1]))}
+        ${n.supplier ? fld("Supplier", esc(n.supplier)) : ""}
+        <div class="fld"><label>Non-conformance</label>
+          <div class="ro" style="white-space:pre-wrap;min-height:auto">${esc(full.details || "")}</div></div>
+      </div></div>
+
+      <div class="card"><h3>Responsibility</h3><div class="bd">
+        ${fld("Department responsible", esc(n.department || "not allocated"))}
+        <div class="fld"><label>Person responsible</label>
+          ${canEdit ? sel("nPerson", [["", "— not allocated —"]].concat(
+              S.people.filter(p => p.active).map(p => [p.id, p.full_name])),
+              full.person_responsible) : `<div class="ro">${esc(n.person_responsible_name || "—")}</div>`}
+          <div class="hint">Half the old register had nobody named. An NCR without
+            an owner is an NCR nobody closes.</div></div>
+        <div class="two">
+          <div class="fld"><label>Severity</label>
+            ${canEdit ? sel("nSeverity", SEVERITIES_NCR, n.severity) : pill(n.severity)}</div>
+          <div class="fld"><label>Disposition</label>
+            ${canEdit ? sel("nDisposition", DISPOSITIONS, full.disposition) : pill(full.disposition)}</div>
+        </div>
+        ${canEdit ? `<button class="btn sm" data-act="save-ncr-who" data-id="${n.id}">Save</button>` : ""}
+      </div></div>
+    </div>
+
+    <div class="card" style="margin-top:13px"><h3>1 · Containment
+        <span class="cl">${full.contained_at ? "recorded " + fmtDate(full.contained_at) : "not recorded"}</span></h3>
+      <div class="bd">
+        <div class="note" style="margin-bottom:11px">What was done immediately to stop the
+          problem spreading — quarantine, stop the machine, hold the despatch. This is not
+          the corrective action: containment deals with <b>this</b> panel, the corrective
+          action is <b>what changes so</b> the next one is right.</div>
+        ${canEdit
+          ? `<textarea id="nContainment" rows="3">${esc(full.containment || "")}</textarea>
+             <button class="btn sm" data-act="save-ncr-containment" data-id="${n.id}"
+               style="margin-top:8px">Save containment</button>`
+          : `<div class="ro" style="white-space:pre-wrap">${esc(full.containment || "—")}</div>`}
+      </div></div>
+
+    <div class="card" style="margin-top:13px"><h3>2 · Root cause
+        <span class="cl">${n.root_cause ? esc(n.root_cause) : "not identified"}</span></h3>
+      <div class="bd">
+        ${!n.root_cause ? `<div class="note q" style="margin-bottom:11px">Required to close.
+          Containment stops the bleeding; without a cause nothing changes. In the register
+          this replaces, 7 of 475 had one.</div>` : ""}
+        ${canEdit ? `<div class="two">
+            <div class="fld"><label>Cause</label>
+              ${sel("nCause", [["", "— not identified —"]].concat(
+                S.rootCauses.map(rc => [rc.id, `${rc.category ? rc.category + " · " : ""}${rc.name}`])),
+                full.root_cause_id)}</div>
+            <div class="fld"><label>Detail</label>
+              <input id="nCauseDetail" value="${esc(full.root_cause_detail || "")}"
+                placeholder="what specifically, in this case"></div>
+          </div>
+          <button class="btn sm" data-act="save-ncr-cause" data-id="${n.id}">Save cause</button>`
+        : `<div class="ro">${esc(n.root_cause || "—")}${full.root_cause_detail
+            ? ` — ${esc(full.root_cause_detail)}` : ""}</div>`}
+      </div></div>
+
+    <div class="card" style="margin-top:13px"><h3>3 · Corrective action
+        <span class="cl">${acts.length
+          ? `${acts.filter(a => a.verified_at).length} of ${acts.length} verified`
+          : "none recorded"}</span></h3>
+      <div class="bd">
+        ${!acts.length ? `<div class="note q" style="margin-bottom:11px">Required to close.
+          This is what stops it happening again — 19% of the old register had one.</div>` : ""}
+        ${acts.length ? `<div style="overflow-x:auto"><table><thead><tr>
+            <th style="width:36px">No</th><th>Action</th><th style="width:150px">Owner</th>
+            <th style="width:110px">Due</th><th style="width:150px">Done by</th>
+            <th style="width:150px">Verified by</th>${canEdit ? "<th style=\"width:40px\"></th>" : ""}
+          </tr></thead><tbody>
+          ${acts.map((a, i) => {
+            const person = (id, col, disabled) => canEdit
+              ? `<select data-ncra="${a.id}|${col}" ${disabled ? "disabled" : ""}
+                   style="padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:12px">
+                   <option value="">— not yet —</option>
+                   ${S.people.filter(p => p.active).map(p =>
+                     `<option value="${p.id}" ${String(id) === String(p.id) ? "selected" : ""}>${esc(p.full_name)}</option>`).join("")}
+                 </select>`
+              : esc(byId(S.people, id)?.full_name || "—");
+            const selfVerified = a.done_by && a.done_by === a.verified_by;
+            return `<tr style="cursor:default">
+              <td>${i + 1}</td>
+              <td style="white-space:normal;font-size:12.6px">${esc(a.action)}</td>
+              <td>${person(a.owner_id, "owner_id")}</td>
+              <td>${a.due_date ? esc(a.due_date) : "—"}</td>
+              <td>${person(a.done_by, "done_by")}</td>
+              <td>${person(a.verified_by, "verified_by", !a.done_by)}
+                ${selfVerified ? `<div class="tag ncr">same person</div>` : ""}</td>
+              ${canEdit ? `<td>${a.verified_at ? "" :
+                `<button class="btn sm danger" data-act="del-ncr-action" data-id="${a.id}">×</button>`}</td>` : ""}
+            </tr>`;
+          }).join("")}
+        </tbody></table></div>` : ""}
+        ${canEdit ? `<div style="margin-top:12px">
+          <button class="btn ${acts.length ? "" : "pri"}" data-act="add-ncr-action" data-id="${n.id}">
+            + Add a corrective action</button></div>` : ""}
+        ${acts.length ? `<div class="hint" style="margin-top:9px">Verification cannot be
+          recorded before the action is done — it is a check on the work.</div>` : ""}
+      </div></div>
+
+    <div class="card" style="margin-top:13px"><h3>Cost
+        <span class="cl">${n.cost_total ? "R" + Number(n.cost_total).toLocaleString("en-ZA") : "not recorded"}</span></h3>
+      <div class="bd">
+        <div class="note" style="margin-bottom:11px">Material and labour were never once
+          filled in the old register across two years, so the breakdown is optional and the
+          total works on its own. Fill the parts and the total is worked out for you.</div>
+        ${canEdit ? `<div class="four">
+            ${[["nCostMaterial", "Material", full.cost_material],
+               ["nCostLabour", "Labour", full.cost_labour],
+               ["nCostRework", "Rework", full.cost_rework],
+               ["nCostOther", "Other", full.cost_other]].map(([id, label, v]) =>
+              `<div class="fld"><label>${label}</label>
+                 <input id="${id}" type="number" step="0.01" value="${v ?? ""}"></div>`).join("")}
+          </div>
+          <div class="two"><div class="fld"><label>Total, if you have only that</label>
+            <input id="nCostTotal" type="number" step="0.01" value="${full.cost_total ?? ""}"></div>
+            <div class="fld"><label>&nbsp;</label>
+              <button class="btn sm" data-act="save-ncr-cost" data-id="${n.id}">Save cost</button></div>
+          </div>` : ""}
+      </div></div>
+
+    ${n.status === "closed" ? `<div class="note" style="margin-top:13px;background:var(--ok-bg);
+      border-color:#bfe4d1;color:#12613f"><b>Closed ${fmtDate(full.closed_at)}</b>
+      by ${esc(byId(S.people, full.closed_by)?.full_name || "—")}. Nothing further can be changed.</div>` : ""}`;
+}
+
+
+/* ---- NCR actions ---- */
+async function openNcr(id) {
+  S.ncrOpen = id; S.ncrFull = {};
+  render(); busy(true);
+  try {
+    /* The list view is a view, so it does not carry the long text or the cost
+       breakdown. Fetched on open rather than loading every NCR's details with
+       the register. */
+    const { data, error } = await supabase.from("ncrs").select("*").eq("id", id).maybeSingle();
+    if (error) throw error;
+    S.ncrFull = data || {};
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); render(); }
+}
+
+function newNcrModal(fromFault) {
+  const fc = fromFault ? S.failedChecks.find(f => f.id === fromFault) : null;
+  const insp = fc ? byId(S.inspections, fc.inspection_id) : null;
+
+  openModal(fc ? `Raise an NCR from ${fc.ref}` : "Raise an NCR", `
+    ${fc ? `<div class="note" style="margin-bottom:13px">Raised from a fault already found on
+      ${esc(insp?.ref || "an inspection")}. The inspection, panel and project come across with
+      it, which is the reason to do it this way rather than starting from scratch.</div>` : ""}
+    <div class="two">
+      <div class="fld"><label>Part or panel</label>
+        <input id="cPart" value="${esc(fc ? (insp?.unit_ref || "") : "")}"
+          placeholder="what the non-conformance is on"></div>
+      <div class="fld"><label>Part number</label><input id="cPartNo"></div>
+    </div>
+    <div class="fld"><label>What is wrong</label>
+      <textarea id="cDetails" rows="3" placeholder="the non-conformance itself">${esc(
+        fc ? (fc.description
+              /* A checkpoint fault carries no description of its own — the
+                 checkpoint is the description. Pre-fill it rather than leaving
+                 the field blank, which reads as nothing having come across. */
+              || `Checkpoint failed on ${insp ? insp.ref : "an inspection"}` +
+                 (insp && insp.unit_ref ? ` (${insp.unit_ref})` : ""))
+            : "")}</textarea></div>
+    <div class="two">
+      <div class="fld"><label>Origin</label><select id="cOrigin">
+        ${ORIGINS.map(([v, l]) => `<option value="${v}" ${fc && v === "fault_list" ? "selected" : ""}>${esc(l)}</option>`).join("")}
+      </select></div>
+      <div class="fld"><label>Severity</label><select id="cSeverity">
+        ${SEVERITIES_NCR.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("")}
+      </select>
+      <div class="hint">Required. It was 7% filled in the old register, so reports built
+        on it could not be trusted.</div></div>
+    </div>
+    <div class="two">
+      <div class="fld"><label>Department responsible</label><select id="cDept">
+        <option value="">— not allocated —</option>
+        ${S.departments.map(d => `<option value="${d.id}" ${insp && insp.department_id === d.id ? "selected" : ""}>${esc(d.name)}</option>`).join("")}
+      </select></div>
+      <div class="fld"><label>Supplier, if it is theirs</label>
+        <input id="cSupplier" placeholder="leave blank if internal">
+        <div class="hint">Its own field. The old register put suppliers inside a column
+          called Department.</div></div>
+    </div>
+    <div class="two">
+      <div class="fld"><label>Quantity</label><input id="cQty" type="number" step="0.01"></div>
+      <div class="fld"><label>Unit</label>
+        <input id="cQtyUnit" placeholder="units, kg, sheets, m">
+        <div class="hint">The old register held "4 SHEETS (252.2 KG)" in a quantity column.</div></div>
+    </div>`,
+    [["Cancel", "close"], ["Raise", "save-ncr", "pri"]], { fromFault });
+}
+
+async function saveNcr() {
+  const part = $("cPart").value.trim(), details = $("cDetails").value.trim();
+  if (!part || !details) { toast("The part and what is wrong are both required.", "bad"); return; }
+  const origin = $("cOrigin").value, supplier = $("cSupplier").value.trim();
+  if (origin === "supplier" && !supplier) {
+    toast("Name the supplier, or change the origin.", "bad"); return;
+  }
+  busy(true);
+  try {
+    const fc = modalCtx.fromFault ? S.failedChecks.find(f => f.id === modalCtx.fromFault) : null;
+    const insp = fc ? byId(S.inspections, fc.inspection_id) : null;
+    const { data, error } = await supabase.from("ncrs").insert({
+      origin, part_description: part, part_no: $("cPartNo").value.trim() || null,
+      details, severity: $("cSeverity").value,
+      department_id: $("cDept").value ? Number($("cDept").value) : null,
+      supplier: supplier || null,
+      qty: $("cQty").value ? Number($("cQty").value) : null,
+      qty_unit: $("cQtyUnit").value.trim() || null,
+      raised_by: S.profile.id,
+      inspection_id: insp ? insp.id : null,
+      failed_check_id: fc ? fc.id : null,
+      project_id: insp ? insp.project_id : null,
+      works_order_id: insp ? insp.works_order_id : null
+    }).select().single();
+    if (error) throw error;
+    closeModal();
+    toast(`${data.ref} raised.`, "ok");
+    await reload();
+    S.view = "ncr"; S.tab = 0; buildNav();
+    openNcr(data.id);
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function patchNcr(id, patch, what) {
+  busy(true);
+  try {
+    const { error } = await supabase.from("ncrs").update(patch).eq("id", id);
+    if (error) throw error;
+    toast(`${what} saved.`, "ok");
+    await reload();
+    await openNcr(id);
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+function ncrActionModal(ncrId) {
+  openModal("Add a corrective action", `
+    <div class="fld"><label>What will be done</label>
+      <textarea id="aAct" rows="3"
+        placeholder="the change that stops this happening again"></textarea>
+      <div class="hint">Not what was done to this panel — that is containment. This is
+        what changes so the next one is right.</div></div>
+    <div class="two">
+      <div class="fld"><label>Owner</label><select id="aOwner">
+        <option value="">— nobody yet —</option>
+        ${S.people.filter(p => p.active).map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("")}
+      </select></div>
+      <div class="fld"><label>Due</label><input id="aDue" type="date"></div>
+    </div>`,
+    [["Cancel", "close"], ["Add", "save-ncr-action", "pri"]], { id: ncrId });
+}
+
+async function saveNcrAction() {
+  const action = $("aAct").value.trim();
+  if (!action) { toast("Say what will be done.", "bad"); return; }
+  busy(true);
+  try {
+    const seq = S.ncrActions.filter(a => a.ncr_id === modalCtx.id).length + 1;
+    const { error } = await supabase.from("ncr_actions").insert({
+      ncr_id: modalCtx.id, seq, action,
+      owner_id: $("aOwner").value || null,
+      due_date: $("aDue").value || null,
+      created_by: S.profile.id
+    });
+    if (error) throw error;
+    closeModal(); await reload(); await openNcr(modalCtx.id);
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function setNcrActionField(id, column, value) {
+  busy(true);
+  try {
+    const patch = { [column]: value || null };
+    /* Timestamps alongside the person, and withdrawing the doing withdraws the
+       verification with it — a verification with nothing under it asserts that
+       somebody checked work nobody did. */
+    if (column === "done_by") {
+      patch.done_at = value ? new Date().toISOString() : null;
+      if (!value) { patch.verified_by = null; patch.verified_at = null; }
+    }
+    if (column === "verified_by") patch.verified_at = value ? new Date().toISOString() : null;
+    const { error } = await supabase.from("ncr_actions").update(patch).eq("id", id);
+    if (error) throw error;
+    const ncrId = (S.ncrActions.find(a => String(a.id) === String(id)) || {}).ncr_id;
+    await reload();
+    if (ncrId) await openNcr(ncrId);
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function deleteNcrAction(id) {
+  const a = S.ncrActions.find(x => String(x.id) === String(id));
+  if (!confirm("Remove this corrective action?")) return;
+  busy(true);
+  try {
+    const { error } = await supabase.from("ncr_actions").delete().eq("id", id);
+    if (error) throw error;
+    await reload();
+    if (a) await openNcr(a.ncr_id);
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function closeNcr(id) {
+  const n = S.ncrs.find(x => x.id === id);
+  if (!confirm(`Close ${n.ref}?\n\nA closed NCR cannot be edited.`)) return;
+  busy(true);
+  try {
+    const { data, error } = await supabase.rpc("close_ncr", { p_ncr: id, p_note: null });
+    if (error) throw error;
+    toast(`${data.ref} closed.`, "ok");
+    await reload(); await openNcr(id);
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function raiseNcrFromFault(failedCheckId) {
+  newNcrModal(failedCheckId);
+}
+
 /* ---------------------------------------------------------------
    Faults per project.
 
@@ -3234,7 +3815,8 @@ function closeModal() { $("modal").classList.remove("open"); modalCtx = {}; }
 /* ------------------------------------------------------------
    6. Render and events
    ------------------------------------------------------------ */
-const VIEWS = { dash: vDash, work: vWork, sched: vSched, dsn: vDsn, req: vReq, adm: vAdm };
+const VIEWS = { dash: vDash, work: vWork, sched: vSched, dsn: vDsn, req: vReq,
+                ncr: vNcr, adm: vAdm };
 function render() {
   /* The report is its own view, not a tab: it has to be able to fill the page
      and print without the surrounding chrome. */
@@ -3278,7 +3860,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-planned],[data-action-set],[data-fc],[data-rm-photo],[data-sig-clear],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
+  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-ncra],[data-planned],[data-action-set],[data-fc],[data-rm-photo],[data-sig-clear],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
   if (!t) return;
   const d = t.dataset;
 
@@ -3384,6 +3966,31 @@ document.addEventListener("click", async e => {
     case "add-action": return actionModal();
     case "save-action": return saveAction();
     case "del-action": return deleteAction(t.dataset.id);
+    case "new-ncr": return newNcrModal(null);
+    case "save-ncr": return saveNcr();
+    case "open-ncr": return openNcr(t.dataset.id);
+    case "close-ncr-view": S.ncrOpen = null; S.ncrFull = null; return render();
+    case "save-ncr-who": return patchNcr(t.dataset.id, {
+        person_responsible: $("nPerson").value || null,
+        severity: $("nSeverity").value,
+        disposition: $("nDisposition").value }, "Responsibility");
+    case "save-ncr-containment": return patchNcr(t.dataset.id,
+        { containment: $("nContainment").value.trim() || null }, "Containment");
+    case "save-ncr-cause": return patchNcr(t.dataset.id, {
+        root_cause_id: $("nCause").value ? Number($("nCause").value) : null,
+        root_cause_detail: $("nCauseDetail").value.trim() || null }, "Root cause");
+    case "save-ncr-cost": {
+      const num = id => $(id).value === "" ? null : Number($(id).value);
+      return patchNcr(t.dataset.id, {
+        cost_material: num("nCostMaterial"), cost_labour: num("nCostLabour"),
+        cost_rework: num("nCostRework"), cost_other: num("nCostOther"),
+        cost_total: num("nCostTotal") }, "Cost");
+    }
+    case "add-ncr-action": return ncrActionModal(t.dataset.id);
+    case "save-ncr-action": return saveNcrAction();
+    case "del-ncr-action": return deleteNcrAction(t.dataset.id);
+    case "do-close-ncr": return closeNcr(t.dataset.id);
+    case "raise-ncr": return raiseNcrFromFault(t.dataset.id);
     case "print-report": return openReport(t.dataset.id);
     case "do-print": return window.print();
     case "close-report":
@@ -3445,6 +4052,10 @@ document.addEventListener("change", e => {
   if (e.target.id === "gStart") return renderGeneratePreview();
   if (d.planned) return rescheduleInspection(d.planned, e.target.value);
   if (e.target.id === "period") { S.period = e.target.value; return render(); }
+  if (d.ncra) {
+    const [id, col] = d.ncra.split("|");
+    return setNcrActionField(id, col, e.target.value);
+  }
   if (d.actionSet) {
     const [id, col] = d.actionSet.split("|");
     return setActionField(id, col, e.target.value);

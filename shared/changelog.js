@@ -22,10 +22,29 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.16.0";
+window.APP_VERSION = "0.17.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.17.0", d: "2026-08-28", t: "NCR management",
+    items: [
+      "New NCR module. A non-conformance is recorded, its cause found, and something changed so it does not happen again — as three stages rather than one long form.",
+      "An NCR can be raised straight from a failed check or a fault line, and carries the inspection, the panel and the project with it.",
+      "Closing an NCR requires a root cause and a verified corrective action. In the register this replaces, 7 of 475 records had a root cause and 368 were still open.",
+      "Root causes are chosen from a list and grouped by category, so a repeat cause can actually be counted. Corrective actions are separate rows with an owner, a due date and a verification.",
+      "Suppliers are their own field rather than a name typed into a department column, and severity is required.",
+      "Repeat causes, by department and by supplier replace the pivot tables. The old numbers were already wrong: the workbook shows a #REF! in the repeat calculation and a #VALUE! in the supplier summary.",
+      "Existing NCR numbers are kept and shown alongside the new reference."
+    ]
+  },
+  {
+    v: "0.16.1", d: "2026-08-28", t: "Database update 013 would not apply",
+    items: [
+      "The planned dates update failed part way through with 'function name is not unique'. Changing how many values a database function takes creates a second copy of it rather than replacing the first, so the old one had to be removed explicitly. Corrected, and safe to run again.",
+      "The same latent problem was fixed across the earlier updates, and the tests now refuse it."
+    ]
+  },
   {
     v: "0.16.0", d: "2026-08-28", t: "Planned dates on a schedule",
     items: [

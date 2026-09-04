@@ -192,4 +192,7 @@ begin
     'works_order_held', v_hold);
 end $$;
 
-grant execute on function submit_inspection to authenticated;
+-- Argument lists stated: a grant on a bare function name breaks the
+-- moment that function gains an overload, and the error names the
+-- grant rather than the overload that caused it.
+grant execute on function submit_inspection(uuid, text) to authenticated;

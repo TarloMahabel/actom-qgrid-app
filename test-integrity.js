@@ -92,7 +92,13 @@ const deadSelector = [...inSelector].filter(a => !usedAttrs.has(a));
 s.check('the selector lists nothing unused', deadSelector.length === 0, deadSelector.join(', '));
 
 const shellIds = new Set([...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]));
-const appIds = new Set([...app.matchAll(/id="(\w+)"/g)].map(m => m[1]));
+/* Ids built through a helper appear as id="${id}" in the source, so the
+   literal-match set misses them. Collect the helper's call sites too, or the
+   check reports ids as missing that are created every render. */
+const appIds = new Set([
+  ...[...app.matchAll(/id="(\w+)"/g)].map(m => m[1]),
+  ...[...app.matchAll(/\bsel\(\s*"(\w+)"/g)].map(m => m[1])
+]);
 const referenced = new Set([...app.matchAll(/\$\("([^"]+)"\)/g)].map(m => m[1]));
 const orphanIds = [...referenced].filter(i => !shellIds.has(i) && !appIds.has(i));
 s.check('no element id is referenced but never created', orphanIds.length === 0, orphanIds.join(', '));
@@ -145,6 +151,24 @@ const closed = new Set([...sql.matchAll(/revoke all on (?:public\.)?(\w+) from/g
 const unpoliced = tables.filter(t => !looped.has(t) && !explicit.has(t) && !closed.has(t));
 s.check('every table has a policy or is closed to clients outright',
   unpoliced.length === 0, unpoliced.join(', '));
+
+s.group('function signatures are unambiguous');
+/* "function name generate_inspections is not unique" — create or replace with
+   a NEW argument list creates a second overload rather than replacing, and
+   then every reference to the bare name is ambiguous. Worse, a caller passing
+   the old number of arguments still reaches the old function, so a migration
+   can appear to have applied while the old behaviour continues. */
+const bareGrants = [...sql.matchAll(/grant execute on function ([^;(]+) to /g)]
+  .map(m => m[1].trim());
+s.check('every function grant names its argument list', bareGrants.length === 0,
+  bareGrants.join(', '));
+
+/* A function whose argument list changed must be dropped first. */
+const changedArity = ['generate_inspections'];
+for (const fn of changedArity) {
+  const dropped = new RegExp('drop function if exists ' + fn + '\\(').test(sql);
+  s.check(`${fn} drops its old signature before redefining`, dropped);
+}
 
 s.group('functions cannot report success they did not achieve');
 /* publish_template_revision reported "published" while RLS had filtered its

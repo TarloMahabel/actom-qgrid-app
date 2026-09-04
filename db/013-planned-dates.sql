@@ -24,6 +24,11 @@
 --  gap. Dates land on weekdays; a supervisor still moves them.
 -- ============================================================
 
+-- ------------------------------------------------------------
+--  Safe to run again. The first attempt at this migration failed part
+--  way through, on the grant, so the column and the seed may already be
+--  in place. Everything below is written to tolerate that.
+-- ------------------------------------------------------------
 alter table manufacturing_stages
   add column if not exists offset_days smallint not null default 0;
 
@@ -55,11 +60,25 @@ begin
   return v_date;
 end $$;
 
-grant execute on function add_working_days to authenticated;
+grant execute on function add_working_days(date, int) to authenticated;
 
 -- ------------------------------------------------------------
 --  Generate, with a start date.
+--
+--  The old one-argument version has to be DROPPED, not replaced. A
+--  function's arguments are part of its identity in Postgres, so
+--  "create or replace function generate_inspections(bigint, date)"
+--  creates a SECOND function alongside generate_inspections(bigint)
+--  rather than replacing it. Two consequences, both bad:
+--
+--    every later reference to the name is ambiguous, which is what
+--    "function name is not unique" means;
+--    and a caller passing one argument still reaches the OLD function,
+--    so the schedule would carry on being stamped with today while
+--    everything looked to have been applied.
 -- ------------------------------------------------------------
+drop function if exists generate_inspections(bigint);
+
 create or replace function generate_inspections(
   p_works_order bigint, p_start date default null)
 returns jsonb language plpgsql security invoker as $$
@@ -113,7 +132,7 @@ begin
                             'first_date', v_first, 'last_date', v_last);
 end $$;
 
-grant execute on function generate_inspections to authenticated;
+grant execute on function generate_inspections(bigint, date) to authenticated;
 
 -- ------------------------------------------------------------
 --  Moving a date afterwards. A plan is a forecast, and forecasts move.
@@ -147,4 +166,4 @@ begin
   return jsonb_build_object('ref', v_insp.ref, 'planned_date', p_date);
 end $$;
 
-grant execute on function reschedule_inspection to authenticated;
+grant execute on function reschedule_inspection(uuid, date) to authenticated;
