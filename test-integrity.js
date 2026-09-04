@@ -152,6 +152,20 @@ const unpoliced = tables.filter(t => !looped.has(t) && !explicit.has(t) && !clos
 s.check('every table has a policy or is closed to clients outright',
   unpoliced.length === 0, unpoliced.join(', '));
 
+s.group('constraints added to existing tables tolerate existing rows');
+/* attachments_belongs_to failed on rows a debugging session had left behind.
+   A migration that adds a constraint to a table that already holds data has
+   to say what happens to rows that do not satisfy it — and deleting them is
+   not a migration's decision to make in a system holding quality evidence. */
+const lateChecks = [...sql.matchAll(/alter table (\w+)\s+add constraint (\w+) check[\s\S]*?;/g)]
+  .filter(m => /attachments|failed_checks|inspections|profiles|division_profile/.test(m[1]))
+  .filter(m => !/not valid/i.test(m[0]));
+s.check('a check added to a populated table is NOT VALID',
+  lateChecks.length === 0, lateChecks.map(m => m[2]).join(', '));
+s.check('and the migration reports what does not satisfy it',
+  !/add constraint attachments_belongs_to/.test(sql) ||
+  /belong to neither an inspection nor an NCR/.test(sql));
+
 s.group('function signatures are unambiguous');
 /* "function name generate_inspections is not unique" — create or replace with
    a NEW argument list creates a second overload rather than replacing, and

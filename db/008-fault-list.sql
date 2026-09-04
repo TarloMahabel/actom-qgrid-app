@@ -69,13 +69,44 @@ comment on column failed_checks.source is
 -- A defect found at a checkpoint must still name the checkpoint; one typed
 -- into a fault list must say what it is. Neither rule can be expressed by a
 -- NOT NULL now that both kinds share the table.
+-- Added NOT VALID and then validated, rather than added and hoped.
+--
+-- Every existing row should satisfy it: result_id was NOT NULL until the
+-- statement above made it nullable, so nothing can yet have a null one. That
+-- reasoning is probably right, which is not the same as being right — and a
+-- constraint that aborts a migration half way through leaves a division in a
+-- state nobody planned. So: add it without checking history, then check, and
+-- if history disagrees say so instead of failing.
 alter table failed_checks drop constraint if exists failed_checks_shape;
 alter table failed_checks add constraint failed_checks_shape check (
   (source = 'checkpoint' and result_id is not null)
   or
   (source = 'fault_list' and field_id is not null
    and description is not null and length(btrim(description)) > 0)
-);
+) not valid;
+
+do $validate$
+declare v_bad int;
+begin
+  select count(*) into v_bad from failed_checks
+   where not ((source = 'checkpoint' and result_id is not null)
+              or (source = 'fault_list' and field_id is not null
+                  and description is not null and length(btrim(description)) > 0));
+  if v_bad = 0 then
+    alter table failed_checks validate constraint failed_checks_shape;
+    raise notice 'failed_checks_shape validated against every existing row.';
+  else
+    raise notice '--------------------------------------------------------------';
+    raise notice '% existing failed_checks row(s) do not fit the new shape rule.', v_bad;
+    raise notice 'Nothing was changed or deleted. New rows are checked; these are not.';
+    raise notice 'Look at them with:';
+    raise notice '  select id, ref, source, result_id, field_id, description';
+    raise notice '    from failed_checks where not ((source = ''checkpoint'' and result_id is not null)';
+    raise notice '      or (source = ''fault_list'' and field_id is not null and description is not null));';
+    raise notice 'Then: alter table failed_checks validate constraint failed_checks_shape;';
+    raise notice '--------------------------------------------------------------';
+  end if;
+end $validate$;
 
 create index if not exists failed_checks_inspection_idx
   on failed_checks (inspection_id, source, seq);

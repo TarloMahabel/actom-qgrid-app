@@ -22,10 +22,18 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.17.0";
+window.APP_VERSION = "0.17.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.17.1", d: "2026-08-28", t: "NCR database update would not apply",
+    items: [
+      "The NCR update failed on a rule about which record a photo belongs to. Some photo records had been left behind by a debugging session earlier and belonged to nothing, so the new rule refused them.",
+      "The rule now applies to new records only and reports the old ones instead of stopping. Nothing is deleted: a database update should not decide that a record is worthless.",
+      "The same treatment was applied to the fault list update, which had the same shape."
+    ]
+  },
   {
     v: "0.17.0", d: "2026-08-28", t: "NCR management",
     items: [

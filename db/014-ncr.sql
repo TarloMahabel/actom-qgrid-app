@@ -230,10 +230,43 @@ comment on table ncr_actions is
 alter table attachments
   add column if not exists ncr_id uuid references ncrs(id) on delete cascade;
 
+-- The constraint is added NOT VALID.
+--
+-- Existing rows are left exactly as they are, and every new row is checked.
+-- Two reasons, in order of importance:
+--
+--   1. Deleting rows to satisfy a new constraint is the wrong default in a
+--      system holding quality evidence. A migration should not decide that a
+--      record is worthless; a person should.
+--   2. There ARE orphans in at least one project — rows written by a
+--      diagnostic that omitted inspection_id while photo upload was being
+--      debugged. They point at real objects in storage and are unreachable
+--      from any screen, which is not the same as being safe to destroy.
+--
+-- The DO block below reports them. Clearing them is a separate, deliberate
+-- act, and the statement to do it is at the end of this file.
 alter table attachments drop constraint if exists attachments_belongs_to;
 alter table attachments add constraint attachments_belongs_to check (
   inspection_id is not null or ncr_id is not null
-);
+) not valid;
+
+do $orphans$
+declare v_n int; v_paths text;
+begin
+  select count(*), string_agg(storage_path, ', ' order by uploaded_at)
+    into v_n, v_paths
+    from attachments where inspection_id is null and ncr_id is null;
+
+  if v_n > 0 then
+    raise notice '--------------------------------------------------------------';
+    raise notice '% attachment row(s) belong to neither an inspection nor an NCR.', v_n;
+    raise notice 'They are unreachable from every screen. Nothing has been deleted.';
+    raise notice 'Paths: %', left(coalesce(v_paths, ''), 800);
+    raise notice 'To clear them, run the statement at the end of this file.';
+    raise notice 'The objects in storage are NOT removed either way.';
+    raise notice '--------------------------------------------------------------';
+  end if;
+end $orphans$;
 
 create index if not exists attachments_ncr_idx on attachments (ncr_id);
 
@@ -562,3 +595,22 @@ begin
 
   raise notice 'NCR schema ready: % root causes, % policies.', v_causes, v_policies;
 end $verify$;
+
+
+-- ============================================================
+--  OPTIONAL, and deliberate: clear orphaned attachment rows.
+--
+--  Run this ONLY after reading the notice above and deciding those rows
+--  are not wanted. It removes rows that belong to neither an inspection
+--  nor an NCR — unreachable from every screen — and then validates the
+--  constraint so the database has checked every remaining row.
+--
+--  The files themselves stay in storage. They are evidence and the
+--  storage policy refuses a delete.
+--
+--    delete from attachments where inspection_id is null and ncr_id is null;
+--    alter table attachments validate constraint attachments_belongs_to;
+--
+--  If instead those rows should be KEPT, leave the constraint NOT VALID.
+--  New rows are still checked; only the history is exempt.
+-- ============================================================
