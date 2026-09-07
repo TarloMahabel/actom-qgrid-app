@@ -1,0 +1,89 @@
+﻿
+> apps\inspect\app.js:248:const NAV = [
+  apps\inspect\app.js:249:  { g: "Inspections" },
+  apps\inspect\app.js:250:  { id: "dash",  n: 1, t: "Dashboard",               col: "--m1",
+  apps\inspect\app.js:251:    tabs: ["Overview", "Faults per project", "Actions", "Pass rate by stage"] },
+  apps\inspect\app.js:252:  { id: "work",  n: 2, t: "Inspection workbench",    col: "--m2", tabs: ["My queue", 
+"Capture", "Register", "Failed checks"] },
+  apps\inspect\app.js:253:  { id: "sched", n: 3, t: "Scheduling",              col: "--m3",
+  apps\inspect\app.js:254:    tabs: ["Schedule", "Unassigned", "Projects & works orders"] },
+  apps\inspect\app.js:255:  { g: "Setup" },
+  apps\inspect\app.js:256:  { id: "dsn",   n: 4, t: "Form designer",           col: "--m4", tabs: [] },
+  apps\inspect\app.js:257:  { id: "req",   n: 5, t: "Inspection requirements", col: "--m5", tabs: ["Requirements 
+matrix"] },
+  apps\inspect\app.js:258:  { id: "ncr",   n: 6, t: "NCR management",           col: "--m4",
+  apps\inspect\app.js:259:    tabs: ["Register", "Repeat causes", "By department", "By supplier"] },
+  apps\inspect\app.js:260:  { id: "adm",   n: 7, t: "Administration",          col: "--m6",
+  apps\inspect\app.js:261:    tabs: ["Users & roles", "Competency", "Reference lists", "Options", "Audit trail"] },
+  apps\inspect\app.js:262:  { g: "Later phases" },
+  apps\inspect\app.js:263:  ...["Calibration","Document control","Training & competency",
+  apps\inspect\app.js:264:      "Supplier quality","Customer quality","Audits & compliance","Performance analytics"]
+  apps\inspect\app.js:265:     .map(t => ({ off: 1, t }))
+  apps\inspect\app.js:266:];
+  apps\inspect\app.js:267:const setupIds = ["dsn", "req", "adm"];
+  apps\inspect\app.js:268:
+  apps\inspect\app.js:269:function buildNav() {
+  apps\inspect\app.js:270:  $("nav").innerHTML = NAV.filter(n => !(setupIds.includes(n.id) && !canConfigure()))
+  apps\inspect\app.js:271:    .map(n => {
+  apps\inspect\app.js:272:      if (n.g) return `<div class="grp">${n.g}</div>`;
+  apps\inspect\app.js:273:      if (n.off) return `<button class="off" title="Deferred to a later phase"><span 
+class="num" style="background:#8593a9">·</span><span>${n.t}</span><span class="later">Phase 2+</span></button>`;
+> apps\inspect\app.js:312:function vDash(m) {
+  apps\inspect\app.js:313:  let body = "";
+  apps\inspect\app.js:314:  if (S.tab === 0) body = dashOverview();
+  apps\inspect\app.js:315:  else if (S.tab === 1) body = dashFaults();
+  apps\inspect\app.js:316:  else if (S.tab === 2) body = dashActions();
+  apps\inspect\app.js:317:  else { body = `<div class="card"><h3>Pass rate by stage</h3>
+  apps\inspect\app.js:318:    <div class="bd" id="yieldHost"><div class="empty">Loading…</div></div></div>`; 
+loadYield(); }
+  apps\inspect\app.js:319:
+  apps\inspect\app.js:320:  return head(m, "Where the work is, what is failing, and what is being done about it.",
+  apps\inspect\app.js:321:    S.tab === 1 || S.tab === 2 ? periodPicker() : `<button class="btn" 
+data-act="refresh">Refresh</button>`)
+  apps\inspect\app.js:322:    + tabbar(m) + body;
+  apps\inspect\app.js:323:}
+  apps\inspect\app.js:324:
+  apps\inspect\app.js:325:/* The month everything on these two tabs is about. Defaults to this month;
+  apps\inspect\app.js:326:   the review is usually held on last month, so it is one click away. */
+  apps\inspect\app.js:327:function periodPicker() {
+  apps\inspect\app.js:328:  const months = [];
+  apps\inspect\app.js:329:  const now = new Date();
+  apps\inspect\app.js:330:  for (let i = 0; i < 13; i++) {
+  apps\inspect\app.js:331:    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+  apps\inspect\app.js:332:    months.push([d.toISOString().slice(0, 7),
+  apps\inspect\app.js:333:                 d.toLocaleString("en-ZA", { month: "long", year: "numeric" })]);
+  apps\inspect\app.js:334:  }
+  apps\inspect\app.js:335:  return `<select id="period" style="padding:8px 11px;border:1px solid var(--line);
+  apps\inspect\app.js:336:      border-radius:8px;font-weight:600;font-size:13px">
+  apps\inspect\app.js:337:      ${months.map(([v, l]) => `<option value="${v}" ${S.period === v ? "selected" : 
+""}>${esc(l)}</option>`).join("")}
+> apps\inspect\app.js:3818:const VIEWS = { dash: vDash, work: vWork, sched: vSched, dsn: vDsn, req: vReq,
+  apps\inspect\app.js:3819:                ncr: vNcr, adm: vAdm };
+  apps\inspect\app.js:3820:function render() {
+  apps\inspect\app.js:3821:  /* The report is its own view, not a tab: it has to be able to fill the page
+  apps\inspect\app.js:3822:     and print without the surrounding chrome. */
+  apps\inspect\app.js:3823:  if (S.view === "print") {
+  apps\inspect\app.js:3824:    document.body.classList.add("printing");
+  apps\inspect\app.js:3825:    $("page").innerHTML = `
+  apps\inspect\app.js:3826:      <div class="printbar">
+  apps\inspect\app.js:3827:        <button class="btn" data-act="close-report">← Back to the register</button>
+  apps\inspect\app.js:3828:        <span style="flex:1"></span>
+  apps\inspect\app.js:3829:        <button class="btn pri" data-act="do-print">Print / save as PDF</button>
+  apps\inspect\app.js:3830:      </div>` + vPrint();
+  apps\inspect\app.js:3831:    return;
+  apps\inspect\app.js:3832:  }
+  apps\inspect\app.js:3833:  document.body.classList.remove("printing");
+  apps\inspect\app.js:3834:  const m = NAV.find(x => x.id === S.view);
+  apps\inspect\app.js:3835:  if (!m || (setupIds.includes(m.id) && !canConfigure())) { S.view = "dash"; S.tab = 0; 
+return render(); }
+  apps\inspect\app.js:3836:  $("page").innerHTML = VIEWS[S.view](m) + foot();
+  apps\inspect\app.js:3837:
+  apps\inspect\app.js:3838:  $("whoName").textContent = S.profile.full_name;
+  apps\inspect\app.js:3839:  $("whoEmail").textContent = S.profile.email;
+  apps\inspect\app.js:3840:  $("whoInitials").textContent = S.profile.full_name.split(/\s+/).map(w => w[0]).slice(0, 
+2).join("").toUpperCase();
+  apps\inspect\app.js:3841:  $("sideDivision").textContent = S.division?.name || DIVISION.name;
+  apps\inspect\app.js:3842:  $("buildTag").textContent =
+  apps\inspect\app.js:3843:    `v${window.APP_VERSION || "?"} · ${BUILD.context} · ${BUILD.commit}`;
+
+
