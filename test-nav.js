@@ -31,11 +31,11 @@ const { loadApp, suite } = require('./test/harness');
 
   s.group('navigation');
   const nav = Array.from(d.querySelectorAll('#nav button[data-go]'));
-  s.check('7 modules in nav', nav.length === 7, nav.length + ' found');
+  s.check('8 modules in nav', nav.length === 8, nav.length + ' found');
   s.check('later phases shown but disabled', d.querySelectorAll('#nav button.off').length === 7);
 
   s.group('every module and tab renders');
-  const views = { dash: 4, work: 4, sched: 3, dsn: 1, req: 1, ncr: 4, adm: 5 };
+  const views = { main: 1, dash: 4, work: 4, sched: 3, dsn: 1, req: 1, ncr: 5, adm: 5 };
   for (const [id, tabs] of Object.entries(views)) {
     d.querySelector(`#nav button[data-go="${id}"]`).click();
     await sleep(60);

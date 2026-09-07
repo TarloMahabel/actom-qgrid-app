@@ -11,7 +11,7 @@
 --  Paste into the Supabase SQL editor of a NEW, EMPTY project and run.
 --  Order matters; do not run sections out of sequence.
 --
---  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 009-photo-storage.sql, 010-handover.sql, 011-fault-clearing.sql, 012-dashboard.sql, 013-planned-dates.sql, 014-ncr.sql
+--  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 002-form-config.min.sql, 002-form-config.sql, 003-create-intake.min.sql, 003-create-intake.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 004-repair-intake-status.sql, 005-lock-ref-sequences.sql, 005-school-stream.sql, 006-fix-silent-publish.sql, 006-retention-storage-fix.sql, 007-apprentice-register.sql, 007-no-empty-published-revision.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 008-fix-role-guard.min.sql, 008-fix-role-guard.sql, 009-consent-ip-and-status-guard.sql, 009-photo-storage.sql, 010-decline-reason.sql, 010-handover.sql, 011-consent-editor.sql, 011-fault-clearing.sql, 012-dashboard.sql, 012-journey-steps.min.sql, 012-journey-steps.sql, 013-planned-dates.sql, 014-ncr.sql, 014-restrict-upload-types.sql, 015-enforce-upload-limits.sql, 015-ncr-status-and-close-path.sql, 016-qualification-advisory.sql
 --
 --  This script is for a fresh project. It is not idempotent: running it
 --  twice will fail on "type user_role already exists", which is the
@@ -837,7 +837,1384 @@ grant execute on function publish_template_revision(uuid), submit_inspection(uui
 
 
 -- ============================================================
---  SECTION 3 — 003-publish-roles.sql
+--  SECTION 3 — 002-form-config.min.sql
+-- ============================================================
+
+alter table public.intakes
+  add column if not exists published_at        timestamptz,
+  add column if not exists published_by        uuid references auth.users(id),
+  add column if not exists closed_at           timestamptz,
+  add column if not exists show_further_study  boolean not null default true,
+  add column if not exists show_technical      boolean not null default true,
+  add column if not exists intro_heading       text,
+  add column if not exists intro_body          text,
+  add column if not exists closed_message      text,
+  add column if not exists consent_version     text default '2026.1',
+  add column if not exists max_upload_mb       smallint not null default 8,
+  add column if not exists scoring_enabled     boolean not null default true,
+  add column if not exists auto_flag_below     boolean not null default true;
+comment on column public.intakes.status is
+  'draft = editable config, no applications. open = live, config frozen. closed = no new applications, config frozen. archived = hidden.';
+alter table public.intake_trades
+  add column if not exists active         boolean not null default true,
+  add column if not exists label_override text,
+  add column if not exists sort_order     smallint not null default 100,
+  add column if not exists min_score      numeric(5,2),
+  add column if not exists notes          text;
+create table if not exists public.intake_trade_subjects (
+  id          uuid primary key default gen_random_uuid(),
+  intake_id   uuid not null references public.intakes(id) on delete cascade,
+  trade_id    uuid not null references public.trades(id)  on delete cascade,
+  subject_id  uuid not null references public.subjects(id) on delete cascade,
+  stream      text not null check (stream in ('academic','technical','qualification')),
+  required    boolean not null default false,
+  min_mark    smallint check (min_mark between 0 and 100),
+  weight      smallint not null default 1 check (weight between 0 and 10),
+  sort_order  smallint not null default 100,
+  unique (intake_id, trade_id, subject_id, stream)
+);
+create index if not exists its_intake_trade_idx
+  on public.intake_trade_subjects(intake_id, trade_id);
+create table if not exists public.intake_documents (
+  id          uuid primary key default gen_random_uuid(),
+  intake_id   uuid not null references public.intakes(id) on delete cascade,
+  doc_type    text not null check (doc_type in
+              ('id_document','matric_certificate','qualification','other')),
+  label       text not null,
+  hint        text,
+  required    boolean not null default false,
+  max_files   smallint not null default 1 check (max_files between 1 and 6),
+  visible     boolean not null default true,
+  sort_order  smallint not null default 100,
+  unique (intake_id, doc_type)
+);
+create or replace function app_private.protect_id_document()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if new.doc_type = 'id_document' then
+    new.required := true;
+    new.visible  := true;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists intake_documents_protect on public.intake_documents;
+create trigger intake_documents_protect
+  before insert or update on public.intake_documents
+  for each row execute function app_private.protect_id_document();
+alter table public.applications
+  add column if not exists auto_score       numeric(5,2),
+  add column if not exists auto_rank        integer,
+  add column if not exists auto_flags       text[] not null default '{}',
+  add column if not exists meets_minimum    boolean,
+  add column if not exists scored_at        timestamptz;
+create index if not exists applications_score_idx
+  on public.applications(intake_id, trade_id, auto_score desc nulls last);
+drop trigger if exists guard_intake_trades         on public.intake_trades;
+drop trigger if exists guard_intake_trade_subjects on public.intake_trade_subjects;
+drop trigger if exists guard_intake_documents      on public.intake_documents;
+drop trigger if exists guard_intakes               on public.intakes;
+do $$
+declare i record; t record;
+begin
+  for i in select * from public.intakes loop
+    insert into public.intake_documents (intake_id, doc_type, label, hint, required, max_files, sort_order)
+    values
+      (i.id, 'id_document', 'Certified copy of your ID',
+       'Certified within the last three months.', true, 1, 10),
+      (i.id, 'matric_certificate', 'Grade 12 certificate or statement of results',
+       'If you are still waiting for results, upload your latest school report.', false, 1, 20),
+      (i.id, 'qualification', 'Further qualification certificates',
+       'N-certificates, diplomas, trade test results.', false, 4, 30),
+      (i.id, 'other', 'Other supporting documents',
+       'Proof of residence, a reference letter, a CV.', false, 2, 40)
+    on conflict (intake_id, doc_type) do nothing;
+    for t in select trade_id from public.intake_trades where intake_id = i.id loop
+      insert into public.intake_trade_subjects
+        (intake_id, trade_id, subject_id, stream, required, min_mark, weight, sort_order)
+      select i.id, t.trade_id, s.id, s.stream,
+             s.name in ('Mathematics','Technical Mathematics','Physical Science','Technical Science'),
+             case when s.name in ('Mathematics','Technical Mathematics','Physical Science','Technical Science')
+                  then 40 else null end,
+             case when s.name in ('Mathematics','Technical Mathematics','Physical Science','Technical Science') then 3
+                  when s.name in ('Engineering Graphics and Design','Mechanical Technology',
+                                  'Electrical Technology','Technical Drawing') then 2
+                  when s.name in ('Life Orientation') then 0
+                  else 1 end,
+             s.sort_order
+        from public.subjects s
+       where s.active and s.stream in ('academic','technical')
+         and s.name in ('Mathematics','Mathematical Literacy','Physical Science','Life Science',
+                        'Life Orientation','Home Language','First Additional Language',
+                        'Technical Mathematics','Technical Science','Engineering Graphics and Design',
+                        'Mechanical Technology','Electrical Technology','Technical Drawing',
+                        'Fitting and Machining Theory','Trade Theory')
+      on conflict (intake_id, trade_id, subject_id, stream) do nothing;
+    end loop;
+  end loop;
+end $$;
+create or replace function app_private.intake_is_editable(p_intake uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select coalesce((select status = 'draft' from public.intakes where id = p_intake), false);
+$$;
+create or replace function app_private.guard_config_write()
+returns trigger language plpgsql set search_path = '' as $$
+declare v_intake uuid;
+begin
+  v_intake := coalesce(new.intake_id, old.intake_id);
+  if not app_private.intake_is_editable(v_intake) then
+    raise exception
+      'This intake has been published. Its form can no longer be changed. Clone it to start a new intake.'
+      using errcode = 'check_violation';
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+drop trigger if exists guard_intake_trades         on public.intake_trades;
+drop trigger if exists guard_intake_trade_subjects on public.intake_trade_subjects;
+drop trigger if exists guard_intake_documents      on public.intake_documents;
+create trigger guard_intake_trades
+  before insert or update or delete on public.intake_trades
+  for each row execute function app_private.guard_config_write();
+create trigger guard_intake_trade_subjects
+  before insert or update or delete on public.intake_trade_subjects
+  for each row execute function app_private.guard_config_write();
+create trigger guard_intake_documents
+  before insert or update or delete on public.intake_documents
+  for each row execute function app_private.guard_config_write();
+create or replace function app_private.guard_intake_write()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if old.status = 'draft' then return new; end if;
+  if new.name             is distinct from old.name
+  or new.opens_at         is distinct from old.opens_at
+  or new.retention_months is distinct from old.retention_months
+  or new.show_further_study is distinct from old.show_further_study
+  or new.show_technical   is distinct from old.show_technical
+  or new.consent_version  is distinct from old.consent_version
+  or new.max_upload_mb    is distinct from old.max_upload_mb
+  or new.scoring_enabled  is distinct from old.scoring_enabled then
+    raise exception
+      'This intake has been published. Only the closing date and closing message can still be changed.'
+      using errcode = 'check_violation';
+  end if;
+  if new.status = 'draft' and old.status <> 'draft' then
+    raise exception 'A published intake cannot be returned to draft.'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists guard_intakes on public.intakes;
+create trigger guard_intakes before update on public.intakes
+  for each row execute function app_private.guard_intake_write();
+create or replace function app_private.score_application(p_application uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  a               record;
+  r               record;
+  v_weighted      numeric := 0;
+  v_weight_total  numeric := 0;
+  v_flags         text[]  := '{}';
+  v_meets         boolean := true;
+  v_mark          smallint;
+  v_score         numeric;
+  v_min_score     numeric;
+  v_enabled       boolean;
+  v_auto_flag     boolean;
+begin
+  select * into a from public.applications where id = p_application;
+  if a.id is null or a.trade_id is null then return; end if;
+  select scoring_enabled, auto_flag_below into v_enabled, v_auto_flag
+    from public.intakes where id = a.intake_id;
+  if not coalesce(v_enabled, false) then return; end if;
+  for r in
+    select its.*, s.name as subject_name
+      from public.intake_trade_subjects its
+      join public.subjects s on s.id = its.subject_id
+     where its.intake_id = a.intake_id and its.trade_id = a.trade_id
+  loop
+    select mark into v_mark
+      from public.application_subjects
+     where application_id = p_application
+       and stream = r.stream
+       and subject_name = r.subject_name;
+    if v_mark is null then
+      if r.required then
+        v_flags := array_append(v_flags, (r.subject_name || ' not supplied'));
+        v_meets := false;
+        if r.weight > 0 then
+          v_weight_total := v_weight_total + r.weight;   -- counts as zero
+        end if;
+      end if;
+      continue;
+    end if;
+    if r.min_mark is not null and v_mark < r.min_mark then
+      v_flags := array_append(v_flags, (r.subject_name || ' ' || v_mark || '%, below the ' || r.min_mark || '% minimum'));
+      v_meets := false;
+    end if;
+    if r.weight > 0 then
+      v_weighted     := v_weighted + (v_mark * r.weight);
+      v_weight_total := v_weight_total + r.weight;
+    end if;
+  end loop;
+  v_score := case when v_weight_total > 0
+                  then round(v_weighted / v_weight_total, 2)
+                  else null end;
+  select min_score into v_min_score
+    from public.intake_trades
+   where intake_id = a.intake_id and trade_id = a.trade_id;
+  if v_min_score is not null and v_score is not null and v_score < v_min_score then
+    v_flags := array_append(v_flags, ('Overall score ' || v_score || ', below the ' || v_min_score || ' minimum'));
+    v_meets := false;
+  end if;
+  update public.applications
+     set auto_score    = v_score,
+         auto_flags    = case when coalesce(v_auto_flag, true) then v_flags else '{}' end,
+         meets_minimum = v_meets,
+         scored_at     = now()
+   where id = p_application;
+end;
+$$;
+create or replace function public.recalculate_ranks(p_intake uuid)
+returns integer language plpgsql security definer set search_path = '' as $$
+declare v_count integer;
+begin
+  if not app.is_reviewer() then raise exception 'Not authorised.'; end if;
+  with ranked as (
+    select id, rank() over (
+             partition by intake_id, trade_id
+             order by meets_minimum desc nulls last, auto_score desc nulls last, submitted_at asc
+           ) as rnk
+      from public.applications
+     where intake_id = p_intake and status <> 'draft'
+  )
+  update public.applications a
+     set auto_rank = ranked.rnk
+    from ranked where ranked.id = a.id;
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+grant execute on function public.recalculate_ranks(uuid) to authenticated;
+create or replace function public.get_form_config(p_intake uuid, p_trade uuid default null)
+returns jsonb language plpgsql stable security definer set search_path = '' as $$
+declare v jsonb; i record;
+begin
+  select * into i from public.intakes where id = p_intake and status = 'open';
+  if i.id is null then return jsonb_build_object('open', false); end if;
+  select jsonb_build_object(
+    'open', true,
+    'intake', jsonb_build_object(
+      'id', i.id, 'name', i.name, 'closes_at', i.closes_at,
+      'show_further_study', i.show_further_study,
+      'show_technical', i.show_technical,
+      'intro_heading', i.intro_heading, 'intro_body', i.intro_body,
+      'consent_version', i.consent_version,
+      'max_upload_mb', i.max_upload_mb),
+    'trades', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'id', t.id,
+               'name', coalesce(it.label_override, t.name),
+               'division', t.division,
+               'notes', it.notes) order by it.sort_order, t.name), '[]'::jsonb)
+        from public.intake_trades it
+        join public.trades t on t.id = it.trade_id
+       where it.intake_id = p_intake and it.active),
+    'documents', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'doc_type', d.doc_type, 'label', d.label, 'hint', d.hint,
+               'required', d.required, 'max_files', d.max_files) order by d.sort_order), '[]'::jsonb)
+        from public.intake_documents d
+       where d.intake_id = p_intake and d.visible),
+    'subjects', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'stream', its.stream, 'name', s.name,
+               'required', its.required, 'min_mark', its.min_mark,
+               'weight', its.weight) order by its.stream, its.sort_order, s.name), '[]'::jsonb)
+        from public.intake_trade_subjects its
+        join public.subjects s on s.id = its.subject_id
+       where its.intake_id = p_intake
+         and (p_trade is null or its.trade_id = p_trade))
+  ) into v;
+  return v;
+end;
+$$;
+grant execute on function public.get_form_config(uuid, uuid) to anon, authenticated;
+create or replace function public.publish_intake(p_intake uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare i record; v_problems text[] := '{}'; v_trades int; v_docs int;
+begin
+  if app.reviewer_role() not in ('admin','manager') then
+    raise exception 'Only an administrator or manager can publish an intake.';
+  end if;
+  select * into i from public.intakes where id = p_intake;
+  if i.id is null then raise exception 'Intake not found.'; end if;
+  if i.status <> 'draft' then
+    return jsonb_build_object('ok', false, 'problems',
+      array['This intake has already been published.']);
+  end if;
+  select count(*) into v_trades from public.intake_trades
+   where intake_id = p_intake and active;
+  if v_trades = 0 then v_problems := array_append(v_problems, 'No trades are switched on.'); end if;
+  select count(*) into v_docs from public.intake_documents
+   where intake_id = p_intake and doc_type = 'id_document';
+  if v_docs = 0 then v_problems := array_append(v_problems, 'The ID document requirement is missing.'); end if;
+  if i.closes_at <= now() then
+    v_problems := array_append(v_problems, 'The closing date is in the past.');
+  end if;
+  if i.closes_at <= i.opens_at then
+    v_problems := array_append(v_problems, 'The closing date is not after the opening date.');
+  end if;
+  if not exists (select 1 from public.consent_versions
+                  where version = i.consent_version and audience = 'applicant' and active) then
+    v_problems := array_append(v_problems, 'The selected consent wording does not exist.');
+  end if;
+  if i.scoring_enabled and exists (
+      select 1 from public.intake_trades it
+       where it.intake_id = p_intake and it.active
+         and not exists (select 1 from public.intake_trade_subjects its
+                          where its.intake_id = p_intake and its.trade_id = it.trade_id)) then
+    v_problems := array_append(v_problems, 'Scoring is on, but one or more active trades have no subjects set.');
+  end if;
+  if array_length(v_problems, 1) > 0 then
+    return jsonb_build_object('ok', false, 'problems', v_problems);
+  end if;
+  update public.intakes
+     set status = 'open', published_at = now(), published_by = auth.uid()
+   where id = p_intake;
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_published',
+          jsonb_build_object('intake_id', p_intake, 'name', i.name));
+  return jsonb_build_object('ok', true);
+end;
+$$;
+grant execute on function public.publish_intake(uuid) to authenticated;
+create or replace function public.close_intake(p_intake uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if app.reviewer_role() not in ('admin','manager') then
+    raise exception 'Only an administrator or manager can close an intake.';
+  end if;
+  update public.intakes set status = 'closed', closed_at = now(), closes_at = least(closes_at, now())
+   where id = p_intake and status = 'open';
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_closed', jsonb_build_object('intake_id', p_intake));
+end;
+$$;
+grant execute on function public.close_intake(uuid) to authenticated;
+create or replace function public.clone_intake(p_intake uuid, p_name text)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare v_new uuid;
+begin
+  if app.reviewer_role() not in ('admin','manager') then
+    raise exception 'Only an administrator or manager can create an intake.';
+  end if;
+  insert into public.intakes (name, opens_at, closes_at, status, retention_months,
+                              show_further_study, show_technical, intro_heading, intro_body,
+                              closed_message, consent_version, max_upload_mb,
+                              scoring_enabled, auto_flag_below)
+  select p_name, now(), now() + interval '60 days', 'draft', retention_months,
+         show_further_study, show_technical, intro_heading, intro_body,
+         closed_message, consent_version, max_upload_mb,
+         scoring_enabled, auto_flag_below
+    from public.intakes where id = p_intake
+  returning id into v_new;
+  insert into public.intake_trades (intake_id, trade_id, positions, active,
+                                    label_override, sort_order, min_score, notes)
+  select v_new, trade_id, positions, active, label_override, sort_order, min_score, notes
+    from public.intake_trades where intake_id = p_intake;
+  insert into public.intake_trade_subjects (intake_id, trade_id, subject_id, stream,
+                                            required, min_mark, weight, sort_order)
+  select v_new, trade_id, subject_id, stream, required, min_mark, weight, sort_order
+    from public.intake_trade_subjects where intake_id = p_intake;
+  insert into public.intake_documents (intake_id, doc_type, label, hint, required,
+                                       max_files, visible, sort_order)
+  select v_new, doc_type, label, hint, required, max_files, visible, sort_order
+    from public.intake_documents where intake_id = p_intake;
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_cloned',
+          jsonb_build_object('from', p_intake, 'to', v_new, 'name', p_name));
+  return v_new;
+end;
+$$;
+grant execute on function public.clone_intake(uuid, text) to authenticated;
+create or replace function public.save_trade_subjects(
+  p_intake uuid, p_trade uuid, p_rows jsonb)
+returns integer language plpgsql security definer set search_path = '' as $$
+declare r jsonb; v_count integer := 0;
+begin
+  if app.reviewer_role() not in ('admin','manager') then
+    raise exception 'Not authorised.';
+  end if;
+  if not app_private.intake_is_editable(p_intake) then
+    raise exception 'This intake has been published. Its form can no longer be changed.';
+  end if;
+  delete from public.intake_trade_subjects
+   where intake_id = p_intake and trade_id = p_trade;
+  for r in select * from jsonb_array_elements(p_rows) loop
+    insert into public.intake_trade_subjects
+      (intake_id, trade_id, subject_id, stream, required, min_mark, weight, sort_order)
+    values (p_intake, p_trade, (r->>'subject_id')::uuid, r->>'stream',
+            coalesce((r->>'required')::boolean, false),
+            nullif(r->>'min_mark','')::smallint,
+            coalesce((r->>'weight')::smallint, 1),
+            coalesce((r->>'sort_order')::smallint, 100));
+    v_count := v_count + 1;
+  end loop;
+  return v_count;
+end;
+$$;
+grant execute on function public.save_trade_subjects(uuid, uuid, jsonb) to authenticated;
+create or replace function app_private.score_on_submit()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if new.status = 'submitted' and coalesce(old.status,'') = 'draft' then
+    perform app_private.score_application(new.id);
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists applications_score on public.applications;
+create trigger applications_score after update on public.applications
+  for each row execute function app_private.score_on_submit();
+alter table public.intake_trade_subjects enable row level security;
+alter table public.intake_documents      enable row level security;
+drop policy if exists its_read on public.intake_trade_subjects;
+create policy its_read on public.intake_trade_subjects for select
+  using (exists (select 1 from public.intakes i
+                 where i.id = intake_id and i.status in ('open','closed'))
+         or app.is_reviewer());
+drop policy if exists its_write on public.intake_trade_subjects;
+create policy its_write on public.intake_trade_subjects for all
+  using (app.reviewer_role() in ('admin','manager'))
+  with check (app.reviewer_role() in ('admin','manager'));
+drop policy if exists intake_docs_read on public.intake_documents;
+create policy intake_docs_read on public.intake_documents for select
+  using (exists (select 1 from public.intakes i
+                 where i.id = intake_id and i.status in ('open','closed'))
+         or app.is_reviewer());
+drop policy if exists intake_docs_write on public.intake_documents;
+create policy intake_docs_write on public.intake_documents for all
+  using (app.reviewer_role() in ('admin','manager'))
+  with check (app.reviewer_role() in ('admin','manager'));
+drop policy if exists intakes_read on public.intakes;
+create policy intakes_read on public.intakes for select
+  using (status in ('open','closed') or app.is_reviewer());
+drop policy if exists intakes_write on public.intakes;
+create policy intakes_write on public.intakes for all
+  using (app.reviewer_role() in ('admin','manager'))
+  with check (app.reviewer_role() in ('admin','manager'));
+drop policy if exists intake_trades_write on public.intake_trades;
+create policy intake_trades_write on public.intake_trades for all
+  using (app.reviewer_role() in ('admin','manager'))
+  with check (app.reviewer_role() in ('admin','manager'));
+drop policy if exists trades_write on public.trades;
+create policy trades_write on public.trades for all
+  using (app.reviewer_role() in ('admin','manager'))
+  with check (app.reviewer_role() in ('admin','manager'));
+drop policy if exists subjects_write on public.subjects;
+create policy subjects_write on public.subjects for all
+  using (app.reviewer_role() in ('admin','manager'))
+  with check (app.reviewer_role() in ('admin','manager'));
+grant select on public.intake_trade_subjects, public.intake_documents to anon, authenticated;
+grant insert, update, delete on public.intake_trade_subjects, public.intake_documents,
+                                public.intake_trades, public.intakes,
+                                public.trades, public.subjects to authenticated;
+grant select (auto_score, auto_rank, auto_flags, meets_minimum, scored_at)
+  on public.applications to authenticated;
+
+
+-- ============================================================
+--  SECTION 4 — 002-form-config.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1. Intake-level form settings
+-- ---------------------------------------------------------------------
+alter table public.intakes
+  add column if not exists published_at        timestamptz,
+  add column if not exists published_by        uuid references auth.users(id),
+  add column if not exists closed_at           timestamptz,
+  -- Step visibility and copy. Only optional steps may be switched off;
+  -- identity, contact, equity, documents, consent and review are fixed.
+  add column if not exists show_further_study  boolean not null default true,
+  add column if not exists show_technical      boolean not null default true,
+  add column if not exists intro_heading       text,
+  add column if not exists intro_body          text,
+  add column if not exists closed_message      text,
+  add column if not exists consent_version     text default '2026.1',
+  add column if not exists max_upload_mb       smallint not null default 8,
+  -- Scoring
+  add column if not exists scoring_enabled     boolean not null default true,
+  add column if not exists auto_flag_below     boolean not null default true;
+
+comment on column public.intakes.status is
+  'draft = editable config, no applications. open = live, config frozen. closed = no new applications, config frozen. archived = hidden.';
+
+
+-- ---------------------------------------------------------------------
+-- 2. Per-intake trade snapshot
+-- ---------------------------------------------------------------------
+alter table public.intake_trades
+  add column if not exists active         boolean not null default true,
+  add column if not exists label_override text,
+  add column if not exists sort_order     smallint not null default 100,
+  add column if not exists min_score      numeric(5,2),
+  add column if not exists notes          text;
+
+
+-- ---------------------------------------------------------------------
+-- 3. Per-intake, per-trade subject requirements
+--
+-- This is the table HR will actually spend their time in: which subjects
+-- a Millwright applicant is asked for, which are compulsory, the minimum
+-- mark, and how heavily each counts toward the ranking score.
+-- ---------------------------------------------------------------------
+create table if not exists public.intake_trade_subjects (
+  id          uuid primary key default gen_random_uuid(),
+  intake_id   uuid not null references public.intakes(id) on delete cascade,
+  trade_id    uuid not null references public.trades(id)  on delete cascade,
+  subject_id  uuid not null references public.subjects(id) on delete cascade,
+  stream      text not null check (stream in ('academic','technical','qualification')),
+  required    boolean not null default false,
+  min_mark    smallint check (min_mark between 0 and 100),
+  weight      smallint not null default 1 check (weight between 0 and 10),
+  sort_order  smallint not null default 100,
+  unique (intake_id, trade_id, subject_id, stream)
+);
+create index if not exists its_intake_trade_idx
+  on public.intake_trade_subjects(intake_id, trade_id);
+
+
+-- ---------------------------------------------------------------------
+-- 4. Per-intake document requirements
+-- ---------------------------------------------------------------------
+create table if not exists public.intake_documents (
+  id          uuid primary key default gen_random_uuid(),
+  intake_id   uuid not null references public.intakes(id) on delete cascade,
+  doc_type    text not null check (doc_type in
+              ('id_document','matric_certificate','qualification','other')),
+  label       text not null,
+  hint        text,
+  required    boolean not null default false,
+  max_files   smallint not null default 1 check (max_files between 1 and 6),
+  visible     boolean not null default true,
+  sort_order  smallint not null default 100,
+  unique (intake_id, doc_type)
+);
+
+-- The certified ID copy is not negotiable: it is how we verify the
+-- identity we are legally obliged to verify. Config may change its
+-- wording, never its requiredness.
+create or replace function app_private.protect_id_document()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if new.doc_type = 'id_document' then
+    new.required := true;
+    new.visible  := true;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists intake_documents_protect on public.intake_documents;
+create trigger intake_documents_protect
+  before insert or update on public.intake_documents
+  for each row execute function app_private.protect_id_document();
+
+
+-- ---------------------------------------------------------------------
+-- 5. Scoring columns on applications
+--
+-- The score is computed ONCE, at submission, and stored. It is a
+-- snapshot of the rules as they stood — it must never silently change
+-- underneath a shortlisting decision that has already been taken.
+-- ---------------------------------------------------------------------
+alter table public.applications
+  add column if not exists auto_score       numeric(5,2),
+  add column if not exists auto_rank        integer,
+  add column if not exists auto_flags       text[] not null default '{}',
+  add column if not exists meets_minimum    boolean,
+  add column if not exists scored_at        timestamptz;
+
+create index if not exists applications_score_idx
+  on public.applications(intake_id, trade_id, auto_score desc nulls last);
+
+
+-- ---------------------------------------------------------------------
+-- 5b. Backfill existing intakes with default config
+--
+-- MUST run before the guard triggers below: an intake that is already
+-- open would otherwise be refused its own defaults by the very lock this
+-- migration installs. The explicit drops make the file safe to re-run
+-- after a partial failure, when the guards may already exist.
+-- ---------------------------------------------------------------------
+drop trigger if exists guard_intake_trades         on public.intake_trades;
+drop trigger if exists guard_intake_trade_subjects on public.intake_trade_subjects;
+drop trigger if exists guard_intake_documents      on public.intake_documents;
+drop trigger if exists guard_intakes               on public.intakes;
+
+do $$
+declare i record; t record;
+begin
+  for i in select * from public.intakes loop
+    insert into public.intake_documents (intake_id, doc_type, label, hint, required, max_files, sort_order)
+    values
+      (i.id, 'id_document', 'Certified copy of your ID',
+       'Certified within the last three months.', true, 1, 10),
+      (i.id, 'matric_certificate', 'Grade 12 certificate or statement of results',
+       'If you are still waiting for results, upload your latest school report.', false, 1, 20),
+      (i.id, 'qualification', 'Further qualification certificates',
+       'N-certificates, diplomas, trade test results.', false, 4, 30),
+      (i.id, 'other', 'Other supporting documents',
+       'Proof of residence, a reference letter, a CV.', false, 2, 40)
+    on conflict (intake_id, doc_type) do nothing;
+
+    -- A sensible engineering-trade default: maths and science compulsory
+    -- and double-weighted, language and life orientation informational.
+    for t in select trade_id from public.intake_trades where intake_id = i.id loop
+      insert into public.intake_trade_subjects
+        (intake_id, trade_id, subject_id, stream, required, min_mark, weight, sort_order)
+      select i.id, t.trade_id, s.id, s.stream,
+             s.name in ('Mathematics','Technical Mathematics','Physical Science','Technical Science'),
+             case when s.name in ('Mathematics','Technical Mathematics','Physical Science','Technical Science')
+                  then 40 else null end,
+             case when s.name in ('Mathematics','Technical Mathematics','Physical Science','Technical Science') then 3
+                  when s.name in ('Engineering Graphics and Design','Mechanical Technology',
+                                  'Electrical Technology','Technical Drawing') then 2
+                  when s.name in ('Life Orientation') then 0
+                  else 1 end,
+             s.sort_order
+        from public.subjects s
+       where s.active and s.stream in ('academic','technical')
+         and s.name in ('Mathematics','Mathematical Literacy','Physical Science','Life Science',
+                        'Life Orientation','Home Language','First Additional Language',
+                        'Technical Mathematics','Technical Science','Engineering Graphics and Design',
+                        'Mechanical Technology','Electrical Technology','Technical Drawing',
+                        'Fitting and Machining Theory','Trade Theory')
+      on conflict (intake_id, trade_id, subject_id, stream) do nothing;
+    end loop;
+  end loop;
+end $$;
+
+
+-- ---------------------------------------------------------------------
+-- 6. The lock
+--
+-- Any attempt to change frozen config raises. Triggers cover every
+-- config table, so this holds for the API, the SQL editor and psql
+-- alike.
+-- ---------------------------------------------------------------------
+create or replace function app_private.intake_is_editable(p_intake uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select coalesce((select status = 'draft' from public.intakes where id = p_intake), false);
+$$;
+
+create or replace function app_private.guard_config_write()
+returns trigger language plpgsql set search_path = '' as $$
+declare v_intake uuid;
+begin
+  v_intake := coalesce(new.intake_id, old.intake_id);
+  if not app_private.intake_is_editable(v_intake) then
+    raise exception
+      'This intake has been published. Its form can no longer be changed. Clone it to start a new intake.'
+      using errcode = 'check_violation';
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists guard_intake_trades         on public.intake_trades;
+drop trigger if exists guard_intake_trade_subjects on public.intake_trade_subjects;
+drop trigger if exists guard_intake_documents      on public.intake_documents;
+
+create trigger guard_intake_trades
+  before insert or update or delete on public.intake_trades
+  for each row execute function app_private.guard_config_write();
+create trigger guard_intake_trade_subjects
+  before insert or update or delete on public.intake_trade_subjects
+  for each row execute function app_private.guard_config_write();
+create trigger guard_intake_documents
+  before insert or update or delete on public.intake_documents
+  for each row execute function app_private.guard_config_write();
+
+-- On the intakes row itself, only a narrow set of fields stays editable
+-- after publication: the closing date may be extended, and the closed
+-- message reworded. Everything that shapes the form is frozen.
+create or replace function app_private.guard_intake_write()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if old.status = 'draft' then return new; end if;
+
+  if new.name             is distinct from old.name
+  or new.opens_at         is distinct from old.opens_at
+  or new.retention_months is distinct from old.retention_months
+  or new.show_further_study is distinct from old.show_further_study
+  or new.show_technical   is distinct from old.show_technical
+  or new.consent_version  is distinct from old.consent_version
+  or new.max_upload_mb    is distinct from old.max_upload_mb
+  or new.scoring_enabled  is distinct from old.scoring_enabled then
+    raise exception
+      'This intake has been published. Only the closing date and closing message can still be changed.'
+      using errcode = 'check_violation';
+  end if;
+
+  -- No going back to draft once real applications exist.
+  if new.status = 'draft' and old.status <> 'draft' then
+    raise exception 'A published intake cannot be returned to draft.'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists guard_intakes on public.intakes;
+create trigger guard_intakes before update on public.intakes
+  for each row execute function app_private.guard_intake_write();
+
+
+-- ---------------------------------------------------------------------
+-- 7. Scoring engine
+--
+-- score = weighted mean of the marks for that trade's scored subjects,
+--         on a 0-100 scale.
+-- flags = the human-readable reasons an application fell short.
+--
+-- A missing required subject scores as 0 rather than being skipped:
+-- omitting a compulsory subject should cost you, not quietly help you.
+-- ---------------------------------------------------------------------
+create or replace function app_private.score_application(p_application uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  a               record;
+  r               record;
+  v_weighted      numeric := 0;
+  v_weight_total  numeric := 0;
+  v_flags         text[]  := '{}';
+  v_meets         boolean := true;
+  v_mark          smallint;
+  v_score         numeric;
+  v_min_score     numeric;
+  v_enabled       boolean;
+  v_auto_flag     boolean;
+begin
+  select * into a from public.applications where id = p_application;
+  if a.id is null or a.trade_id is null then return; end if;
+
+  select scoring_enabled, auto_flag_below into v_enabled, v_auto_flag
+    from public.intakes where id = a.intake_id;
+  if not coalesce(v_enabled, false) then return; end if;
+
+  for r in
+    select its.*, s.name as subject_name
+      from public.intake_trade_subjects its
+      join public.subjects s on s.id = its.subject_id
+     where its.intake_id = a.intake_id and its.trade_id = a.trade_id
+  loop
+    select mark into v_mark
+      from public.application_subjects
+     where application_id = p_application
+       and stream = r.stream
+       and subject_name = r.subject_name;
+
+    if v_mark is null then
+      if r.required then
+        v_flags := array_append(v_flags, (r.subject_name || ' not supplied'));
+        v_meets := false;
+        if r.weight > 0 then
+          v_weight_total := v_weight_total + r.weight;   -- counts as zero
+        end if;
+      end if;
+      continue;
+    end if;
+
+    if r.min_mark is not null and v_mark < r.min_mark then
+      v_flags := array_append(v_flags, (r.subject_name || ' ' || v_mark || '%, below the ' || r.min_mark || '% minimum'));
+      v_meets := false;
+    end if;
+
+    if r.weight > 0 then
+      v_weighted     := v_weighted + (v_mark * r.weight);
+      v_weight_total := v_weight_total + r.weight;
+    end if;
+  end loop;
+
+  v_score := case when v_weight_total > 0
+                  then round(v_weighted / v_weight_total, 2)
+                  else null end;
+
+  select min_score into v_min_score
+    from public.intake_trades
+   where intake_id = a.intake_id and trade_id = a.trade_id;
+
+  if v_min_score is not null and v_score is not null and v_score < v_min_score then
+    v_flags := array_append(v_flags, ('Overall score ' || v_score || ', below the ' || v_min_score || ' minimum'));
+    v_meets := false;
+  end if;
+
+  update public.applications
+     set auto_score    = v_score,
+         auto_flags    = case when coalesce(v_auto_flag, true) then v_flags else '{}' end,
+         meets_minimum = v_meets,
+         scored_at     = now()
+   where id = p_application;
+end;
+$$;
+
+-- Ranking is per intake and trade, so a Boilermaker is never ranked
+-- against an Electrician.
+create or replace function public.recalculate_ranks(p_intake uuid)
+returns integer language plpgsql security definer set search_path = '' as $$
+declare v_count integer;
+begin
+  if not app.is_reviewer() then raise exception 'Not authorised.'; end if;
+
+  with ranked as (
+    select id, rank() over (
+             partition by intake_id, trade_id
+             order by meets_minimum desc nulls last, auto_score desc nulls last, submitted_at asc
+           ) as rnk
+      from public.applications
+     where intake_id = p_intake and status <> 'draft'
+  )
+  update public.applications a
+     set auto_rank = ranked.rnk
+    from ranked where ranked.id = a.id;
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+grant execute on function public.recalculate_ranks(uuid) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 8. Applicant-facing config reader
+--
+-- One call returns everything the form needs to render itself for the
+-- chosen trade. Returns only what is published — a draft intake is
+-- invisible to applicants.
+-- ---------------------------------------------------------------------
+create or replace function public.get_form_config(p_intake uuid, p_trade uuid default null)
+returns jsonb language plpgsql stable security definer set search_path = '' as $$
+declare v jsonb; i record;
+begin
+  select * into i from public.intakes where id = p_intake and status = 'open';
+  if i.id is null then return jsonb_build_object('open', false); end if;
+
+  select jsonb_build_object(
+    'open', true,
+    'intake', jsonb_build_object(
+      'id', i.id, 'name', i.name, 'closes_at', i.closes_at,
+      'show_further_study', i.show_further_study,
+      'show_technical', i.show_technical,
+      'intro_heading', i.intro_heading, 'intro_body', i.intro_body,
+      'consent_version', i.consent_version,
+      'max_upload_mb', i.max_upload_mb),
+    'trades', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'id', t.id,
+               'name', coalesce(it.label_override, t.name),
+               'division', t.division,
+               'notes', it.notes) order by it.sort_order, t.name), '[]'::jsonb)
+        from public.intake_trades it
+        join public.trades t on t.id = it.trade_id
+       where it.intake_id = p_intake and it.active),
+    'documents', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'doc_type', d.doc_type, 'label', d.label, 'hint', d.hint,
+               'required', d.required, 'max_files', d.max_files) order by d.sort_order), '[]'::jsonb)
+        from public.intake_documents d
+       where d.intake_id = p_intake and d.visible),
+    'subjects', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'stream', its.stream, 'name', s.name,
+               'required', its.required, 'min_mark', its.min_mark,
+               'weight', its.weight) order by its.stream, its.sort_order, s.name), '[]'::jsonb)
+        from public.intake_trade_subjects its
+        join public.subjects s on s.id = its.subject_id
+       where its.intake_id = p_intake
+         and (p_trade is null or its.trade_id = p_trade))
+  ) into v;
+  return v;
+end;
+$$;
+grant execute on function public.get_form_config(uuid, uuid) to anon, authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 9. Admin config RPCs
+-- ---------------------------------------------------------------------
+create or replace function public.publish_intake(p_intake uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare i record; v_problems text[] := '{}'; v_trades int; v_docs int;
+begin
+  if app.reviewer_role() not in ('admin','manager') then
+    raise exception 'Only an administrator or manager can publish an intake.';
+  end if;
+
+  select * into i from public.intakes where id = p_intake;
+  if i.id is null then raise exception 'Intake not found.'; end if;
+  if i.status <> 'draft' then
+    return jsonb_build_object('ok', false, 'problems',
+      array['This intake has already been published.']);
+  end if;
+
+  select count(*) into v_trades from public.intake_trades
+   where intake_id = p_intake and active;
+  if v_trades = 0 then v_problems := array_append(v_problems, 'No trades are switched on.'); end if;
+
+  select count(*) into v_docs from public.intake_documents
+   where intake_id = p_intake and doc_type = 'id_document';
+  if v_docs = 0 then v_problems := array_append(v_problems, 'The ID document requirement is missing.'); end if;
+
+  if i.closes_at <= now() then
+    v_problems := array_append(v_problems, 'The closing date is in the past.');
+  end if;
+  if i.closes_at <= i.opens_at then
+    v_problems := array_append(v_problems, 'The closing date is not after the opening date.');
+  end if;
+  if not exists (select 1 from public.consent_versions
+                  where version = i.consent_version and audience = 'applicant' and active) then
+    v_problems := array_append(v_problems, 'The selected consent wording does not exist.');
+  end if;
+
+  -- A trade switched on but with no subjects would score every applicant
+  -- as null and rank them arbitrarily.
+  if i.scoring_enabled and exists (
+      select 1 from public.intake_trades it
+       where it.intake_id = p_intake and it.active
+         and not exists (select 1 from public.intake_trade_subjects its
+                          where its.intake_id = p_intake and its.trade_id = it.trade_id)) then
+    v_problems := array_append(v_problems, 'Scoring is on, but one or more active trades have no subjects set.');
+  end if;
+
+  if array_length(v_problems, 1) > 0 then
+    return jsonb_build_object('ok', false, 'problems', v_problems);
+  end if;
+
+  update public.intakes
+     set status = 'open', published_at = now(), published_by = auth.uid()
+   where id = p_intake;
+
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_published',
+          jsonb_build_object('intake_id', p_intake, 'name', i.name));
+
+  return jsonb_build_object('ok', true);
+end;
+$$;
+grant execute on function public.publish_intake(uuid) to authenticated;
+
+
+create or replace function public.close_intake(p_intake uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if app.reviewer_role() not in ('admin','manager') then
+    raise exception 'Only an administrator or manager can close an intake.';
+  end if;
+  update public.intakes set status = 'closed', closed_at = now(), closes_at = least(closes_at, now())
+   where id = p_intake and status = 'open';
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_closed', jsonb_build_object('intake_id', p_intake));
+end;
+$$;
+grant execute on function public.close_intake(uuid) to authenticated;
+
+
+-- Cloning is how you edit a published intake: copy it forward, change
+-- the copy, publish that. The original stays exactly as its applicants
+-- experienced it.
+create or replace function public.clone_intake(p_intake uuid, p_name text)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare v_new uuid;
+begin
+  if app.reviewer_role() not in ('admin','manager') then
+    raise exception 'Only an administrator or manager can create an intake.';
+  end if;
+
+  insert into public.intakes (name, opens_at, closes_at, status, retention_months,
+                              show_further_study, show_technical, intro_heading, intro_body,
+                              closed_message, consent_version, max_upload_mb,
+                              scoring_enabled, auto_flag_below)
+  select p_name, now(), now() + interval '60 days', 'draft', retention_months,
+         show_further_study, show_technical, intro_heading, intro_body,
+         closed_message, consent_version, max_upload_mb,
+         scoring_enabled, auto_flag_below
+    from public.intakes where id = p_intake
+  returning id into v_new;
+
+  insert into public.intake_trades (intake_id, trade_id, positions, active,
+                                    label_override, sort_order, min_score, notes)
+  select v_new, trade_id, positions, active, label_override, sort_order, min_score, notes
+    from public.intake_trades where intake_id = p_intake;
+
+  insert into public.intake_trade_subjects (intake_id, trade_id, subject_id, stream,
+                                            required, min_mark, weight, sort_order)
+  select v_new, trade_id, subject_id, stream, required, min_mark, weight, sort_order
+    from public.intake_trade_subjects where intake_id = p_intake;
+
+  insert into public.intake_documents (intake_id, doc_type, label, hint, required,
+                                       max_files, visible, sort_order)
+  select v_new, doc_type, label, hint, required, max_files, visible, sort_order
+    from public.intake_documents where intake_id = p_intake;
+
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_cloned',
+          jsonb_build_object('from', p_intake, 'to', v_new, 'name', p_name));
+
+  return v_new;
+end;
+$$;
+grant execute on function public.clone_intake(uuid, text) to authenticated;
+
+
+-- Bulk save for the subject grid. The admin UI edits a draft locally and
+-- commits the whole trade in one call, per the draft-then-save pattern.
+create or replace function public.save_trade_subjects(
+  p_intake uuid, p_trade uuid, p_rows jsonb)
+returns integer language plpgsql security definer set search_path = '' as $$
+declare r jsonb; v_count integer := 0;
+begin
+  if app.reviewer_role() not in ('admin','manager') then
+    raise exception 'Not authorised.';
+  end if;
+  if not app_private.intake_is_editable(p_intake) then
+    raise exception 'This intake has been published. Its form can no longer be changed.';
+  end if;
+
+  delete from public.intake_trade_subjects
+   where intake_id = p_intake and trade_id = p_trade;
+
+  for r in select * from jsonb_array_elements(p_rows) loop
+    insert into public.intake_trade_subjects
+      (intake_id, trade_id, subject_id, stream, required, min_mark, weight, sort_order)
+    values (p_intake, p_trade, (r->>'subject_id')::uuid, r->>'stream',
+            coalesce((r->>'required')::boolean, false),
+            nullif(r->>'min_mark','')::smallint,
+            coalesce((r->>'weight')::smallint, 1),
+            coalesce((r->>'sort_order')::smallint, 100));
+    v_count := v_count + 1;
+  end loop;
+
+  return v_count;
+end;
+$$;
+grant execute on function public.save_trade_subjects(uuid, uuid, jsonb) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 10. Hook scoring into submission
+--
+-- submit_application() already exists; rather than rewrite it, score on
+-- the status transition. This also means a reviewer correcting a mark
+-- and re-scoring goes through the same path.
+-- ---------------------------------------------------------------------
+create or replace function app_private.score_on_submit()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if new.status = 'submitted' and coalesce(old.status,'') = 'draft' then
+    perform app_private.score_application(new.id);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists applications_score on public.applications;
+create trigger applications_score after update on public.applications
+  for each row execute function app_private.score_on_submit();
+
+
+-- ---------------------------------------------------------------------
+-- 11. RLS and grants
+-- ---------------------------------------------------------------------
+alter table public.intake_trade_subjects enable row level security;
+alter table public.intake_documents      enable row level security;
+
+drop policy if exists its_read on public.intake_trade_subjects;
+create policy its_read on public.intake_trade_subjects for select
+  using (exists (select 1 from public.intakes i
+                 where i.id = intake_id and i.status in ('open','closed'))
+         or app.is_reviewer());
+
+drop policy if exists its_write on public.intake_trade_subjects;
+create policy its_write on public.intake_trade_subjects for all
+  using (app.reviewer_role() in ('admin','manager'))
+  with check (app.reviewer_role() in ('admin','manager'));
+
+drop policy if exists intake_docs_read on public.intake_documents;
+create policy intake_docs_read on public.intake_documents for select
+  using (exists (select 1 from public.intakes i
+                 where i.id = intake_id and i.status in ('open','closed'))
+         or app.is_reviewer());
+
+drop policy if exists intake_docs_write on public.intake_documents;
+create policy intake_docs_write on public.intake_documents for all
+  using (app.reviewer_role() in ('admin','manager'))
+  with check (app.reviewer_role() in ('admin','manager'));
+
+-- Reviewers may see draft intakes; applicants may not.
+drop policy if exists intakes_read on public.intakes;
+create policy intakes_read on public.intakes for select
+  using (status in ('open','closed') or app.is_reviewer());
+
+drop policy if exists intakes_write on public.intakes;
+create policy intakes_write on public.intakes for all
+  using (app.reviewer_role() in ('admin','manager'))
+  with check (app.reviewer_role() in ('admin','manager'));
+
+drop policy if exists intake_trades_write on public.intake_trades;
+create policy intake_trades_write on public.intake_trades for all
+  using (app.reviewer_role() in ('admin','manager'))
+  with check (app.reviewer_role() in ('admin','manager'));
+
+drop policy if exists trades_write on public.trades;
+create policy trades_write on public.trades for all
+  using (app.reviewer_role() in ('admin','manager'))
+  with check (app.reviewer_role() in ('admin','manager'));
+
+drop policy if exists subjects_write on public.subjects;
+create policy subjects_write on public.subjects for all
+  using (app.reviewer_role() in ('admin','manager'))
+  with check (app.reviewer_role() in ('admin','manager'));
+
+grant select on public.intake_trade_subjects, public.intake_documents to anon, authenticated;
+grant insert, update, delete on public.intake_trade_subjects, public.intake_documents,
+                                public.intake_trades, public.intakes,
+                                public.trades, public.subjects to authenticated;
+
+grant select (auto_score, auto_rank, auto_flags, meets_minimum, scored_at)
+  on public.applications to authenticated;
+
+
+-- ============================================================
+--  SECTION 5 — 003-create-intake.min.sql
+-- ============================================================
+
+do $$
+declare
+  v_intake uuid;
+  t        record;
+begin
+  ------------------------------------------------------------------
+  -- 1. The intake itself
+  ------------------------------------------------------------------
+  select id into v_intake from public.intakes
+   where name = '2027 Apprenticeship Intake';
+
+  if v_intake is null then
+    insert into public.intakes (
+      name, opens_at, closes_at, status, retention_months,
+      show_further_study, show_technical, consent_version,
+      max_upload_mb, scoring_enabled, auto_flag_below)
+    values (
+      '2027 Apprenticeship Intake',
+      now(),
+      now() + interval '60 days',
+      'draft',            -- configure in the console, publish there
+      12,                 -- months to keep applications after closing
+      true, true, '2026.1', 8, true, true)
+    returning id into v_intake;
+    raise notice 'Created intake %', v_intake;
+  else
+    raise notice 'Intake already exists: %', v_intake;
+  end if;
+
+  ------------------------------------------------------------------
+  -- 2. Trades — every active trade, switched on
+  ------------------------------------------------------------------
+  insert into public.intake_trades
+    (intake_id, trade_id, active, positions, sort_order)
+  select v_intake, tr.id, true, 2, tr.sort_order
+    from public.trades tr
+   where tr.active
+  on conflict (intake_id, trade_id) do nothing;
+
+  ------------------------------------------------------------------
+  -- 3. Documents
+  ------------------------------------------------------------------
+  insert into public.intake_documents
+    (intake_id, doc_type, label, hint, required, max_files, sort_order)
+  values
+    (v_intake, 'id_document', 'Certified copy of your ID',
+     'Certified within the last three months.', true, 1, 10),
+    (v_intake, 'matric_certificate', 'Grade 12 certificate or statement of results',
+     'If you are still waiting for results, upload your latest school report.', false, 1, 20),
+    (v_intake, 'qualification', 'Further qualification certificates',
+     'N-certificates, diplomas, trade test results.', false, 4, 30),
+    (v_intake, 'other', 'Other supporting documents',
+     'Proof of residence, a reference letter, a CV.', false, 2, 40)
+  on conflict (intake_id, doc_type) do nothing;
+
+  ------------------------------------------------------------------
+  -- 4. Subjects per trade
+  --
+  -- A starting point only: maths and science compulsory at 40% and
+  -- weighted 3, drawing and technology weighted 2, life orientation
+  -- captured but not scored. Adjust per trade in the console — a
+  -- Millwright and a Plater should not be scored identically.
+  ------------------------------------------------------------------
+  for t in select trade_id from public.intake_trades
+            where intake_id = v_intake
+  loop
+    insert into public.intake_trade_subjects
+      (intake_id, trade_id, subject_id, stream, required, min_mark, weight, sort_order)
+    select
+      v_intake, t.trade_id, s.id, s.stream,
+      s.name in ('Mathematics','Technical Mathematics','Physical Science','Technical Science'),
+      case when s.name in ('Mathematics','Technical Mathematics',
+                           'Physical Science','Technical Science')
+           then 40 else null end,
+      case when s.name in ('Mathematics','Technical Mathematics',
+                           'Physical Science','Technical Science') then 3
+           when s.name in ('Engineering Graphics and Design','Mechanical Technology',
+                           'Electrical Technology','Technical Drawing') then 2
+           when s.name = 'Life Orientation' then 0
+           else 1 end,
+      s.sort_order
+      from public.subjects s
+     where s.active
+       and s.stream in ('academic','technical')
+       and s.name in ('Mathematics','Mathematical Literacy','Physical Science',
+                      'Life Science','Life Orientation','Home Language',
+                      'First Additional Language','Technical Mathematics',
+                      'Technical Science','Engineering Graphics and Design',
+                      'Mechanical Technology','Electrical Technology',
+                      'Technical Drawing','Fitting and Machining Theory','Trade Theory')
+    on conflict (intake_id, trade_id, subject_id, stream) do nothing;
+  end loop;
+
+  raise notice 'Configuration complete for intake %', v_intake;
+end $$;
+select i.name, i.status, i.opens_at::date, i.closes_at::date,
+       (select count(*) from public.intake_trades it
+         where it.intake_id = i.id and it.active)          as trades,
+       (select count(*) from public.intake_trade_subjects s
+         where s.intake_id = i.id)                          as subject_rules,
+       (select count(*) from public.intake_documents d
+         where d.intake_id = i.id)                          as documents
+  from public.intakes i
+ order by i.created_at;
+
+
+-- ============================================================
+--  SECTION 6 — 003-create-intake.sql
+-- ============================================================
+
+do $$
+declare
+  v_intake uuid;
+  t        record;
+begin
+  ------------------------------------------------------------------
+  -- 1. The intake itself
+  ------------------------------------------------------------------
+  select id into v_intake from public.intakes
+   where name = '2027 Apprenticeship Intake';
+
+  if v_intake is null then
+    insert into public.intakes (
+      name, opens_at, closes_at, status, retention_months,
+      show_further_study, show_technical, consent_version,
+      max_upload_mb, scoring_enabled, auto_flag_below)
+    values (
+      '2027 Apprenticeship Intake',
+      now(),
+      now() + interval '60 days',
+      'draft',            -- configure in the console, publish there
+      12,                 -- months to keep applications after closing
+      true, true, '2026.1', 8, true, true)
+    returning id into v_intake;
+    raise notice 'Created intake %', v_intake;
+  else
+    raise notice 'Intake already exists: %', v_intake;
+  end if;
+
+  ------------------------------------------------------------------
+  -- 2. Trades — every active trade, switched on
+  ------------------------------------------------------------------
+  insert into public.intake_trades
+    (intake_id, trade_id, active, positions, sort_order)
+  select v_intake, tr.id, true, 2, tr.sort_order
+    from public.trades tr
+   where tr.active
+  on conflict (intake_id, trade_id) do nothing;
+
+  ------------------------------------------------------------------
+  -- 3. Documents
+  ------------------------------------------------------------------
+  insert into public.intake_documents
+    (intake_id, doc_type, label, hint, required, max_files, sort_order)
+  values
+    (v_intake, 'id_document', 'Certified copy of your ID',
+     'Certified within the last three months.', true, 1, 10),
+    (v_intake, 'matric_certificate', 'Grade 12 certificate or statement of results',
+     'If you are still waiting for results, upload your latest school report.', false, 1, 20),
+    (v_intake, 'qualification', 'Further qualification certificates',
+     'N-certificates, diplomas, trade test results.', false, 4, 30),
+    (v_intake, 'other', 'Other supporting documents',
+     'Proof of residence, a reference letter, a CV.', false, 2, 40)
+  on conflict (intake_id, doc_type) do nothing;
+
+  ------------------------------------------------------------------
+  -- 4. Subjects per trade
+  --
+  -- A starting point only: maths and science compulsory at 40% and
+  -- weighted 3, drawing and technology weighted 2, life orientation
+  -- captured but not scored. Adjust per trade in the console — a
+  -- Millwright and a Plater should not be scored identically.
+  ------------------------------------------------------------------
+  for t in select trade_id from public.intake_trades
+            where intake_id = v_intake
+  loop
+    insert into public.intake_trade_subjects
+      (intake_id, trade_id, subject_id, stream, required, min_mark, weight, sort_order)
+    select
+      v_intake, t.trade_id, s.id, s.stream,
+      s.name in ('Mathematics','Technical Mathematics','Physical Science','Technical Science'),
+      case when s.name in ('Mathematics','Technical Mathematics',
+                           'Physical Science','Technical Science')
+           then 40 else null end,
+      case when s.name in ('Mathematics','Technical Mathematics',
+                           'Physical Science','Technical Science') then 3
+           when s.name in ('Engineering Graphics and Design','Mechanical Technology',
+                           'Electrical Technology','Technical Drawing') then 2
+           when s.name = 'Life Orientation' then 0
+           else 1 end,
+      s.sort_order
+      from public.subjects s
+     where s.active
+       and s.stream in ('academic','technical')
+       and s.name in ('Mathematics','Mathematical Literacy','Physical Science',
+                      'Life Science','Life Orientation','Home Language',
+                      'First Additional Language','Technical Mathematics',
+                      'Technical Science','Engineering Graphics and Design',
+                      'Mechanical Technology','Electrical Technology',
+                      'Technical Drawing','Fitting and Machining Theory','Trade Theory')
+    on conflict (intake_id, trade_id, subject_id, stream) do nothing;
+  end loop;
+
+  raise notice 'Configuration complete for intake %', v_intake;
+end $$;
+
+
+-- ---------------------------------------------------------------------
+-- Verify
+-- ---------------------------------------------------------------------
+select i.name, i.status, i.opens_at::date, i.closes_at::date,
+       (select count(*) from public.intake_trades it
+         where it.intake_id = i.id and it.active)          as trades,
+       (select count(*) from public.intake_trade_subjects s
+         where s.intake_id = i.id)                          as subject_rules,
+       (select count(*) from public.intake_documents d
+         where d.intake_id = i.id)                          as documents
+  from public.intakes i
+ order by i.created_at;
+
+
+-- ============================================================
+--  SECTION 7 — 003-publish-roles.sql
 -- ============================================================
 
 create or replace function publish_template_revision(p_rev uuid)
@@ -876,7 +2253,7 @@ grant execute on function publish_template_revision(uuid) to authenticated;
 
 
 -- ============================================================
---  SECTION 4 — 004-publish-approval-optional.sql
+--  SECTION 8 — 004-publish-approval-optional.sql
 -- ============================================================
 
 -- 1. The setting.
@@ -934,7 +2311,77 @@ grant execute on function publish_template_revision(uuid) to authenticated;
 
 
 -- ============================================================
---  SECTION 5 — 005-lock-ref-sequences.sql
+--  SECTION 9 — 004-repair-intake-status.sql
+-- ============================================================
+
+do $$
+declare
+  v_ids  uuid[];
+  v_id   uuid;
+  v_name text;
+  v_stat text;
+  v_apps integer;
+  v_fixed integer := 0;
+begin
+  -- Collect first. A cursor open over public.intakes blocks the
+  -- ALTER TABLE below with "relation is being used by active queries
+  -- in this session", so the loop must not be reading from it.
+  select array_agg(id) into v_ids
+    from public.intakes i
+   where i.status <> 'draft'
+     and not exists (select 1 from public.applications a where a.intake_id = i.id);
+
+  if v_ids is null or array_length(v_ids, 1) = 0 then
+    raise notice 'Nothing to repair: no non-draft intake without applications.';
+    return;
+  end if;
+
+  -- guard_intake_write() refuses a direct return to draft, and rightly
+  -- so. Disabled only for this repair, then immediately re-enabled.
+  alter table public.intakes disable trigger guard_intakes;
+
+  foreach v_id in array v_ids loop
+    select name, status into v_name, v_stat from public.intakes where id = v_id;
+    update public.intakes
+       set status = 'draft', published_at = null, closed_at = null
+     where id = v_id;
+    raise notice 'Returned "%" to draft (was %).', v_name, v_stat;
+    v_fixed := v_fixed + 1;
+  end loop;
+
+  alter table public.intakes enable trigger guard_intakes;
+
+  raise notice '% intake(s) repaired.', v_fixed;
+
+  -- Any intake WITH applications is a legal record; report and leave alone.
+  for v_id in select i.id from public.intakes i
+               where i.status <> 'draft'
+                 and exists (select 1 from public.applications a where a.intake_id = i.id)
+  loop
+    select name into v_name from public.intakes where id = v_id;
+    raise notice 'SKIPPED "%" — it has applications against it.', v_name;
+  end loop;
+end $$;
+
+
+-- ---------------------------------------------------------------------
+-- Confirm. Every intake here should read 'draft' before you run
+-- 003-create-intake.sql to populate its configuration.
+-- ---------------------------------------------------------------------
+select i.name, i.status,
+       (select count(*) from public.applications a where a.intake_id = i.id) as applications,
+       (select count(*) from public.intake_trades it
+         where it.intake_id = i.id and it.active)                            as trades,
+       (select count(*) from public.intake_trade_subjects s
+         where s.intake_id = i.id)                                           as subject_rules,
+       (select count(*) from public.intake_documents d
+         where d.intake_id = i.id)                                           as documents
+  from public.intakes i
+ order by i.created_at;
+
+
+-- ============================================================
+--  SECTION 10 — 005-lock-ref-sequences.sql
 -- ============================================================
 
 -- 1. The function does the privileged work, with a pinned search_path so a
@@ -1001,7 +2448,208 @@ comment on table public.qgrid_migrations is
 
 
 -- ============================================================
---  SECTION 6 — 006-fix-silent-publish.sql
+--  SECTION 11 — 005-school-stream.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1. Certificate type -> school stream
+--
+--   nsc, senior_certificate, amended_senior_certificate -> academic
+--   nsc_technical, ncv_l4                               -> technical
+--
+-- NC(V) Level 4 is a vocational qualification and its subjects sit in
+-- the technical catalogue, so it maps there.
+-- ---------------------------------------------------------------------
+create or replace function public.school_stream(p_grade12_type text)
+returns text language sql immutable set search_path = '' as $$
+  select case p_grade12_type
+           when 'nsc_technical'              then 'technical'
+           when 'ncv_l4'                     then 'technical'
+           when 'nsc'                        then 'academic'
+           when 'senior_certificate'         then 'academic'
+           when 'amended_senior_certificate' then 'academic'
+           else null                     -- 'none', or not yet answered
+         end;
+$$;
+grant execute on function public.school_stream(text) to anon, authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 2. Stream-aware scoring
+--
+-- Rules whose stream does not apply to this applicant are skipped
+-- entirely — not failed, not counted as zero, not weighted. The
+-- 'qualification' stream always applies, since a further qualification
+-- sits alongside either school route.
+-- ---------------------------------------------------------------------
+create or replace function app_private.score_application(p_application uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  a               record;
+  r               record;
+  v_stream        text;
+  v_weighted      numeric := 0;
+  v_weight_total  numeric := 0;
+  v_flags         text[]  := '{}';
+  v_meets         boolean := true;
+  v_mark          smallint;
+  v_score         numeric;
+  v_min_score     numeric;
+  v_enabled       boolean;
+  v_auto_flag     boolean;
+begin
+  select * into a from public.applications where id = p_application;
+  if a.id is null or a.trade_id is null then return; end if;
+
+  select scoring_enabled, auto_flag_below into v_enabled, v_auto_flag
+    from public.intakes where id = a.intake_id;
+  if not coalesce(v_enabled, false) then return; end if;
+
+  v_stream := public.school_stream(a.grade12_type);
+
+  for r in
+    select its.*, s.name as subject_name
+      from public.intake_trade_subjects its
+      join public.subjects s on s.id = its.subject_id
+     where its.intake_id = a.intake_id
+       and its.trade_id  = a.trade_id
+       -- Only the applicant's own school stream, plus further study.
+       and (its.stream = 'qualification'
+            or v_stream is null
+            or its.stream = v_stream)
+  loop
+    select mark into v_mark
+      from public.application_subjects
+     where application_id = p_application
+       and stream = r.stream
+       and subject_name = r.subject_name;
+
+    if v_mark is null then
+      if r.required then
+        v_flags := array_append(v_flags, (r.subject_name || ' not supplied'));
+        v_meets := false;
+        if r.weight > 0 then
+          v_weight_total := v_weight_total + r.weight;   -- counts as zero
+        end if;
+      end if;
+      continue;
+    end if;
+
+    if r.min_mark is not null and v_mark < r.min_mark then
+      v_flags := array_append(v_flags,
+        (r.subject_name || ' ' || v_mark || '%, below the ' || r.min_mark || '% minimum'));
+      v_meets := false;
+    end if;
+
+    if r.weight > 0 then
+      v_weighted     := v_weighted + (v_mark * r.weight);
+      v_weight_total := v_weight_total + r.weight;
+    end if;
+  end loop;
+
+  v_score := case when v_weight_total > 0
+                  then round(v_weighted / v_weight_total, 2)
+                  else null end;
+
+  select min_score into v_min_score
+    from public.intake_trades
+   where intake_id = a.intake_id and trade_id = a.trade_id;
+
+  if v_min_score is not null and v_score is not null and v_score < v_min_score then
+    v_flags := array_append(v_flags,
+      ('Overall score ' || v_score || ', below the ' || v_min_score || ' minimum'));
+    v_meets := false;
+  end if;
+
+  update public.applications
+     set auto_score    = v_score,
+         auto_flags    = case when coalesce(v_auto_flag, true) then v_flags else '{}' end,
+         meets_minimum = v_meets,
+         scored_at     = now()
+   where id = p_application;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 3. Marks from the wrong stream are discarded on write
+--
+-- Belt and braces: if the applicant changes certificate type after
+-- capturing marks, the stale block must not survive to be scored. The
+-- client clears it too, but the client is not the enforcement point.
+-- ---------------------------------------------------------------------
+create or replace function app_private.enforce_subject_stream()
+returns trigger language plpgsql set search_path = '' as $$
+declare v_type text; v_stream text;
+begin
+  if new.stream = 'qualification' then return new; end if;
+
+  select grade12_type into v_type
+    from public.applications where id = new.application_id;
+
+  v_stream := public.school_stream(v_type);
+  if v_stream is null then return new; end if;   -- type not yet chosen
+
+  if new.stream <> v_stream then
+    return null;                                  -- silently drop the row
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists application_subjects_stream on public.application_subjects;
+create trigger application_subjects_stream
+  before insert or update on public.application_subjects
+  for each row execute function app_private.enforce_subject_stream();
+
+
+-- ---------------------------------------------------------------------
+-- 4. Clear the other stream when the certificate type changes
+-- ---------------------------------------------------------------------
+create or replace function app_private.clear_stale_stream()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare v_stream text;
+begin
+  if new.grade12_type is not distinct from old.grade12_type then
+    return new;
+  end if;
+
+  v_stream := public.school_stream(new.grade12_type);
+  if v_stream is null then return new; end if;
+
+  delete from public.application_subjects
+   where application_id = new.id
+     and stream <> 'qualification'
+     and stream <> v_stream;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists applications_clear_stream on public.applications;
+create trigger applications_clear_stream
+  after update of grade12_type on public.applications
+  for each row execute function app_private.clear_stale_stream();
+
+
+-- ---------------------------------------------------------------------
+-- 5. Re-score anything already submitted under the old logic
+-- ---------------------------------------------------------------------
+do $$
+declare r record; n integer := 0;
+begin
+  for r in select id from public.applications
+            where status <> 'draft' and scored_at is not null
+  loop
+    perform app_private.score_application(r.id);
+    n := n + 1;
+  end loop;
+  raise notice 'Re-scored % application(s) under the stream-aware rules.', n;
+end $$;
+
+
+-- ============================================================
+--  SECTION 12 — 006-fix-silent-publish.sql
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -1157,7 +2805,661 @@ grant execute on function publish_template_revision(uuid), submit_inspection(uui
 
 
 -- ============================================================
---  SECTION 7 — 007-no-empty-templates.sql
+--  SECTION 13 — 006-retention-storage-fix.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1. The queue
+-- ---------------------------------------------------------------------
+create table if not exists public.storage_purge_queue (
+  id             bigserial primary key,
+  bucket_id      text not null default 'applicant-documents',
+  storage_path   text not null,
+  application_id uuid,                 -- kept for tracing; the row is gone
+  reason         text not null default 'retention',
+  queued_at      timestamptz not null default now(),
+  attempts       smallint not null default 0,
+  last_error     text,
+  deleted_at     timestamptz
+);
+
+create index if not exists storage_purge_pending_idx
+  on public.storage_purge_queue (queued_at)
+  where deleted_at is null;
+
+create unique index if not exists storage_purge_path_idx
+  on public.storage_purge_queue (bucket_id, storage_path)
+  where deleted_at is null;
+
+alter table public.storage_purge_queue enable row level security;
+
+-- Oversight roles may read it; nobody writes it through the API.
+drop policy if exists storage_purge_read on public.storage_purge_queue;
+create policy storage_purge_read on public.storage_purge_queue for select
+  using (app.reviewer_role() in ('admin','manager','information_officer'));
+
+revoke all on public.storage_purge_queue from anon, authenticated;
+grant select on public.storage_purge_queue to authenticated;
+revoke all on sequence public.storage_purge_queue_id_seq from anon, authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 2. Retention, corrected
+-- ---------------------------------------------------------------------
+create or replace function app_private.purge_expired()
+returns integer language plpgsql security definer set search_path = '' as $$
+declare v_count integer := 0; r record;
+begin
+  for r in
+    select id from public.applications
+     where legal_hold = false and purge_after is not null and purge_after < current_date
+  loop
+    -- Queue the files. storage.objects cannot be deleted from SQL, and
+    -- attempting it aborts this entire function.
+    insert into public.storage_purge_queue (bucket_id, storage_path, application_id, reason)
+    select 'applicant-documents', d.storage_path, d.application_id, 'retention'
+      from public.application_documents d
+     where d.application_id = r.id
+    on conflict do nothing;
+
+    delete from public.applications where id = r.id;
+    v_count := v_count + 1;
+  end loop;
+
+  -- Abandoned drafts: no submission within 90 days of the intake closing.
+  insert into public.storage_purge_queue (bucket_id, storage_path, application_id, reason)
+  select 'applicant-documents', d.storage_path, d.application_id, 'abandoned_draft'
+    from public.application_documents d
+    join public.applications a on a.id = d.application_id
+    join public.intakes i on i.id = a.intake_id
+   where a.status = 'draft' and a.legal_hold = false
+     and i.closes_at < now() - interval '90 days'
+  on conflict do nothing;
+
+  delete from public.applications a
+   using public.intakes i
+   where a.intake_id = i.id and a.status = 'draft'
+     and i.closes_at < now() - interval '90 days' and a.legal_hold = false;
+
+  -- Audit logs are kept for three years, then aged out.
+  delete from public.pii_access_log where occurred_at < now() - interval '3 years';
+
+  insert into public.application_events (event, detail)
+  values ('retention_purge', jsonb_build_object(
+            'applications_deleted', v_count,
+            'files_queued', (select count(*) from public.storage_purge_queue
+                              where deleted_at is null)));
+
+  return v_count;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 3. Cleaning up after a withdrawn or edited draft
+--
+-- When an applicant removes a document the client deletes the object
+-- through the Storage API, which is allowed. This trigger covers the
+-- other paths — a cascade, an admin correction — where the row goes but
+-- nothing called the API.
+-- ---------------------------------------------------------------------
+create or replace function app_private.queue_document_file()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  insert into public.storage_purge_queue (bucket_id, storage_path, application_id, reason)
+  values ('applicant-documents', old.storage_path, old.application_id, 'row_deleted')
+  on conflict do nothing;
+  return old;
+end;
+$$;
+
+drop trigger if exists application_documents_queue_file on public.application_documents;
+create trigger application_documents_queue_file
+  after delete on public.application_documents
+  for each row execute function app_private.queue_document_file();
+
+
+-- ---------------------------------------------------------------------
+-- 4. Oversight
+--
+-- If the worker stops, this is where it shows. A queue that only grows
+-- means files ACTOM has undertaken to delete are still sitting in the
+-- bucket — worth a monitor, not a quarterly discovery.
+-- ---------------------------------------------------------------------
+create or replace view public.v_storage_purge_status as
+select
+  count(*) filter (where deleted_at is null)                        as pending,
+  count(*) filter (where deleted_at is not null)                    as deleted,
+  count(*) filter (where deleted_at is null and attempts >= 3)      as failing,
+  min(queued_at) filter (where deleted_at is null)                  as oldest_pending,
+  max(deleted_at)                                                   as last_success
+  from public.storage_purge_queue;
+
+grant select on public.v_storage_purge_status to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 5. Marking work done
+--
+-- Called by the worker once the Storage API has confirmed a delete.
+-- ---------------------------------------------------------------------
+create or replace function public.mark_storage_purged(p_ids bigint[])
+returns integer language plpgsql security definer set search_path = '' as $$
+declare v integer;
+begin
+  if app.reviewer_role() is distinct from 'admin'
+     and current_user not in ('postgres', 'service_role') then
+    raise exception 'Not authorised.';
+  end if;
+  update public.storage_purge_queue
+     set deleted_at = now(), last_error = null
+   where id = any(p_ids) and deleted_at is null;
+  get diagnostics v = row_count;
+  return v;
+end;
+$$;
+
+create or replace function public.record_storage_purge_error(p_id bigint, p_error text)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  update public.storage_purge_queue
+     set attempts = attempts + 1, last_error = left(coalesce(p_error, ''), 400)
+   where id = p_id;
+end;
+$$;
+
+grant execute on function public.mark_storage_purged(bigint[]) to authenticated;
+grant execute on function public.record_storage_purge_error(bigint, text) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 6. Backfill
+--
+-- Any application already past its retention date has been sitting there
+-- because the purge could not complete. Run it now that it can.
+-- ---------------------------------------------------------------------
+do $$
+declare n integer;
+begin
+  n := app_private.purge_expired();
+  raise notice 'Purge run: % application(s) deleted, % file(s) pending removal.',
+    n, (select count(*) from public.storage_purge_queue where deleted_at is null);
+end $$;
+
+
+-- ---------------------------------------------------------------------
+-- What still needs doing OUTSIDE the database
+--
+-- A worker must empty the queue. Deploy a Supabase Edge Function on a
+-- schedule (or a Netlify scheduled function) that:
+--
+--   1. selects id, bucket_id, storage_path
+--        from storage_purge_queue where deleted_at is null limit 100
+--   2. calls storage.from(bucket).remove([paths]) with the SERVICE ROLE key
+--   3. calls mark_storage_purged(ids) for those that succeeded,
+--      record_storage_purge_error(id, message) for those that did not
+--
+-- Until that exists the files remain in the bucket. The database rows are
+-- gone, so no reviewer can reach them, but the objects are still stored —
+-- which is not what "deleted after 12 months" means to an applicant or to
+-- the Information Regulator. Treat the worker as part of go-live, not as
+-- a follow-up.
+--
+-- Monitor with:  select * from public.v_storage_purge_status;
+-- ---------------------------------------------------------------------
+
+
+-- ============================================================
+--  SECTION 14 — 007-apprentice-register.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1. 'enrolled' becomes a valid application status
+-- ---------------------------------------------------------------------
+alter table public.applications drop constraint if exists applications_status_check;
+alter table public.applications add constraint applications_status_check
+  check (status in ('draft','submitted','under_review','shortlisted',
+                    'declined','withdrawn','enrolled'));
+
+
+-- ---------------------------------------------------------------------
+-- 2. The register
+-- ---------------------------------------------------------------------
+create table if not exists public.apprentices (
+  id                 uuid primary key default gen_random_uuid(),
+
+  -- One apprentice per application. The application is the identity
+  -- record; this is the employment record built on top of it.
+  application_id     uuid not null unique
+                     references public.applications(id) on delete restrict,
+  intake_id          uuid not null references public.intakes(id),
+  trade_id           uuid not null references public.trades(id),
+
+  -- Denormalised for the register view only. The authoritative name is
+  -- on the application; this exists so the register still reads sensibly
+  -- if a name is later corrected, and so the list does not need a join
+  -- to the identity record to render.
+  full_name          text not null,
+
+  employee_number    text,
+  seta_learner_number text,
+
+  start_date         date not null,
+  expected_end_date  date,
+  contract_signed_on date,
+
+  site               text,          -- where they are based
+  supervisor         text,          -- mentoring artisan or foreman
+
+  status             text not null default 'active'
+                     check (status in ('active','completed','withdrawn','terminated','transferred')),
+  ended_on           date,
+  end_reason         text,
+
+  trade_test_date    date,
+  trade_test_result  text check (trade_test_result in ('passed','failed','pending')),
+
+  notes              text,
+
+  enrolled_by        uuid references auth.users(id),
+  enrolled_at        timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+
+  -- An apprenticeship that ended must say when and why.
+  constraint apprentices_end_recorded check (
+    status in ('active','completed')
+    or (ended_on is not null and end_reason is not null)
+  )
+);
+
+create index if not exists apprentices_status_idx on public.apprentices(status);
+create index if not exists apprentices_trade_idx  on public.apprentices(trade_id);
+create index if not exists apprentices_intake_idx on public.apprentices(intake_id);
+
+create or replace function app_private.touch_apprentice()
+returns trigger language plpgsql as $$
+begin new.updated_at := now(); return new; end;
+$$;
+drop trigger if exists apprentices_touch on public.apprentices;
+create trigger apprentices_touch before update on public.apprentices
+  for each row execute function app_private.touch_apprentice();
+
+
+-- ---------------------------------------------------------------------
+-- 3. Enrol
+--
+-- Only from 'shortlisted': enrolment is the end of a review, not a
+-- shortcut past it. Sets legal_hold so retention leaves the record
+-- alone, and writes an audit entry — this is the moment a person is
+-- taken on, and it should be attributable.
+-- ---------------------------------------------------------------------
+create or replace function public.enrol_applicant(
+  p_application       uuid,
+  p_start_date        date,
+  p_employee_number   text default null,
+  p_seta_number       text default null,
+  p_site              text default null,
+  p_supervisor        text default null,
+  p_contract_signed   date default null,
+  p_expected_end      date default null,
+  p_notes             text default null)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare a record; v_id uuid; v_end date;
+begin
+  if app.reviewer_role() not in ('admin','manager') then
+    raise exception 'Only a manager or administrator can enrol an apprentice.';
+  end if;
+
+  select * into a from public.applications where id = p_application;
+  if a.id is null then raise exception 'Application not found.'; end if;
+
+  if exists (select 1 from public.apprentices where application_id = p_application) then
+    return jsonb_build_object('ok', false,
+      'reason', 'This applicant is already on the register.');
+  end if;
+
+  if a.status <> 'shortlisted' then
+    return jsonb_build_object('ok', false,
+      'reason', 'Only a shortlisted applicant can be enrolled. This one is ' || a.status || '.');
+  end if;
+
+  if p_start_date is null then
+    return jsonb_build_object('ok', false, 'reason', 'A start date is required.');
+  end if;
+
+  -- Apprenticeships run three years unless told otherwise.
+  v_end := coalesce(p_expected_end, p_start_date + interval '3 years');
+
+  insert into public.apprentices (
+    application_id, intake_id, trade_id, full_name,
+    employee_number, seta_learner_number,
+    start_date, expected_end_date, contract_signed_on,
+    site, supervisor, notes, enrolled_by)
+  values (
+    a.id, a.intake_id, a.trade_id, a.full_name,
+    nullif(btrim(coalesce(p_employee_number,'')), ''),
+    nullif(btrim(coalesce(p_seta_number,'')), ''),
+    p_start_date, v_end, p_contract_signed,
+    nullif(btrim(coalesce(p_site,'')), ''),
+    nullif(btrim(coalesce(p_supervisor,'')), ''),
+    nullif(btrim(coalesce(p_notes,'')), ''),
+    auth.uid())
+  returning id into v_id;
+
+  -- The application becomes an employment record. legal_hold keeps the
+  -- retention job away from it; purge_after is cleared so nothing later
+  -- misreads it as due for deletion.
+  update public.applications
+     set status = 'enrolled', legal_hold = true, purge_after = null
+   where id = a.id;
+
+  insert into public.application_events
+    (application_id, actor_id, event, from_status, to_status, detail)
+  values (a.id, auth.uid(), 'enrolled', 'shortlisted', 'enrolled',
+          jsonb_build_object('apprentice_id', v_id, 'start_date', p_start_date));
+
+  insert into public.pii_access_log (actor_id, actor_email, application_id, action, detail)
+  values (auth.uid(), auth.jwt() ->> 'email', a.id, 'enrol',
+          'Enrolled as an apprentice, starting ' || p_start_date);
+
+  return jsonb_build_object('ok', true, 'apprentice_id', v_id, 'expected_end', v_end);
+end;
+$$;
+grant execute on function public.enrol_applicant(uuid, date, text, text, text, text, date, date, text)
+  to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 4. Update a register entry
+-- ---------------------------------------------------------------------
+create or replace function public.update_apprentice(
+  p_id            uuid,
+  p_status        text default null,
+  p_ended_on      date default null,
+  p_end_reason    text default null,
+  p_trade_test_date date default null,
+  p_trade_test_result text default null,
+  p_employee_number text default null,
+  p_seta_number   text default null,
+  p_site          text default null,
+  p_supervisor    text default null,
+  p_notes         text default null)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare r record;
+begin
+  if app.reviewer_role() not in ('admin','manager') then
+    raise exception 'Only a manager or administrator can change the register.';
+  end if;
+
+  select * into r from public.apprentices where id = p_id;
+  if r.id is null then raise exception 'Not on the register.'; end if;
+
+  if p_status is not null and p_status not in ('active','completed') then
+    if p_ended_on is null or btrim(coalesce(p_end_reason,'')) = '' then
+      return jsonb_build_object('ok', false,
+        'reason', 'Ending an apprenticeship needs both a date and a reason.');
+    end if;
+  end if;
+
+  update public.apprentices set
+    status            = coalesce(p_status, status),
+    ended_on          = coalesce(p_ended_on, ended_on),
+    end_reason        = coalesce(nullif(btrim(coalesce(p_end_reason,'')),''), end_reason),
+    trade_test_date   = coalesce(p_trade_test_date, trade_test_date),
+    trade_test_result = coalesce(p_trade_test_result, trade_test_result),
+    employee_number   = coalesce(nullif(btrim(coalesce(p_employee_number,'')),''), employee_number),
+    seta_learner_number = coalesce(nullif(btrim(coalesce(p_seta_number,'')),''), seta_learner_number),
+    site              = coalesce(nullif(btrim(coalesce(p_site,'')),''), site),
+    supervisor        = coalesce(nullif(btrim(coalesce(p_supervisor,'')),''), supervisor),
+    notes             = coalesce(nullif(btrim(coalesce(p_notes,'')),''), notes)
+  where id = p_id;
+
+  insert into public.application_events (application_id, actor_id, event, detail)
+  values (r.application_id, auth.uid(), 'apprentice_updated',
+          jsonb_build_object('apprentice_id', p_id, 'status', coalesce(p_status, r.status)));
+
+  return jsonb_build_object('ok', true);
+end;
+$$;
+grant execute on function public.update_apprentice(uuid, text, date, text, date, text, text, text, text, text, text)
+  to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 5. Removing someone from the register
+--
+-- Deliberately restricted to admin, and it releases the legal hold so
+-- the application returns to the normal retention path. Used when
+-- someone was enrolled in error, not when they leave — leaving is a
+-- status change, and the record stays.
+-- ---------------------------------------------------------------------
+create or replace function public.unenrol_apprentice(p_id uuid, p_reason text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare r record; v_close timestamptz; v_months smallint;
+begin
+  if app.reviewer_role() <> 'admin' then
+    raise exception 'Only an administrator can remove someone from the register.';
+  end if;
+  if btrim(coalesce(p_reason,'')) = '' then
+    raise exception 'A reason is required.';
+  end if;
+
+  select * into r from public.apprentices where id = p_id;
+  if r.id is null then raise exception 'Not on the register.'; end if;
+
+  delete from public.apprentices where id = p_id;
+
+  select i.closes_at, i.retention_months into v_close, v_months
+    from public.intakes i where i.id = r.intake_id;
+
+  update public.applications
+     set status = 'shortlisted', legal_hold = false,
+         purge_after = (v_close + (coalesce(v_months,12) || ' months')::interval)::date
+   where id = r.application_id;
+
+  insert into public.application_events (application_id, actor_id, event, detail)
+  values (r.application_id, auth.uid(), 'unenrolled',
+          jsonb_build_object('reason', btrim(p_reason)));
+end;
+$$;
+grant execute on function public.unenrol_apprentice(uuid, text) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 6. The register view
+--
+-- Joins in the trade and intake names so the console does not need to,
+-- and exposes nothing from the application beyond what a register needs.
+-- No ID number, encrypted or otherwise.
+-- ---------------------------------------------------------------------
+create or replace view public.v_apprentice_register as
+select
+  ap.id, ap.application_id, ap.full_name,
+  ap.employee_number, ap.seta_learner_number,
+  t.name  as trade, t.division,
+  i.name  as intake,
+  ap.start_date, ap.expected_end_date, ap.contract_signed_on,
+  ap.site, ap.supervisor,
+  ap.status, ap.ended_on, ap.end_reason,
+  ap.trade_test_date, ap.trade_test_result,
+  ap.notes, ap.enrolled_at,
+  a.reference,
+  a.contact_number, a.email,
+  case
+    when ap.status <> 'active' then null
+    when ap.expected_end_date is null then null
+    else greatest(0, (ap.expected_end_date - current_date))
+  end as days_remaining,
+  case
+    when ap.expected_end_date is null or ap.start_date is null then null
+    else least(100, greatest(0, round(
+      (current_date - ap.start_date)::numeric
+      / nullif((ap.expected_end_date - ap.start_date), 0) * 100)))
+  end as progress_pct
+from public.apprentices ap
+  join public.trades   t on t.id = ap.trade_id
+  join public.intakes  i on i.id = ap.intake_id
+  join public.applications a on a.id = ap.application_id;
+
+grant select on public.v_apprentice_register to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 7. RLS
+-- ---------------------------------------------------------------------
+alter table public.apprentices enable row level security;
+
+drop policy if exists apprentices_read on public.apprentices;
+create policy apprentices_read on public.apprentices for select
+  using (app.is_reviewer() and app.can_see_trade(trade_id));
+
+-- Writes go through the RPCs above, which check the role. No direct
+-- insert or update policy, deliberately.
+grant select on public.apprentices to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 8. Retention must never touch an enrolled record
+--
+-- Belt and braces on top of legal_hold: an explicit exclusion, so a
+-- future change that clears legal_hold by accident still cannot delete
+-- someone who is on the register.
+-- ---------------------------------------------------------------------
+create or replace function app_private.purge_expired()
+returns integer language plpgsql security definer set search_path = '' as $$
+declare v_count integer := 0; r record;
+begin
+  for r in
+    select id from public.applications
+     where legal_hold = false
+       and status <> 'enrolled'
+       and not exists (select 1 from public.apprentices ap where ap.application_id = id)
+       and purge_after is not null and purge_after < current_date
+  loop
+    insert into public.storage_purge_queue (bucket_id, storage_path, application_id, reason)
+    select 'applicant-documents', d.storage_path, d.application_id, 'retention'
+      from public.application_documents d
+     where d.application_id = r.id
+    on conflict do nothing;
+
+    delete from public.applications where id = r.id;
+    v_count := v_count + 1;
+  end loop;
+
+  insert into public.storage_purge_queue (bucket_id, storage_path, application_id, reason)
+  select 'applicant-documents', d.storage_path, d.application_id, 'abandoned_draft'
+    from public.application_documents d
+    join public.applications a on a.id = d.application_id
+    join public.intakes i on i.id = a.intake_id
+   where a.status = 'draft' and a.legal_hold = false
+     and i.closes_at < now() - interval '90 days'
+  on conflict do nothing;
+
+  delete from public.applications a
+   using public.intakes i
+   where a.intake_id = i.id and a.status = 'draft'
+     and i.closes_at < now() - interval '90 days' and a.legal_hold = false;
+
+  delete from public.pii_access_log where occurred_at < now() - interval '3 years';
+
+  insert into public.application_events (event, detail)
+  values ('retention_purge', jsonb_build_object(
+            'applications_deleted', v_count,
+            'files_queued', (select count(*) from public.storage_purge_queue
+                              where deleted_at is null)));
+
+  return v_count;
+end;
+$$;
+
+
+-- ============================================================
+--  SECTION 15 — 007-no-empty-published-revision.sql
+-- ============================================================
+
+create or replace function publish_template_revision(p_rev uuid)
+returns jsonb language plpgsql security invoker as $$
+declare
+  v_tpl uuid; v_author uuid; v_rev smallint; v_require boolean;
+  v_rows int; v_fields int;
+begin
+  if not has_role('quality_manager', 'sysadmin') then
+    raise exception 'PUBLISH_ROLE: only a Quality Manager or System Administrator may publish a template';
+  end if;
+
+  select template_id, created_by, rev into v_tpl, v_author, v_rev
+    from template_revisions where id = p_rev;
+  if v_tpl is null then raise exception 'PUBLISH_MISSING: revision not found'; end if;
+
+  -- Count answerable fields. Sections and instructions are not questions.
+  select count(*) into v_fields
+    from template_revisions tr,
+         jsonb_array_elements(tr.definition->'sections') s,
+         jsonb_array_elements(s->'items') f
+   where tr.id = p_rev
+     and coalesce(f->>'type', '') not in ('section', 'info');
+
+  if coalesce(v_fields, 0) = 0 then
+    raise exception 'PUBLISH_EMPTY: this revision has no questions on it. An inspection generated from it could not be filled in.';
+  end if;
+
+  select require_second_approver into v_require from division_profile where id;
+
+  if coalesce(v_require, false) and v_author = auth.uid() then
+    raise exception 'PUBLISH_SELF: this division requires a second approver, so the person who built a template cannot publish it.';
+  end if;
+
+  update template_revisions
+     set status = 'superseded'
+   where template_id = v_tpl and status = 'published';
+
+  update template_revisions
+     set status = 'published',
+         approved_by = auth.uid(),
+         effective_from = current_date
+   where id = p_rev;
+
+  get diagnostics v_rows = row_count;
+  if v_rows = 0 then
+    raise exception 'PUBLISH_BLOCKED: row level security prevented the update. Your role may not edit this revision.';
+  end if;
+
+  return jsonb_build_object('template_id', v_tpl, 'rev', v_rev, 'status', 'published',
+                            'fields', v_fields,
+                            'self_approved', v_author = auth.uid());
+end $$;
+
+grant execute on function publish_template_revision to authenticated;
+
+-- ------------------------------------------------------------
+--  Anything already published empty is a live trap: it will keep
+--  generating unfillable inspections. Report them so they can be dealt
+--  with, rather than changing status underneath a running division.
+-- ------------------------------------------------------------
+do $$
+declare r record; n int := 0;
+begin
+  for r in
+    select t.code, tr.rev
+      from template_revisions tr
+      join inspection_templates t on t.id = tr.template_id
+     where tr.status = 'published'
+       and (select count(*)
+              from jsonb_array_elements(tr.definition->'sections') s,
+                   jsonb_array_elements(s->'items') f
+             where coalesce(f->>'type','') not in ('section','info')) = 0
+  loop
+    n := n + 1;
+    raise warning 'Published revision with no questions: % rev % — inspections generated from it cannot be filled in.', r.code, r.rev;
+  end loop;
+  if n > 0 then
+    raise warning '% published revision(s) have no questions. Add fields, publish a new revision, and move any unstarted inspections onto it.', n;
+  end if;
+end $$;
+
+
+-- ============================================================
+--  SECTION 16 — 007-no-empty-templates.sql
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -1234,7 +3536,7 @@ grant execute on function publish_template_revision(uuid) to authenticated;
 
 
 -- ============================================================
---  SECTION 8 — 008-fault-list.sql
+--  SECTION 17 — 008-fault-list.sql
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -1435,7 +3737,933 @@ grant execute on function submit_inspection(uuid, text) to authenticated;
 
 
 -- ============================================================
---  SECTION 9 — 009-photo-storage.sql
+--  SECTION 18 — 008-fix-role-guard.min.sql
+-- ============================================================
+
+create or replace function app.require_role(variadic p_roles text[])
+returns void language plpgsql stable security definer set search_path = '' as $$
+declare v_role text;
+begin
+  v_role := app.reviewer_role();          -- NULL when not an active reviewer
+
+  -- coalesce first: comparing NULL to anything yields NULL, and a NULL
+  -- condition means the guard silently does nothing.
+  if coalesce(v_role, '') <> all (p_roles) then
+    raise exception 'Not authorised. This action needs one of: %.', array_to_string(p_roles, ', ')
+      using errcode = 'insufficient_privilege';
+  end if;
+end;
+$$;
+revoke all on function app.require_role(text[]) from anon;
+grant execute on function app.require_role(text[]) to authenticated;
+create or replace function public.publish_intake(p_intake uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare i record; v_problems text[] := '{}'; v_trades int; v_docs int;
+begin
+  perform app.require_role('admin','manager');
+
+  select * into i from public.intakes where id = p_intake;
+  if i.id is null then raise exception 'Intake not found.'; end if;
+  if i.status <> 'draft' then
+    return jsonb_build_object('ok', false, 'problems',
+      array['This intake has already been published.']);
+  end if;
+
+  select count(*) into v_trades from public.intake_trades
+   where intake_id = p_intake and active;
+  if v_trades = 0 then v_problems := array_append(v_problems, 'No trades are switched on.'); end if;
+
+  select count(*) into v_docs from public.intake_documents
+   where intake_id = p_intake and doc_type = 'id_document';
+  if v_docs = 0 then
+    v_problems := array_append(v_problems, 'The ID document requirement is missing.');
+  end if;
+
+  if i.closes_at <= now() then
+    v_problems := array_append(v_problems, 'The closing date is in the past.');
+  end if;
+  if i.closes_at <= i.opens_at then
+    v_problems := array_append(v_problems, 'The closing date is not after the opening date.');
+  end if;
+  if not exists (select 1 from public.consent_versions
+                  where version = i.consent_version and audience = 'applicant' and active) then
+    v_problems := array_append(v_problems, 'The selected consent wording does not exist.');
+  end if;
+
+  if i.scoring_enabled and exists (
+      select 1 from public.intake_trades it
+       where it.intake_id = p_intake and it.active
+         and not exists (select 1 from public.intake_trade_subjects its
+                          where its.intake_id = p_intake and its.trade_id = it.trade_id)) then
+    v_problems := array_append(v_problems,
+      'Scoring is on, but one or more active trades have no subjects set.');
+  end if;
+
+  if array_length(v_problems, 1) > 0 then
+    return jsonb_build_object('ok', false, 'problems', v_problems);
+  end if;
+
+  update public.intakes
+     set status = 'open', published_at = now(), published_by = auth.uid()
+   where id = p_intake;
+
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_published',
+          jsonb_build_object('intake_id', p_intake, 'name', i.name));
+
+  return jsonb_build_object('ok', true);
+end;
+$$;
+create or replace function public.close_intake(p_intake uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  perform app.require_role('admin','manager');
+  update public.intakes set status = 'closed', closed_at = now(), closes_at = least(closes_at, now())
+   where id = p_intake and status = 'open';
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_closed', jsonb_build_object('intake_id', p_intake));
+end;
+$$;
+create or replace function public.clone_intake(p_intake uuid, p_name text)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare v_new uuid;
+begin
+  perform app.require_role('admin','manager');
+
+  insert into public.intakes (name, opens_at, closes_at, status, retention_months,
+                              show_further_study, show_technical, intro_heading, intro_body,
+                              closed_message, consent_version, max_upload_mb,
+                              scoring_enabled, auto_flag_below)
+  select p_name, now(), now() + interval '60 days', 'draft', retention_months,
+         show_further_study, show_technical, intro_heading, intro_body,
+         closed_message, consent_version, max_upload_mb,
+         scoring_enabled, auto_flag_below
+    from public.intakes where id = p_intake
+  returning id into v_new;
+
+  insert into public.intake_trades (intake_id, trade_id, positions, active,
+                                    label_override, sort_order, min_score, notes)
+  select v_new, trade_id, positions, active, label_override, sort_order, min_score, notes
+    from public.intake_trades where intake_id = p_intake;
+
+  insert into public.intake_trade_subjects (intake_id, trade_id, subject_id, stream,
+                                            required, min_mark, weight, sort_order)
+  select v_new, trade_id, subject_id, stream, required, min_mark, weight, sort_order
+    from public.intake_trade_subjects where intake_id = p_intake;
+
+  insert into public.intake_documents (intake_id, doc_type, label, hint, required,
+                                       max_files, visible, sort_order)
+  select v_new, doc_type, label, hint, required, max_files, visible, sort_order
+    from public.intake_documents where intake_id = p_intake;
+
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_cloned',
+          jsonb_build_object('from', p_intake, 'to', v_new, 'name', p_name));
+
+  return v_new;
+end;
+$$;
+create or replace function public.save_trade_subjects(
+  p_intake uuid, p_trade uuid, p_rows jsonb)
+returns integer language plpgsql security definer set search_path = '' as $$
+declare r jsonb; v_count integer := 0;
+begin
+  perform app.require_role('admin','manager');
+
+  if not app_private.intake_is_editable(p_intake) then
+    raise exception 'This intake has been published. Its form can no longer be changed.';
+  end if;
+
+  delete from public.intake_trade_subjects
+   where intake_id = p_intake and trade_id = p_trade;
+
+  for r in select * from jsonb_array_elements(p_rows) loop
+    insert into public.intake_trade_subjects
+      (intake_id, trade_id, subject_id, stream, required, min_mark, weight, sort_order)
+    values (p_intake, p_trade, (r->>'subject_id')::uuid, r->>'stream',
+            coalesce((r->>'required')::boolean, false),
+            nullif(r->>'min_mark','')::smallint,
+            coalesce((r->>'weight')::smallint, 1),
+            coalesce((r->>'sort_order')::smallint, 100));
+    v_count := v_count + 1;
+  end loop;
+
+  return v_count;
+end;
+$$;
+create or replace function public.mark_storage_purged(p_ids bigint[])
+returns integer language plpgsql security definer set search_path = '' as $$
+declare v integer;
+begin
+  -- The worker connects as service_role, which bypasses this path; a
+  -- human calling it must be an administrator.
+  if current_user not in ('postgres', 'service_role') then
+    perform app.require_role('admin');
+  end if;
+  update public.storage_purge_queue
+     set deleted_at = now(), last_error = null
+   where id = any(p_ids) and deleted_at is null;
+  get diagnostics v = row_count;
+  return v;
+end;
+$$;
+create or replace function public.enrol_applicant(
+  p_application       uuid,
+  p_start_date        date,
+  p_employee_number   text default null,
+  p_seta_number       text default null,
+  p_site              text default null,
+  p_supervisor        text default null,
+  p_contract_signed   date default null,
+  p_expected_end      date default null,
+  p_notes             text default null)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare a record; v_id uuid; v_end date;
+begin
+  perform app.require_role('admin','manager');
+
+  select * into a from public.applications where id = p_application;
+  if a.id is null then raise exception 'Application not found.'; end if;
+
+  if exists (select 1 from public.apprentices where application_id = p_application) then
+    return jsonb_build_object('ok', false,
+      'reason', 'This applicant is already on the register.');
+  end if;
+
+  if a.status <> 'shortlisted' then
+    return jsonb_build_object('ok', false,
+      'reason', 'Only a shortlisted applicant can be enrolled. This one is ' || a.status || '.');
+  end if;
+
+  if p_start_date is null then
+    return jsonb_build_object('ok', false, 'reason', 'A start date is required.');
+  end if;
+
+  v_end := coalesce(p_expected_end, p_start_date + interval '3 years');
+
+  insert into public.apprentices (
+    application_id, intake_id, trade_id, full_name,
+    employee_number, seta_learner_number,
+    start_date, expected_end_date, contract_signed_on,
+    site, supervisor, notes, enrolled_by)
+  values (
+    a.id, a.intake_id, a.trade_id, a.full_name,
+    nullif(btrim(coalesce(p_employee_number,'')), ''),
+    nullif(btrim(coalesce(p_seta_number,'')), ''),
+    p_start_date, v_end, p_contract_signed,
+    nullif(btrim(coalesce(p_site,'')), ''),
+    nullif(btrim(coalesce(p_supervisor,'')), ''),
+    nullif(btrim(coalesce(p_notes,'')), ''),
+    auth.uid())
+  returning id into v_id;
+
+  update public.applications
+     set status = 'enrolled', legal_hold = true, purge_after = null
+   where id = a.id;
+
+  insert into public.application_events
+    (application_id, actor_id, event, from_status, to_status, detail)
+  values (a.id, auth.uid(), 'enrolled', 'shortlisted', 'enrolled',
+          jsonb_build_object('apprentice_id', v_id, 'start_date', p_start_date));
+
+  insert into public.pii_access_log (actor_id, actor_email, application_id, action, detail)
+  values (auth.uid(), auth.jwt() ->> 'email', a.id, 'enrol',
+          'Enrolled as an apprentice, starting ' || p_start_date);
+
+  return jsonb_build_object('ok', true, 'apprentice_id', v_id, 'expected_end', v_end);
+end;
+$$;
+create or replace function public.update_apprentice(
+  p_id            uuid,
+  p_status        text default null,
+  p_ended_on      date default null,
+  p_end_reason    text default null,
+  p_trade_test_date date default null,
+  p_trade_test_result text default null,
+  p_employee_number text default null,
+  p_seta_number   text default null,
+  p_site          text default null,
+  p_supervisor    text default null,
+  p_notes         text default null)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare r record;
+begin
+  perform app.require_role('admin','manager');
+
+  select * into r from public.apprentices where id = p_id;
+  if r.id is null then raise exception 'Not on the register.'; end if;
+
+  if p_status is not null and p_status not in ('active','completed') then
+    if p_ended_on is null or btrim(coalesce(p_end_reason,'')) = '' then
+      return jsonb_build_object('ok', false,
+        'reason', 'Ending an apprenticeship needs both a date and a reason.');
+    end if;
+  end if;
+
+  update public.apprentices set
+    status            = coalesce(p_status, status),
+    ended_on          = coalesce(p_ended_on, ended_on),
+    end_reason        = coalesce(nullif(btrim(coalesce(p_end_reason,'')),''), end_reason),
+    trade_test_date   = coalesce(p_trade_test_date, trade_test_date),
+    trade_test_result = coalesce(p_trade_test_result, trade_test_result),
+    employee_number   = coalesce(nullif(btrim(coalesce(p_employee_number,'')),''), employee_number),
+    seta_learner_number = coalesce(nullif(btrim(coalesce(p_seta_number,'')),''), seta_learner_number),
+    site              = coalesce(nullif(btrim(coalesce(p_site,'')),''), site),
+    supervisor        = coalesce(nullif(btrim(coalesce(p_supervisor,'')),''), supervisor),
+    notes             = coalesce(nullif(btrim(coalesce(p_notes,'')),''), notes)
+  where id = p_id;
+
+  insert into public.application_events (application_id, actor_id, event, detail)
+  values (r.application_id, auth.uid(), 'apprentice_updated',
+          jsonb_build_object('apprentice_id', p_id, 'status', coalesce(p_status, r.status)));
+
+  return jsonb_build_object('ok', true);
+end;
+$$;
+create or replace function public.unenrol_apprentice(p_id uuid, p_reason text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare r record; v_close timestamptz; v_months smallint;
+begin
+  perform app.require_role('admin');
+
+  if btrim(coalesce(p_reason,'')) = '' then
+    raise exception 'A reason is required.';
+  end if;
+
+  select * into r from public.apprentices where id = p_id;
+  if r.id is null then raise exception 'Not on the register.'; end if;
+
+  delete from public.apprentices where id = p_id;
+
+  select i.closes_at, i.retention_months into v_close, v_months
+    from public.intakes i where i.id = r.intake_id;
+
+  update public.applications
+     set status = 'shortlisted', legal_hold = false,
+         purge_after = (v_close + (coalesce(v_months,12) || ' months')::interval)::date
+   where id = r.application_id;
+
+  insert into public.application_events (application_id, actor_id, event, detail)
+  values (r.application_id, auth.uid(), 'unenrolled',
+          jsonb_build_object('reason', btrim(p_reason)));
+end;
+$$;
+create or replace function app.has_role(variadic p_roles text[])
+returns boolean language sql stable security definer set search_path = '' as $$
+  select coalesce(app.reviewer_role(), '') = any (p_roles);
+$$;
+grant execute on function app.has_role(text[]) to authenticated;
+drop policy if exists pii_log_read on public.pii_access_log;
+create policy pii_log_read on public.pii_access_log for select
+  using (app.has_role('admin','manager','information_officer'));
+drop policy if exists storage_purge_read on public.storage_purge_queue;
+create policy storage_purge_read on public.storage_purge_queue for select
+  using (app.has_role('admin','manager','information_officer'));
+drop policy if exists reviewer_admin_update on public.reviewer_profiles;
+create policy reviewer_admin_update on public.reviewer_profiles for update
+  using (app.has_role('admin')) with check (app.has_role('admin'));
+drop policy if exists its_write on public.intake_trade_subjects;
+create policy its_write on public.intake_trade_subjects for all
+  using (app.has_role('admin','manager')) with check (app.has_role('admin','manager'));
+drop policy if exists intake_docs_write on public.intake_documents;
+create policy intake_docs_write on public.intake_documents for all
+  using (app.has_role('admin','manager')) with check (app.has_role('admin','manager'));
+drop policy if exists intakes_write on public.intakes;
+create policy intakes_write on public.intakes for all
+  using (app.has_role('admin','manager')) with check (app.has_role('admin','manager'));
+drop policy if exists intake_trades_write on public.intake_trades;
+create policy intake_trades_write on public.intake_trades for all
+  using (app.has_role('admin','manager')) with check (app.has_role('admin','manager'));
+drop policy if exists trades_write on public.trades;
+create policy trades_write on public.trades for all
+  using (app.has_role('admin','manager')) with check (app.has_role('admin','manager'));
+drop policy if exists subjects_write on public.subjects;
+create policy subjects_write on public.subjects for all
+  using (app.has_role('admin','manager')) with check (app.has_role('admin','manager'));
+
+
+-- ============================================================
+--  SECTION 19 — 008-fix-role-guard.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1. The helper
+-- ---------------------------------------------------------------------
+create or replace function app.require_role(variadic p_roles text[])
+returns void language plpgsql stable security definer set search_path = '' as $$
+declare v_role text;
+begin
+  v_role := app.reviewer_role();          -- NULL when not an active reviewer
+
+  -- coalesce first: comparing NULL to anything yields NULL, and a NULL
+  -- condition means the guard silently does nothing.
+  if coalesce(v_role, '') <> all (p_roles) then
+    raise exception 'Not authorised. This action needs one of: %.', array_to_string(p_roles, ', ')
+      using errcode = 'insufficient_privilege';
+  end if;
+end;
+$$;
+
+revoke all on function app.require_role(text[]) from anon;
+grant execute on function app.require_role(text[]) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 2. Every affected function, re-guarded
+-- ---------------------------------------------------------------------
+
+-- 002: intake configuration -------------------------------------------
+create or replace function public.publish_intake(p_intake uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare i record; v_problems text[] := '{}'; v_trades int; v_docs int;
+begin
+  perform app.require_role('admin','manager');
+
+  select * into i from public.intakes where id = p_intake;
+  if i.id is null then raise exception 'Intake not found.'; end if;
+  if i.status <> 'draft' then
+    return jsonb_build_object('ok', false, 'problems',
+      array['This intake has already been published.']);
+  end if;
+
+  select count(*) into v_trades from public.intake_trades
+   where intake_id = p_intake and active;
+  if v_trades = 0 then v_problems := array_append(v_problems, 'No trades are switched on.'); end if;
+
+  select count(*) into v_docs from public.intake_documents
+   where intake_id = p_intake and doc_type = 'id_document';
+  if v_docs = 0 then
+    v_problems := array_append(v_problems, 'The ID document requirement is missing.');
+  end if;
+
+  if i.closes_at <= now() then
+    v_problems := array_append(v_problems, 'The closing date is in the past.');
+  end if;
+  if i.closes_at <= i.opens_at then
+    v_problems := array_append(v_problems, 'The closing date is not after the opening date.');
+  end if;
+  if not exists (select 1 from public.consent_versions
+                  where version = i.consent_version and audience = 'applicant' and active) then
+    v_problems := array_append(v_problems, 'The selected consent wording does not exist.');
+  end if;
+
+  if i.scoring_enabled and exists (
+      select 1 from public.intake_trades it
+       where it.intake_id = p_intake and it.active
+         and not exists (select 1 from public.intake_trade_subjects its
+                          where its.intake_id = p_intake and its.trade_id = it.trade_id)) then
+    v_problems := array_append(v_problems,
+      'Scoring is on, but one or more active trades have no subjects set.');
+  end if;
+
+  if array_length(v_problems, 1) > 0 then
+    return jsonb_build_object('ok', false, 'problems', v_problems);
+  end if;
+
+  update public.intakes
+     set status = 'open', published_at = now(), published_by = auth.uid()
+   where id = p_intake;
+
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_published',
+          jsonb_build_object('intake_id', p_intake, 'name', i.name));
+
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+create or replace function public.close_intake(p_intake uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  perform app.require_role('admin','manager');
+  update public.intakes set status = 'closed', closed_at = now(), closes_at = least(closes_at, now())
+   where id = p_intake and status = 'open';
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_closed', jsonb_build_object('intake_id', p_intake));
+end;
+$$;
+
+create or replace function public.clone_intake(p_intake uuid, p_name text)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare v_new uuid;
+begin
+  perform app.require_role('admin','manager');
+
+  insert into public.intakes (name, opens_at, closes_at, status, retention_months,
+                              show_further_study, show_technical, intro_heading, intro_body,
+                              closed_message, consent_version, max_upload_mb,
+                              scoring_enabled, auto_flag_below)
+  select p_name, now(), now() + interval '60 days', 'draft', retention_months,
+         show_further_study, show_technical, intro_heading, intro_body,
+         closed_message, consent_version, max_upload_mb,
+         scoring_enabled, auto_flag_below
+    from public.intakes where id = p_intake
+  returning id into v_new;
+
+  insert into public.intake_trades (intake_id, trade_id, positions, active,
+                                    label_override, sort_order, min_score, notes)
+  select v_new, trade_id, positions, active, label_override, sort_order, min_score, notes
+    from public.intake_trades where intake_id = p_intake;
+
+  insert into public.intake_trade_subjects (intake_id, trade_id, subject_id, stream,
+                                            required, min_mark, weight, sort_order)
+  select v_new, trade_id, subject_id, stream, required, min_mark, weight, sort_order
+    from public.intake_trade_subjects where intake_id = p_intake;
+
+  insert into public.intake_documents (intake_id, doc_type, label, hint, required,
+                                       max_files, visible, sort_order)
+  select v_new, doc_type, label, hint, required, max_files, visible, sort_order
+    from public.intake_documents where intake_id = p_intake;
+
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_cloned',
+          jsonb_build_object('from', p_intake, 'to', v_new, 'name', p_name));
+
+  return v_new;
+end;
+$$;
+
+create or replace function public.save_trade_subjects(
+  p_intake uuid, p_trade uuid, p_rows jsonb)
+returns integer language plpgsql security definer set search_path = '' as $$
+declare r jsonb; v_count integer := 0;
+begin
+  perform app.require_role('admin','manager');
+
+  if not app_private.intake_is_editable(p_intake) then
+    raise exception 'This intake has been published. Its form can no longer be changed.';
+  end if;
+
+  delete from public.intake_trade_subjects
+   where intake_id = p_intake and trade_id = p_trade;
+
+  for r in select * from jsonb_array_elements(p_rows) loop
+    insert into public.intake_trade_subjects
+      (intake_id, trade_id, subject_id, stream, required, min_mark, weight, sort_order)
+    values (p_intake, p_trade, (r->>'subject_id')::uuid, r->>'stream',
+            coalesce((r->>'required')::boolean, false),
+            nullif(r->>'min_mark','')::smallint,
+            coalesce((r->>'weight')::smallint, 1),
+            coalesce((r->>'sort_order')::smallint, 100));
+    v_count := v_count + 1;
+  end loop;
+
+  return v_count;
+end;
+$$;
+
+-- 006: storage purge queue ---------------------------------------------
+create or replace function public.mark_storage_purged(p_ids bigint[])
+returns integer language plpgsql security definer set search_path = '' as $$
+declare v integer;
+begin
+  -- The worker connects as service_role, which bypasses this path; a
+  -- human calling it must be an administrator.
+  if current_user not in ('postgres', 'service_role') then
+    perform app.require_role('admin');
+  end if;
+  update public.storage_purge_queue
+     set deleted_at = now(), last_error = null
+   where id = any(p_ids) and deleted_at is null;
+  get diagnostics v = row_count;
+  return v;
+end;
+$$;
+
+-- 007: enrolment and the register --------------------------------------
+create or replace function public.enrol_applicant(
+  p_application       uuid,
+  p_start_date        date,
+  p_employee_number   text default null,
+  p_seta_number       text default null,
+  p_site              text default null,
+  p_supervisor        text default null,
+  p_contract_signed   date default null,
+  p_expected_end      date default null,
+  p_notes             text default null)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare a record; v_id uuid; v_end date;
+begin
+  perform app.require_role('admin','manager');
+
+  select * into a from public.applications where id = p_application;
+  if a.id is null then raise exception 'Application not found.'; end if;
+
+  if exists (select 1 from public.apprentices where application_id = p_application) then
+    return jsonb_build_object('ok', false,
+      'reason', 'This applicant is already on the register.');
+  end if;
+
+  if a.status <> 'shortlisted' then
+    return jsonb_build_object('ok', false,
+      'reason', 'Only a shortlisted applicant can be enrolled. This one is ' || a.status || '.');
+  end if;
+
+  if p_start_date is null then
+    return jsonb_build_object('ok', false, 'reason', 'A start date is required.');
+  end if;
+
+  v_end := coalesce(p_expected_end, p_start_date + interval '3 years');
+
+  insert into public.apprentices (
+    application_id, intake_id, trade_id, full_name,
+    employee_number, seta_learner_number,
+    start_date, expected_end_date, contract_signed_on,
+    site, supervisor, notes, enrolled_by)
+  values (
+    a.id, a.intake_id, a.trade_id, a.full_name,
+    nullif(btrim(coalesce(p_employee_number,'')), ''),
+    nullif(btrim(coalesce(p_seta_number,'')), ''),
+    p_start_date, v_end, p_contract_signed,
+    nullif(btrim(coalesce(p_site,'')), ''),
+    nullif(btrim(coalesce(p_supervisor,'')), ''),
+    nullif(btrim(coalesce(p_notes,'')), ''),
+    auth.uid())
+  returning id into v_id;
+
+  update public.applications
+     set status = 'enrolled', legal_hold = true, purge_after = null
+   where id = a.id;
+
+  insert into public.application_events
+    (application_id, actor_id, event, from_status, to_status, detail)
+  values (a.id, auth.uid(), 'enrolled', 'shortlisted', 'enrolled',
+          jsonb_build_object('apprentice_id', v_id, 'start_date', p_start_date));
+
+  insert into public.pii_access_log (actor_id, actor_email, application_id, action, detail)
+  values (auth.uid(), auth.jwt() ->> 'email', a.id, 'enrol',
+          'Enrolled as an apprentice, starting ' || p_start_date);
+
+  return jsonb_build_object('ok', true, 'apprentice_id', v_id, 'expected_end', v_end);
+end;
+$$;
+
+create or replace function public.update_apprentice(
+  p_id            uuid,
+  p_status        text default null,
+  p_ended_on      date default null,
+  p_end_reason    text default null,
+  p_trade_test_date date default null,
+  p_trade_test_result text default null,
+  p_employee_number text default null,
+  p_seta_number   text default null,
+  p_site          text default null,
+  p_supervisor    text default null,
+  p_notes         text default null)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare r record;
+begin
+  perform app.require_role('admin','manager');
+
+  select * into r from public.apprentices where id = p_id;
+  if r.id is null then raise exception 'Not on the register.'; end if;
+
+  if p_status is not null and p_status not in ('active','completed') then
+    if p_ended_on is null or btrim(coalesce(p_end_reason,'')) = '' then
+      return jsonb_build_object('ok', false,
+        'reason', 'Ending an apprenticeship needs both a date and a reason.');
+    end if;
+  end if;
+
+  update public.apprentices set
+    status            = coalesce(p_status, status),
+    ended_on          = coalesce(p_ended_on, ended_on),
+    end_reason        = coalesce(nullif(btrim(coalesce(p_end_reason,'')),''), end_reason),
+    trade_test_date   = coalesce(p_trade_test_date, trade_test_date),
+    trade_test_result = coalesce(p_trade_test_result, trade_test_result),
+    employee_number   = coalesce(nullif(btrim(coalesce(p_employee_number,'')),''), employee_number),
+    seta_learner_number = coalesce(nullif(btrim(coalesce(p_seta_number,'')),''), seta_learner_number),
+    site              = coalesce(nullif(btrim(coalesce(p_site,'')),''), site),
+    supervisor        = coalesce(nullif(btrim(coalesce(p_supervisor,'')),''), supervisor),
+    notes             = coalesce(nullif(btrim(coalesce(p_notes,'')),''), notes)
+  where id = p_id;
+
+  insert into public.application_events (application_id, actor_id, event, detail)
+  values (r.application_id, auth.uid(), 'apprentice_updated',
+          jsonb_build_object('apprentice_id', p_id, 'status', coalesce(p_status, r.status)));
+
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+create or replace function public.unenrol_apprentice(p_id uuid, p_reason text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare r record; v_close timestamptz; v_months smallint;
+begin
+  perform app.require_role('admin');
+
+  if btrim(coalesce(p_reason,'')) = '' then
+    raise exception 'A reason is required.';
+  end if;
+
+  select * into r from public.apprentices where id = p_id;
+  if r.id is null then raise exception 'Not on the register.'; end if;
+
+  delete from public.apprentices where id = p_id;
+
+  select i.closes_at, i.retention_months into v_close, v_months
+    from public.intakes i where i.id = r.intake_id;
+
+  update public.applications
+     set status = 'shortlisted', legal_hold = false,
+         purge_after = (v_close + (coalesce(v_months,12) || ' months')::interval)::date
+   where id = r.application_id;
+
+  insert into public.application_events (application_id, actor_id, event, detail)
+  values (r.application_id, auth.uid(), 'unenrolled',
+          jsonb_build_object('reason', btrim(p_reason)));
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 3. The same trap in RLS policies
+--
+-- app.reviewer_role() in (...) inside a USING clause returns NULL for a
+-- non-reviewer, and a NULL policy result denies access — so these were
+-- safe. Rewritten anyway so the pattern is consistent and nobody copies
+-- the wrong one into a policy where the default is permissive.
+-- ---------------------------------------------------------------------
+create or replace function app.has_role(variadic p_roles text[])
+returns boolean language sql stable security definer set search_path = '' as $$
+  select coalesce(app.reviewer_role(), '') = any (p_roles);
+$$;
+grant execute on function app.has_role(text[]) to authenticated;
+
+drop policy if exists pii_log_read on public.pii_access_log;
+create policy pii_log_read on public.pii_access_log for select
+  using (app.has_role('admin','manager','information_officer'));
+
+drop policy if exists storage_purge_read on public.storage_purge_queue;
+create policy storage_purge_read on public.storage_purge_queue for select
+  using (app.has_role('admin','manager','information_officer'));
+
+drop policy if exists reviewer_admin_update on public.reviewer_profiles;
+create policy reviewer_admin_update on public.reviewer_profiles for update
+  using (app.has_role('admin')) with check (app.has_role('admin'));
+
+drop policy if exists its_write on public.intake_trade_subjects;
+create policy its_write on public.intake_trade_subjects for all
+  using (app.has_role('admin','manager')) with check (app.has_role('admin','manager'));
+
+drop policy if exists intake_docs_write on public.intake_documents;
+create policy intake_docs_write on public.intake_documents for all
+  using (app.has_role('admin','manager')) with check (app.has_role('admin','manager'));
+
+drop policy if exists intakes_write on public.intakes;
+create policy intakes_write on public.intakes for all
+  using (app.has_role('admin','manager')) with check (app.has_role('admin','manager'));
+
+drop policy if exists intake_trades_write on public.intake_trades;
+create policy intake_trades_write on public.intake_trades for all
+  using (app.has_role('admin','manager')) with check (app.has_role('admin','manager'));
+
+drop policy if exists trades_write on public.trades;
+create policy trades_write on public.trades for all
+  using (app.has_role('admin','manager')) with check (app.has_role('admin','manager'));
+
+drop policy if exists subjects_write on public.subjects;
+create policy subjects_write on public.subjects for all
+  using (app.has_role('admin','manager')) with check (app.has_role('admin','manager'));
+
+
+-- ============================================================
+--  SECTION 20 — 009-consent-ip-and-status-guard.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1. N3 — record_consent could raise on a proxy-chained header
+--
+-- The original recorded the applicant's IP with:
+--
+--     nullif(... ->> 'x-forwarded-for','')::inet
+--
+-- X-Forwarded-For is a LIST, not a single address. The moment any proxy
+-- or CDN sits in the path the header arrives as
+--
+--     "41.13.24.7, 10.0.0.1"
+--
+-- and casting that to inet raises invalid_text_representation. The
+-- exception propagates out of record_consent, so the applicant cannot
+-- record consent — and consent is checked by submit_application, so
+-- they cannot submit at all. The failure appears at the final step of a
+-- long form, which is the worst possible place to lose someone.
+--
+-- Whether production hits this depends on Supabase's edge configuration
+-- on any given day. That is not something to leave to chance during an
+-- intake.
+--
+-- The fix takes the first hop (the client, per RFC 7239 ordering) and
+-- refuses to let a malformed value break the write: the IP is evidence
+-- for a POPIA consent record, useful but never worth failing a consent
+-- over. A bad value now stores NULL instead of raising.
+-- ---------------------------------------------------------------------
+create or replace function app_private.client_ip()
+returns inet language plpgsql stable set search_path = '' as $$
+declare v_raw text; v_first text;
+begin
+  v_raw := nullif(btrim(coalesce(
+             current_setting('request.headers', true)::jsonb ->> 'x-forwarded-for', '')), '');
+  if v_raw is null then return null; end if;
+
+  -- First hop only. Everything after the first comma is proxy chain.
+  v_first := btrim(split_part(v_raw, ',', 1));
+
+  -- Strip a port if one is present. IPv4 "1.2.3.4:56" splits on the
+  -- single colon; bracketed IPv6 "[::1]:56" keeps its address intact.
+  if v_first ~ '^\[' then
+    v_first := split_part(btrim(v_first, '[]'), ']', 1);
+  elsif (length(v_first) - length(replace(v_first, ':', ''))) = 1 then
+    v_first := split_part(v_first, ':', 1);
+  end if;
+
+  return v_first::inet;
+exception when others then
+  -- An unparseable header must never cost an applicant their consent.
+  return null;
+end;
+$$;
+
+revoke all on function app_private.client_ip() from public, anon, authenticated;
+
+
+create or replace function public.record_consent(
+  p_application uuid, p_version text, p_audience text, p_user_agent text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare v_v record;
+begin
+  if not exists (select 1 from public.applications
+                 where id = p_application and applicant_user_id = auth.uid()) then
+    raise exception 'Application not found.';
+  end if;
+
+  select id, body_sha256 into v_v from public.consent_versions
+   where version = p_version and audience = p_audience and active;
+  if v_v.id is null then raise exception 'Consent wording not found.'; end if;
+
+  insert into public.consents (application_id, consent_version_id, audience,
+                               body_sha256, granted_ip, user_agent)
+  values (p_application, v_v.id, p_audience, v_v.body_sha256,
+          app_private.client_ip(),
+          left(coalesce(p_user_agent,''), 400));
+end;
+$$;
+grant execute on function public.record_consent(uuid, text, text, text) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 2. N4 — set_application_status accepted any source state
+--
+-- The function checked that the caller was a reviewer with access to the
+-- trade, but never what it was acting on. Two gaps followed.
+--
+--   a) A draft could be moved to under_review. The applicant's own
+--      update policy requires status = 'draft', so this locks a person
+--      out of a form they have not finished, with no way back — the
+--      function cannot return a record to draft. Drafts are invisible to
+--      reviewer SELECTs and UUIDs are unguessable, so this is unlikely
+--      rather than impossible. It should still be refused.
+--
+--   b) No transition rules at all: declined -> shortlisted was accepted
+--      silently. For a selection process that has to stand up to an
+--      audit, a decision being quietly reversed with no recorded reason
+--      is the part that matters.
+--
+-- The rule below is deliberately not a rigid matrix. Reversing a
+-- decision stays possible, because genuine mistakes happen and an
+-- inflexible system gets worked around in ways nobody can see. It just
+-- has to be deliberate: reversing shortlisted or declined now requires
+-- a reason, which lands in application_reviews.notes and the event log.
+--
+-- 'withdrawn' and 'enrolled' are terminal here. Withdrawal belongs to
+-- the applicant (POPIA s24) and a reviewer must not undo it; enrolment
+-- is reversed only by unenrol_apprentice, which is admin-only and
+-- restores the retention date the enrolment cleared.
+-- ---------------------------------------------------------------------
+create or replace function public.set_application_status(
+  p_application uuid, p_status text, p_notes text default null)
+returns void language plpgsql security definer set search_path = '' as $$
+declare v_from text; v_trade uuid;
+begin
+  if not app.is_reviewer() then raise exception 'Not authorised.'; end if;
+  if p_status not in ('under_review','shortlisted','declined') then
+    raise exception 'Unknown status.';
+  end if;
+
+  select status, trade_id into v_from, v_trade
+    from public.applications where id = p_application;
+  if v_from is null then raise exception 'Application not found.'; end if;
+  if not app.can_see_trade(v_trade) then raise exception 'Not authorised for this trade.'; end if;
+
+  -- (a) never touch an unsubmitted form
+  if v_from = 'draft' then
+    raise exception 'This application has not been submitted yet. It cannot be moved into review.'
+      using errcode = 'invalid_parameter_value';
+  end if;
+
+  -- terminal states
+  if v_from = 'withdrawn' then
+    raise exception 'The applicant withdrew this application. It cannot be reopened by a reviewer.'
+      using errcode = 'invalid_parameter_value';
+  end if;
+  if v_from = 'enrolled' then
+    raise exception 'This applicant is on the apprentice register. Remove them from the register first.'
+      using errcode = 'invalid_parameter_value';
+  end if;
+
+  -- no-op, rather than a second identical review row
+  if v_from = p_status then return; end if;
+
+  -- (b) reversing a recorded decision has to be deliberate and reasoned
+  if v_from in ('shortlisted','declined')
+     and btrim(coalesce(p_notes,'')) = '' then
+    raise exception
+      'This application was already %. Changing that decision needs a reason.', v_from
+      using errcode = 'invalid_parameter_value';
+  end if;
+
+  update public.applications set status = p_status where id = p_application;
+
+  insert into public.application_reviews (application_id, reviewer_id, decision, notes)
+  values (p_application, auth.uid(),
+          case p_status when 'shortlisted' then 'shortlist'
+                        when 'declined' then 'decline' else 'hold' end, p_notes);
+
+  insert into public.application_events (application_id, actor_id, event, from_status, to_status, detail)
+  values (p_application, auth.uid(), 'status_change', v_from, p_status,
+          case when v_from in ('shortlisted','declined')
+               then jsonb_build_object('reversal', true, 'reason', btrim(p_notes))
+               else null end);
+end;
+$$;
+grant execute on function public.set_application_status(uuid, text, text) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 3. Verification
+--
+-- Both should report PASS.
+-- ---------------------------------------------------------------------
+do $$
+declare v inet;
+begin
+  -- The cast that used to raise.
+  perform set_config('request.headers',
+    '{"x-forwarded-for":"41.13.24.7, 10.0.0.1, 172.16.0.4"}', true);
+  v := app_private.client_ip();
+  raise notice '%  chained X-Forwarded-For yields first hop (%)',
+    case when v = '41.13.24.7'::inet then 'PASS' else 'FAIL' end, v;
+
+  perform set_config('request.headers', '{"x-forwarded-for":"not an address"}', true);
+  raise notice '%  malformed X-Forwarded-For stores NULL rather than raising',
+    case when app_private.client_ip() is null then 'PASS' else 'FAIL' end;
+
+  perform set_config('request.headers', '{}', true);
+end $$;
+
+
+-- ============================================================
+--  SECTION 21 — 009-photo-storage.sql
 -- ============================================================
 
 -- 1. Detaching a photo from an inspection.
@@ -1521,7 +4749,100 @@ end $verify$;
 
 
 -- ============================================================
---  SECTION 10 — 010-handover.sql
+--  SECTION 22 — 010-decline-reason.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1. The structured reason
+-- ---------------------------------------------------------------------
+alter table public.applications
+  add column if not exists decline_reason_category text,
+  add column if not exists decline_reason_detail   text;
+
+alter table public.applications drop constraint if exists applications_decline_reason_check;
+alter table public.applications add constraint applications_decline_reason_check
+  check (decline_reason_category is null or decline_reason_category in (
+    'below_minimum', 'position_filled', 'failed_assessment',
+    'incomplete_docs', 'unreachable', 'other'
+  ));
+
+
+-- ---------------------------------------------------------------------
+-- 2. decline_applicant()
+--
+-- Composes the note from the category, appends any extra detail, then
+-- hands off to set_application_status for everything that already
+-- worked correctly. Left open to any active reviewer, matching the
+-- access level the plain Decline button already had — this is not being
+-- newly restricted to managers the way enrolment is.
+-- ---------------------------------------------------------------------
+create or replace function public.decline_applicant(
+  p_application uuid, p_category text, p_detail text default null)
+returns void language plpgsql security definer set search_path = '' as $$
+declare v_notes text;
+begin
+  if p_category not in ('below_minimum', 'position_filled', 'failed_assessment',
+                        'incomplete_docs', 'unreachable', 'other') then
+    raise exception 'Unknown decline reason.';
+  end if;
+
+  if p_category = 'other' and btrim(coalesce(p_detail, '')) = '' then
+    raise exception 'Add a short explanation when the reason is Other.';
+  end if;
+
+  v_notes := case p_category
+    when 'below_minimum'    then 'Did not meet the minimum subject or mark requirements.'
+    when 'position_filled'  then 'Position filled by a stronger candidate.'
+    when 'failed_assessment' then 'Did not pass the interview or aptitude assessment.'
+    when 'incomplete_docs'  then 'Documents were incomplete, unverifiable, or could not be cleared.'
+    when 'unreachable'      then 'Could not be reached, or withdrew informally.'
+    else 'Other reason recorded — see detail.'
+  end;
+  if btrim(coalesce(p_detail, '')) <> '' then
+    v_notes := v_notes || ' ' || btrim(p_detail);
+  end if;
+
+  -- Every existing guard applies unchanged: cannot decline a draft, a
+  -- withdrawn application, or someone already enrolled; reversing a
+  -- prior shortlist/decline still requires this same non-empty note,
+  -- which v_notes always is.
+  perform public.set_application_status(p_application, 'declined', v_notes);
+
+  -- Recorded regardless of whether set_application_status changed the
+  -- status just now (it no-ops if already declined) — this lets a
+  -- reviewer correct or add detail to the category afterwards without
+  -- needing to bounce the status away and back.
+  update public.applications
+     set decline_reason_category = p_category,
+         decline_reason_detail   = nullif(btrim(coalesce(p_detail, '')), '')
+   where id = p_application;
+end;
+$$;
+
+grant execute on function public.decline_applicant(uuid, text, text) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 3. Reporting
+--
+-- The reason ACTOM most needs an answer to eventually: where in the
+-- pipeline are trades losing candidates. Aggregate only, per trade.
+-- ---------------------------------------------------------------------
+create or replace view public.v_decline_reasons as
+select
+  t.name as trade,
+  a.decline_reason_category,
+  count(*) as n
+from public.applications a
+join public.trades t on t.id = a.trade_id
+where a.status = 'declined' and a.decline_reason_category is not null
+group by t.name, a.decline_reason_category;
+
+grant select on public.v_decline_reasons to authenticated;
+
+
+-- ============================================================
+--  SECTION 23 — 010-handover.sql
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -1690,7 +5011,185 @@ grant select on v_inspection_people to authenticated;
 
 
 -- ============================================================
---  SECTION 11 — 011-fault-clearing.sql
+--  SECTION 24 — 011-consent-editor.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1. Immutability, enforced in the database
+--
+-- A trigger rather than a policy: this must hold regardless of who is
+-- connected, including a developer in the SQL editor.
+-- ---------------------------------------------------------------------
+create or replace function app_private.guard_consent_version()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare v_used integer;
+begin
+  select count(*) into v_used from public.consents where consent_version_id = old.id;
+
+  if v_used = 0 then
+    return new;                       -- never agreed to; safe to change
+  end if;
+
+  -- Retiring a version is legitimate: it stops new applications using
+  -- it while leaving the historical record intact.
+  if new.body is distinct from old.body
+     or new.version is distinct from old.version
+     or new.audience is distinct from old.audience then
+    raise exception
+      'Consent version % (%) has been agreed to by % applicant(s) and cannot be reworded. Create a new revision instead.',
+      old.version, old.audience, v_used
+      using errcode = 'integrity_constraint_violation';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists consent_versions_guard on public.consent_versions;
+create trigger consent_versions_guard before update on public.consent_versions
+  for each row execute function app_private.guard_consent_version();
+
+create or replace function app_private.guard_consent_version_delete()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare v_used integer;
+begin
+  select count(*) into v_used from public.consents where consent_version_id = old.id;
+  if v_used > 0 then
+    raise exception
+      'Consent version % (%) has been agreed to by % applicant(s) and cannot be deleted.',
+      old.version, old.audience, v_used
+      using errcode = 'integrity_constraint_violation';
+  end if;
+  return old;
+end;
+$$;
+
+drop trigger if exists consent_versions_guard_delete on public.consent_versions;
+create trigger consent_versions_guard_delete before delete on public.consent_versions
+  for each row execute function app_private.guard_consent_version_delete();
+
+
+-- ---------------------------------------------------------------------
+-- 2. Reading it in the console
+--
+-- Usage count is what tells the Information Officer whether a version is
+-- still editable, so it belongs in the same view as the text.
+-- ---------------------------------------------------------------------
+create or replace view public.v_consent_versions as
+select
+  cv.id, cv.version, cv.audience, cv.body, cv.body_sha256,
+  cv.effective_from, cv.active,
+  (select count(*) from public.consents c where c.consent_version_id = cv.id) as times_agreed,
+  (select count(*) from public.consents c where c.consent_version_id = cv.id) = 0 as editable,
+  exists (select 1 from public.intakes i where i.consent_version = cv.version) as used_by_intake
+from public.consent_versions cv;
+
+grant select on public.v_consent_versions to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 3. Writing it
+--
+-- Restricted to admin and information_officer. A manager can configure
+-- an intake; the consent paragraph is the Information Officer's
+-- responsibility and should not be casually edited by whoever happens
+-- to be setting up the next intake.
+-- ---------------------------------------------------------------------
+create or replace function public.save_consent_version(
+  p_version text, p_audience text, p_body text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_id uuid; v_used integer; v_existing record;
+begin
+  perform app.require_role('admin', 'information_officer');
+
+  if p_audience not in ('applicant', 'guardian') then
+    raise exception 'Audience must be applicant or guardian.';
+  end if;
+  if btrim(coalesce(p_version, '')) = '' then
+    raise exception 'A version number is required.';
+  end if;
+  if length(btrim(coalesce(p_body, ''))) < 50 then
+    raise exception 'The consent wording looks too short to be complete.';
+  end if;
+
+  select * into v_existing from public.consent_versions
+   where version = btrim(p_version) and audience = p_audience;
+
+  if v_existing.id is null then
+    insert into public.consent_versions (version, audience, body, active)
+    values (btrim(p_version), p_audience, btrim(p_body), true)
+    returning id into v_id;
+
+    insert into public.application_events (actor_id, event, detail)
+    values (auth.uid(), 'consent_version_created',
+            jsonb_build_object('version', btrim(p_version), 'audience', p_audience));
+
+    return jsonb_build_object('ok', true, 'created', true, 'id', v_id);
+  end if;
+
+  select count(*) into v_used from public.consents
+   where consent_version_id = v_existing.id;
+
+  if v_used > 0 then
+    return jsonb_build_object('ok', false, 'times_agreed', v_used,
+      'reason', 'Version ' || btrim(p_version) || ' has already been agreed to by ' ||
+                v_used || ' applicant(s). Its wording is now part of the record and cannot ' ||
+                'be changed. Save this as a new version number instead.');
+  end if;
+
+  update public.consent_versions
+     set body = btrim(p_body), effective_from = now()
+   where id = v_existing.id;
+
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'consent_version_edited',
+          jsonb_build_object('version', btrim(p_version), 'audience', p_audience));
+
+  return jsonb_build_object('ok', true, 'created', false, 'id', v_existing.id);
+end;
+$$;
+
+grant execute on function public.save_consent_version(text, text, text) to authenticated;
+
+
+create or replace function public.set_consent_version_active(p_id uuid, p_active boolean)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  perform app.require_role('admin', 'information_officer');
+  update public.consent_versions set active = p_active where id = p_id;
+
+  insert into public.application_events (actor_id, event, detail)
+  select auth.uid(), case when p_active then 'consent_version_activated'
+                          else 'consent_version_retired' end,
+         jsonb_build_object('version', version, 'audience', audience)
+    from public.consent_versions where id = p_id;
+end;
+$$;
+
+grant execute on function public.set_consent_version_active(uuid, boolean) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 4. Tamper detection
+--
+-- If a consent's recorded hash no longer matches the version's current
+-- text, the wording was changed after someone agreed to it. With the
+-- triggers above that should be impossible; this is the check that
+-- proves it, and belongs in the standing audit.
+-- ---------------------------------------------------------------------
+create or replace view public.v_consent_integrity as
+select
+  c.id as consent_id, c.application_id, cv.version, cv.audience,
+  c.granted_at, c.body_sha256 as agreed_hash, cv.body_sha256 as current_hash
+from public.consents c
+join public.consent_versions cv on cv.id = c.consent_version_id
+where c.body_sha256 is distinct from cv.body_sha256;
+
+grant select on public.v_consent_integrity to authenticated;
+
+
+-- ============================================================
+--  SECTION 25 — 011-fault-clearing.sql
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -1775,7 +5274,7 @@ create policy fc_progress on failed_checks for update
 
 
 -- ============================================================
---  SECTION 12 — 012-dashboard.sql
+--  SECTION 26 — 012-dashboard.sql
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -1888,7 +5387,430 @@ create trigger trg_action_closed
 
 
 -- ============================================================
---  SECTION 13 — 013-planned-dates.sql
+--  SECTION 27 — 012-journey-steps.min.sql
+-- ============================================================
+
+alter table public.intakes
+  add column if not exists journey_steps jsonb;
+alter table public.intakes alter column journey_steps set default jsonb_build_array(
+  jsonb_build_object('title', 'Application received',
+    'detail', 'Today. Nothing more is needed from you right now.'),
+  jsonb_build_object('title', 'Screening',
+    'detail', 'After the intake closes. We check every application against the requirements for your trade.'),
+  jsonb_build_object('title', 'Aptitude assessment',
+    'detail', 'If you are shortlisted we phone you on the number you gave us to arrange it.'),
+  jsonb_build_object('title', 'Interview and medical',
+    'detail', 'A conversation about the work, and a fitness-for-duty check.'),
+  jsonb_build_object('title', 'Contract of apprenticeship',
+    'detail', 'Signed and registered with the SETA. You start earning.'),
+  jsonb_build_object('title', 'Three years of training',
+    'detail', 'Workshop, site and classroom, working towards your trade test.'),
+  jsonb_build_object('title', 'Qualified artisan',
+    'detail', 'A national trade certificate, and a skill that travels.')
+);
+alter table public.intakes drop constraint if exists intakes_journey_steps_check;
+alter table public.intakes add constraint intakes_journey_steps_check
+  check (journey_steps is null or jsonb_typeof(journey_steps) = 'array');
+update public.intakes
+   set journey_steps = jsonb_build_array(
+     jsonb_build_object('title', 'Application received',
+       'detail', 'Today. Nothing more is needed from you right now.'),
+     jsonb_build_object('title', 'Screening',
+       'detail', 'After the intake closes. We check every application against the requirements for your trade.'),
+     jsonb_build_object('title', 'Aptitude assessment',
+       'detail', 'If you are shortlisted we phone you on the number you gave us to arrange it.'),
+     jsonb_build_object('title', 'Interview and medical',
+       'detail', 'A conversation about the work, and a fitness-for-duty check.'),
+     jsonb_build_object('title', 'Contract of apprenticeship',
+       'detail', 'Signed and registered with the SETA. You start earning.'),
+     jsonb_build_object('title', 'Three years of training',
+       'detail', 'Workshop, site and classroom, working towards your trade test.'),
+     jsonb_build_object('title', 'Qualified artisan',
+       'detail', 'A national trade certificate, and a skill that travels.')
+   )
+ where journey_steps is null;
+create or replace function public.get_form_config(p_intake uuid default null)
+returns jsonb language plpgsql stable security definer set search_path = '' as $$
+declare i record; v jsonb;
+begin
+  if p_intake is null then
+    select * into i from public.intakes
+     where status = 'open' and opens_at <= now() and closes_at > now()
+     order by opens_at desc limit 1;
+  else
+    select * into i from public.intakes where id = p_intake;
+  end if;
+
+  if i.id is null then
+    select * into i from public.intakes order by closes_at desc limit 1;
+    if i.id is null then
+      return jsonb_build_object('open', false, 'message',
+        'Applications are not open at the moment.');
+    end if;
+    return jsonb_build_object('open', false, 'message',
+      coalesce(i.closed_message, 'Applications are closed at the moment.'));
+  end if;
+
+  if i.status <> 'open' or i.opens_at > now() or i.closes_at <= now() then
+    return jsonb_build_object('open', false, 'message',
+      coalesce(i.closed_message, 'Applications are closed at the moment.'));
+  end if;
+
+  v := jsonb_build_object(
+    'open', true,
+    'intake', jsonb_build_object(
+      'id', i.id, 'name', i.name, 'closes_at', i.closes_at,
+      'show_further_study', i.show_further_study,
+      'show_technical', i.show_technical,
+      'intro_heading', i.intro_heading, 'intro_body', i.intro_body,
+      'consent_version', i.consent_version,
+      'max_upload_mb', i.max_upload_mb,
+      'journey_steps', i.journey_steps),
+    'trades', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'id', t.id,
+               'name', coalesce(it.label_override, t.name),
+               'division', t.division,
+               'notes', it.notes,
+               'positions', it.positions
+             ) order by it.sort_order, t.name), '[]'::jsonb)
+        from public.intake_trades it
+        join public.trades t on t.id = it.trade_id
+       where it.intake_id = i.id and it.active),
+    'documents', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'doc_type', d.doc_type, 'label', d.label, 'hint', d.hint,
+               'required', d.required, 'max_files', d.max_files
+             ) order by d.sort_order), '[]'::jsonb)
+        from public.intake_documents d
+       where d.intake_id = i.id and d.visible),
+    'subjects', (
+      select coalesce(jsonb_agg(distinct jsonb_build_object(
+               'id', s.id, 'name', s.name, 'stream', s.stream)), '[]'::jsonb)
+        from public.intake_trade_subjects its
+        join public.subjects s on s.id = its.subject_id
+       where its.intake_id = i.id)
+  );
+
+  return v;
+end;
+$$;
+grant execute on function public.get_form_config(uuid) to anon, authenticated;
+create or replace function public.save_journey_steps(p_intake uuid, p_steps jsonb)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare n integer;
+begin
+  perform app.require_role('admin', 'manager');
+
+  if jsonb_typeof(p_steps) <> 'array' then
+    raise exception 'Steps must be a list.';
+  end if;
+
+  n := jsonb_array_length(p_steps);
+  if n = 0 then
+    return jsonb_build_object('ok', false,
+      'reason', 'Keep at least one step — the applicant is shown this straight after submitting.');
+  end if;
+  if n > 12 then
+    return jsonb_build_object('ok', false,
+      'reason', 'Twelve steps is plenty. More than that stops being read.');
+  end if;
+
+  -- Every step needs a title; detail is optional.
+  if exists (
+    select 1 from jsonb_array_elements(p_steps) e
+     where btrim(coalesce(e->>'title', '')) = ''
+  ) then
+    return jsonb_build_object('ok', false, 'reason', 'Every step needs a title.');
+  end if;
+
+  update public.intakes set journey_steps = p_steps where id = p_intake;
+
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'journey_steps_updated',
+          jsonb_build_object('intake_id', p_intake, 'steps', n));
+
+  return jsonb_build_object('ok', true, 'steps', n);
+end;
+$$;
+grant execute on function public.save_journey_steps(uuid, jsonb) to authenticated;
+create or replace function public.clone_intake(p_intake uuid, p_name text)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare v_new uuid;
+begin
+  perform app.require_role('admin','manager');
+
+  insert into public.intakes (name, opens_at, closes_at, status, retention_months,
+                              show_further_study, show_technical, intro_heading, intro_body,
+                              closed_message, consent_version, max_upload_mb,
+                              scoring_enabled, auto_flag_below, journey_steps)
+  select p_name, now(), now() + interval '60 days', 'draft', retention_months,
+         show_further_study, show_technical, intro_heading, intro_body,
+         closed_message, consent_version, max_upload_mb,
+         scoring_enabled, auto_flag_below, journey_steps
+    from public.intakes where id = p_intake
+  returning id into v_new;
+
+  insert into public.intake_trades (intake_id, trade_id, positions, active,
+                                    label_override, sort_order, min_score, notes)
+  select v_new, trade_id, positions, active, label_override, sort_order, min_score, notes
+    from public.intake_trades where intake_id = p_intake;
+
+  insert into public.intake_trade_subjects (intake_id, trade_id, subject_id, stream,
+                                            required, min_mark, weight, sort_order)
+  select v_new, trade_id, subject_id, stream, required, min_mark, weight, sort_order
+    from public.intake_trade_subjects where intake_id = p_intake;
+
+  insert into public.intake_documents (intake_id, doc_type, label, hint, required,
+                                       max_files, visible, sort_order)
+  select v_new, doc_type, label, hint, required, max_files, visible, sort_order
+    from public.intake_documents where intake_id = p_intake;
+
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_cloned',
+          jsonb_build_object('from', p_intake, 'to', v_new, 'name', p_name));
+
+  return v_new;
+end;
+$$;
+
+
+-- ============================================================
+--  SECTION 28 — 012-journey-steps.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1. The column
+--
+-- jsonb array of { title, detail }. Order is the order shown.
+-- ---------------------------------------------------------------------
+alter table public.intakes
+  add column if not exists journey_steps jsonb;
+
+-- A DEFAULT, not just a one-off backfill. Without it any intake created
+-- later — including by clone_intake — starts with null steps and the
+-- applicant sees an empty "what happens from here" section. Found by
+-- checking get_form_config against a freshly created intake rather than
+-- the seeded one.
+alter table public.intakes alter column journey_steps set default jsonb_build_array(
+  jsonb_build_object('title', 'Application received',
+    'detail', 'Today. Nothing more is needed from you right now.'),
+  jsonb_build_object('title', 'Screening',
+    'detail', 'After the intake closes. We check every application against the requirements for your trade.'),
+  jsonb_build_object('title', 'Aptitude assessment',
+    'detail', 'If you are shortlisted we phone you on the number you gave us to arrange it.'),
+  jsonb_build_object('title', 'Interview and medical',
+    'detail', 'A conversation about the work, and a fitness-for-duty check.'),
+  jsonb_build_object('title', 'Contract of apprenticeship',
+    'detail', 'Signed and registered with the SETA. You start earning.'),
+  jsonb_build_object('title', 'Three years of training',
+    'detail', 'Workshop, site and classroom, working towards your trade test.'),
+  jsonb_build_object('title', 'Qualified artisan',
+    'detail', 'A national trade certificate, and a skill that travels.')
+);
+
+alter table public.intakes drop constraint if exists intakes_journey_steps_check;
+alter table public.intakes add constraint intakes_journey_steps_check
+  check (journey_steps is null or jsonb_typeof(journey_steps) = 'array');
+
+
+-- ---------------------------------------------------------------------
+-- 2. Seed with what the app has been showing
+--
+-- Only where nothing is set, so re-running never overwrites edited text.
+-- The first step is marked current; the rest are still to come.
+-- ---------------------------------------------------------------------
+update public.intakes
+   set journey_steps = jsonb_build_array(
+     jsonb_build_object('title', 'Application received',
+       'detail', 'Today. Nothing more is needed from you right now.'),
+     jsonb_build_object('title', 'Screening',
+       'detail', 'After the intake closes. We check every application against the requirements for your trade.'),
+     jsonb_build_object('title', 'Aptitude assessment',
+       'detail', 'If you are shortlisted we phone you on the number you gave us to arrange it.'),
+     jsonb_build_object('title', 'Interview and medical',
+       'detail', 'A conversation about the work, and a fitness-for-duty check.'),
+     jsonb_build_object('title', 'Contract of apprenticeship',
+       'detail', 'Signed and registered with the SETA. You start earning.'),
+     jsonb_build_object('title', 'Three years of training',
+       'detail', 'Workshop, site and classroom, working towards your trade test.'),
+     jsonb_build_object('title', 'Qualified artisan',
+       'detail', 'A national trade certificate, and a skill that travels.')
+   )
+ where journey_steps is null;
+
+
+-- ---------------------------------------------------------------------
+-- 3. Hand it to the applicant app
+--
+-- get_form_config is what the public form reads. Adding the steps here
+-- means the app renders whatever is configured, with its own fallback if
+-- an intake somehow has none.
+-- ---------------------------------------------------------------------
+create or replace function public.get_form_config(p_intake uuid default null)
+returns jsonb language plpgsql stable security definer set search_path = '' as $$
+declare i record; v jsonb;
+begin
+  if p_intake is null then
+    select * into i from public.intakes
+     where status = 'open' and opens_at <= now() and closes_at > now()
+     order by opens_at desc limit 1;
+  else
+    select * into i from public.intakes where id = p_intake;
+  end if;
+
+  if i.id is null then
+    select * into i from public.intakes order by closes_at desc limit 1;
+    if i.id is null then
+      return jsonb_build_object('open', false, 'message',
+        'Applications are not open at the moment.');
+    end if;
+    return jsonb_build_object('open', false, 'message',
+      coalesce(i.closed_message, 'Applications are closed at the moment.'));
+  end if;
+
+  if i.status <> 'open' or i.opens_at > now() or i.closes_at <= now() then
+    return jsonb_build_object('open', false, 'message',
+      coalesce(i.closed_message, 'Applications are closed at the moment.'));
+  end if;
+
+  v := jsonb_build_object(
+    'open', true,
+    'intake', jsonb_build_object(
+      'id', i.id, 'name', i.name, 'closes_at', i.closes_at,
+      'show_further_study', i.show_further_study,
+      'show_technical', i.show_technical,
+      'intro_heading', i.intro_heading, 'intro_body', i.intro_body,
+      'consent_version', i.consent_version,
+      'max_upload_mb', i.max_upload_mb,
+      'journey_steps', i.journey_steps),
+    'trades', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'id', t.id,
+               'name', coalesce(it.label_override, t.name),
+               'division', t.division,
+               'notes', it.notes,
+               'positions', it.positions
+             ) order by it.sort_order, t.name), '[]'::jsonb)
+        from public.intake_trades it
+        join public.trades t on t.id = it.trade_id
+       where it.intake_id = i.id and it.active),
+    'documents', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'doc_type', d.doc_type, 'label', d.label, 'hint', d.hint,
+               'required', d.required, 'max_files', d.max_files
+             ) order by d.sort_order), '[]'::jsonb)
+        from public.intake_documents d
+       where d.intake_id = i.id and d.visible),
+    'subjects', (
+      select coalesce(jsonb_agg(distinct jsonb_build_object(
+               'id', s.id, 'name', s.name, 'stream', s.stream)), '[]'::jsonb)
+        from public.intake_trade_subjects its
+        join public.subjects s on s.id = its.subject_id
+       where its.intake_id = i.id)
+  );
+
+  return v;
+end;
+$$;
+
+grant execute on function public.get_form_config(uuid) to anon, authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 4. Saving from the console
+-- ---------------------------------------------------------------------
+create or replace function public.save_journey_steps(p_intake uuid, p_steps jsonb)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare n integer;
+begin
+  perform app.require_role('admin', 'manager');
+
+  if jsonb_typeof(p_steps) <> 'array' then
+    raise exception 'Steps must be a list.';
+  end if;
+
+  n := jsonb_array_length(p_steps);
+  if n = 0 then
+    return jsonb_build_object('ok', false,
+      'reason', 'Keep at least one step — the applicant is shown this straight after submitting.');
+  end if;
+  if n > 12 then
+    return jsonb_build_object('ok', false,
+      'reason', 'Twelve steps is plenty. More than that stops being read.');
+  end if;
+
+  -- Every step needs a title; detail is optional.
+  if exists (
+    select 1 from jsonb_array_elements(p_steps) e
+     where btrim(coalesce(e->>'title', '')) = ''
+  ) then
+    return jsonb_build_object('ok', false, 'reason', 'Every step needs a title.');
+  end if;
+
+  update public.intakes set journey_steps = p_steps where id = p_intake;
+
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'journey_steps_updated',
+          jsonb_build_object('intake_id', p_intake, 'steps', n));
+
+  return jsonb_build_object('ok', true, 'steps', n);
+end;
+$$;
+
+grant execute on function public.save_journey_steps(uuid, jsonb) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 5. Cloning an intake carries its steps
+--
+-- clone_intake copies the configuration forward. Without journey_steps
+-- in that list the clone silently falls back to the default, quietly
+-- discarding wording someone had edited.
+-- ---------------------------------------------------------------------
+create or replace function public.clone_intake(p_intake uuid, p_name text)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare v_new uuid;
+begin
+  perform app.require_role('admin','manager');
+
+  insert into public.intakes (name, opens_at, closes_at, status, retention_months,
+                              show_further_study, show_technical, intro_heading, intro_body,
+                              closed_message, consent_version, max_upload_mb,
+                              scoring_enabled, auto_flag_below, journey_steps)
+  select p_name, now(), now() + interval '60 days', 'draft', retention_months,
+         show_further_study, show_technical, intro_heading, intro_body,
+         closed_message, consent_version, max_upload_mb,
+         scoring_enabled, auto_flag_below, journey_steps
+    from public.intakes where id = p_intake
+  returning id into v_new;
+
+  insert into public.intake_trades (intake_id, trade_id, positions, active,
+                                    label_override, sort_order, min_score, notes)
+  select v_new, trade_id, positions, active, label_override, sort_order, min_score, notes
+    from public.intake_trades where intake_id = p_intake;
+
+  insert into public.intake_trade_subjects (intake_id, trade_id, subject_id, stream,
+                                            required, min_mark, weight, sort_order)
+  select v_new, trade_id, subject_id, stream, required, min_mark, weight, sort_order
+    from public.intake_trade_subjects where intake_id = p_intake;
+
+  insert into public.intake_documents (intake_id, doc_type, label, hint, required,
+                                       max_files, visible, sort_order)
+  select v_new, doc_type, label, hint, required, max_files, visible, sort_order
+    from public.intake_documents where intake_id = p_intake;
+
+  insert into public.application_events (actor_id, event, detail)
+  values (auth.uid(), 'intake_cloned',
+          jsonb_build_object('from', p_intake, 'to', v_new, 'name', p_name));
+
+  return v_new;
+end;
+$$;
+
+
+-- ============================================================
+--  SECTION 29 — 013-planned-dates.sql
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -2037,7 +5959,7 @@ grant execute on function reschedule_inspection(uuid, date) to authenticated;
 
 
 -- ============================================================
---  SECTION 14 — 014-ncr.sql
+--  SECTION 30 — 014-ncr.sql
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -2617,7 +6539,819 @@ end $verify$;
 
 
 -- ============================================================
---  SECTION 15 — Group reference data
+--  SECTION 31 — 014-restrict-upload-types.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1. The bucket
+-- ---------------------------------------------------------------------
+update storage.buckets
+   set allowed_mime_types = array['application/pdf','image/jpeg','image/png']
+ where id = 'applicant-documents';
+
+
+-- ---------------------------------------------------------------------
+-- 2. The catalogue
+--
+-- application_documents.mime_type had no constraint, so a row could
+-- record a type the bucket would never have accepted. Existing rows are
+-- checked first: if any HEIC was uploaded before this change, the
+-- constraint is skipped rather than failing the migration, and the
+-- notice tells you what to deal with.
+-- ---------------------------------------------------------------------
+do $$
+declare n int; t text;
+begin
+  select count(*), string_agg(distinct mime_type, ', ')
+    into n, t
+    from public.application_documents
+   where mime_type not in ('application/pdf','image/jpeg','image/png');
+
+  if n > 0 then
+    raise notice 'SKIPPED the constraint: % existing document(s) use %', n, t;
+    raise notice 'Convert or remove them, then re-run this migration.';
+    raise notice 'Find them with:';
+    raise notice '  select id, application_id, original_filename, mime_type';
+    raise notice '    from public.application_documents';
+    raise notice '   where mime_type not in (''application/pdf'',''image/jpeg'',''image/png'');';
+  else
+    alter table public.application_documents
+      drop constraint if exists application_documents_mime_allowed;
+    alter table public.application_documents
+      add constraint application_documents_mime_allowed
+      check (mime_type in ('application/pdf','image/jpeg','image/png'));
+    raise notice 'Constraint applied: catalogue now accepts PDF, JPEG and PNG only.';
+  end if;
+end $$;
+
+
+-- ---------------------------------------------------------------------
+-- 3. Verification
+-- ---------------------------------------------------------------------
+select 'bucket allowed types' as check,
+       array_to_string(allowed_mime_types, ', ') as value
+  from storage.buckets where id = 'applicant-documents'
+union all
+select 'catalogue constraint present',
+       case when exists (
+         select 1 from pg_constraint
+          where conname = 'application_documents_mime_allowed'
+       ) then 'yes' else 'NO — see the notices above' end
+union all
+select 'documents outside the allowlist',
+       count(*)::text
+  from public.application_documents
+ where mime_type not in ('application/pdf','image/jpeg','image/png');
+
+
+-- ============================================================
+--  SECTION 32 — 015-enforce-upload-limits.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1. Resolve the console's limit
+--
+-- SECURITY DEFINER because the caller is the applicant, and the
+-- applicant has no reason to hold a general read on intake_documents.
+-- STABLE, so the planner may cache it within a statement.
+--
+-- Returns 0 for a doc type the intake does not offer or has hidden.
+-- The id_document backstop covers an intake whose row is somehow
+-- missing: the certified ID copy is mandatory by policy, and a limit of
+-- 0 would lock the applicant out of submitting at all.
+-- ---------------------------------------------------------------------
+create or replace function app.doc_file_limit(p_application uuid, p_doc_type text)
+returns smallint language sql stable security definer set search_path = '' as $$
+  select coalesce(
+    (select d.max_files
+       from public.applications a
+       join public.intake_documents d
+         on d.intake_id = a.intake_id
+        and d.doc_type  = p_doc_type
+      where a.id = p_application
+        and d.visible),
+    case when p_doc_type = 'id_document'
+           and not exists (select 1
+                             from public.applications a
+                             join public.intake_documents d
+                               on d.intake_id = a.intake_id
+                              and d.doc_type = 'id_document'
+                            where a.id = p_application)
+         then 1::smallint
+         else 0::smallint
+    end);
+$$;
+
+grant execute on function app.doc_file_limit(uuid, text) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 2. Enforce it on the catalogue
+--
+-- The advisory lock closes the race the browser guard cannot: two
+-- requests arriving together both read count = 0 and both insert. It is
+-- taken on (application_id, doc_type) so it never blocks a different
+-- applicant, and it is transaction-scoped so it releases on commit or
+-- rollback without any cleanup path.
+--
+-- SECURITY DEFINER so the count is the true count. Under the invoking
+-- applicant's RLS the count would be filtered by documents_own_select —
+-- correct today, but a policy change that narrowed that SELECT would
+-- silently turn this limit into a no-op.
+-- ---------------------------------------------------------------------
+create or replace function app_private.enforce_doc_file_limit()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare
+  v_limit smallint;
+  v_have  integer;
+begin
+  perform pg_advisory_xact_lock(
+    hashtextextended(new.application_id::text || ':' || new.doc_type, 0));
+
+  v_limit := app.doc_file_limit(new.application_id, new.doc_type);
+
+  if v_limit = 0 then
+    raise exception
+      'Document type % is not accepted for this intake', new.doc_type
+      using errcode = 'check_violation',
+            hint = 'The intake does not offer this document, or it is hidden.';
+  end if;
+
+  select count(*) into v_have
+    from public.application_documents d
+   where d.application_id = new.application_id
+     and d.doc_type = new.doc_type;
+
+  if v_have >= v_limit then
+    raise exception
+      'Upload limit reached: % file(s) allowed for %, % already uploaded',
+      v_limit, new.doc_type, v_have
+      using errcode = 'check_violation',
+            hint = 'Remove an existing file before uploading another.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists application_documents_file_limit
+  on public.application_documents;
+create trigger application_documents_file_limit
+  before insert on public.application_documents
+  for each row execute function app_private.enforce_doc_file_limit();
+
+
+-- ---------------------------------------------------------------------
+-- 3. Put a ceiling on the bucket
+--
+-- The catalogue trigger above is the exact limit. This is the ceiling
+-- that stops the bucket being filled by someone who never bothers to
+-- insert a catalogue row at all.
+--
+-- WHY THERE IS HEADROOM, AND WHY IT IS NOT A HOLE
+--
+--   app.js uploads the object first and inserts the catalogue row
+--   second. If the insert fails, the object is left behind. With an
+--   exact ceiling, every failed insert would permanently consume a slot
+--   and an applicant could be locked out of a REQUIRED document —
+--   turning a transient network error into an application they can
+--   never submit. The headroom absorbs retries; the catalogue trigger
+--   still holds the real line, so the extra objects are unreferenced
+--   bytes, not extra documents a reviewer ever sees.
+--
+--   Worst case per application is therefore bounded at
+--   sum(max_files + 3) over at most four doc types — roughly 20 objects,
+--   ~160 MB, against unbounded before. Part 5 lists the orphans so they
+--   can be queued for deletion.
+--
+-- SECURITY DEFINER is what makes this safe to call from a policy ON
+-- storage.objects: a subquery over storage.objects evaluated under that
+-- table's own RLS would recurse. Running as owner bypasses RLS.
+--
+-- The ownership check inside stops the function being used as a
+-- counting oracle against another applicant's folder.
+-- ---------------------------------------------------------------------
+create or replace function app.storage_slot_free(p_name text)
+returns boolean language plpgsql stable security definer set search_path = '' as $$
+declare
+  v_parts  text[];
+  v_app    uuid;
+  v_doc    text;
+  v_prefix text;
+  v_limit  smallint;
+  v_have   integer;
+begin
+  v_parts := storage.foldername(p_name);
+
+  -- Path must be <application_id>/<doc_type>/<file>. Anything else is
+  -- not a shape this application writes.
+  --
+  -- coalesce is load-bearing: array_length('{}', 1) is NULL, not 0, so
+  -- `array_length(...) < 2` on an empty array evaluates to NULL and the
+  -- IF falls through. Same NULL-comparison trap as the role guard in
+  -- migration 008 — a bare-name object would have skipped the check.
+  if v_parts is null or coalesce(array_length(v_parts, 1), 0) < 2 then
+    return false;
+  end if;
+
+  begin
+    v_app := v_parts[1]::uuid;
+  exception when others then
+    return false;
+  end;
+
+  v_doc := v_parts[2];
+
+  -- Caller must own the draft. The storage policy checks this too; it is
+  -- repeated here so the function cannot answer questions about folders
+  -- belonging to anyone else.
+  if not exists (select 1 from public.applications a
+                  where a.id = v_app
+                    and a.applicant_user_id = auth.uid()
+                    and a.status = 'draft') then
+    return false;
+  end if;
+
+  v_limit := app.doc_file_limit(v_app, v_doc);
+  if v_limit = 0 then
+    return false;
+  end if;
+
+  v_prefix := v_parts[1] || '/' || v_doc || '/';
+
+  select count(*) into v_have
+    from storage.objects o
+   where o.bucket_id = 'applicant-documents'
+     and left(o.name, length(v_prefix)) = v_prefix;
+
+  return v_have < (v_limit + 3);
+end;
+$$;
+
+grant execute on function app.storage_slot_free(text) to authenticated;
+
+-- Replaces the policy from schema.sql. The ownership and draft clauses
+-- are kept as they were; only the ceiling is new.
+drop policy if exists applicant_docs_insert on storage.objects;
+create policy applicant_docs_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'applicant-documents'
+    and exists (select 1 from public.applications a
+                where a.id::text = (storage.foldername(name))[1]
+                  and a.applicant_user_id = auth.uid()
+                  and a.status = 'draft')
+    and app.storage_slot_free(name));
+
+
+-- ---------------------------------------------------------------------
+-- 4. Keep the console honest
+--
+-- saveDocs() in formsetup.js posts max_files straight from a number
+-- input. The 1..6 CHECK on the column already refuses anything else,
+-- but it refuses it with a raw Postgres message in an alert() box. A
+-- BEFORE trigger clamping instead of rejecting means a fat-fingered 60
+-- saves as 6 and the admin sees the clamped value on reload.
+--
+-- Clamping, not rejecting, is deliberate: this field is never
+-- security-relevant in the upward direction — a larger number only ever
+-- means more files, and the CHECK is the real bound.
+-- ---------------------------------------------------------------------
+create or replace function app_private.clamp_max_files()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if new.max_files is null then
+    new.max_files := 1;
+  end if;
+  new.max_files := least(greatest(new.max_files, 1::smallint), 6::smallint);
+  return new;
+end;
+$$;
+
+drop trigger if exists intake_documents_clamp_max_files on public.intake_documents;
+create trigger intake_documents_clamp_max_files
+  before insert or update on public.intake_documents
+  for each row execute function app_private.clamp_max_files();
+
+
+-- ---------------------------------------------------------------------
+-- 5. Verification and diagnostics
+--
+-- Results come back as a SELECT: the Supabase SQL editor shows result
+-- sets, not RAISE NOTICE output.
+-- ---------------------------------------------------------------------
+select 'catalogue trigger installed' as check,
+       case when exists (
+         select 1 from pg_trigger
+          where tgname = 'application_documents_file_limit'
+            and not tgisinternal
+       ) then 'yes' else 'NO' end as value
+
+union all
+select 'storage ceiling in insert policy',
+       case when exists (
+         select 1 from pg_policies
+          where schemaname = 'storage' and tablename = 'objects'
+            and policyname = 'applicant_docs_insert'
+            and with_check like '%storage_slot_free%'
+       ) then 'yes' else 'NO' end
+
+-- The ceiling counts storage.objects, a table owned by
+-- supabase_storage_admin with its own RLS. SECURITY DEFINER only escapes
+-- that RLS if the function's owner is exempt from it. On Supabase the
+-- editor runs as `postgres`, which holds BYPASSRLS, so it is — but if
+-- this reads NO the ceiling silently counts 0 and never fires, so it is
+-- checked rather than assumed.
+union all
+select 'ceiling owner is exempt from RLS',
+       case when (select r.rolbypassrls or r.rolsuper
+                    from pg_proc p
+                    join pg_roles r on r.oid = p.proowner
+                   where p.oid = 'app.storage_slot_free(text)'::regprocedure)
+            then 'yes' else 'NO — the ceiling will not fire, see part 3' end
+
+union all
+select 'console clamp installed',
+       case when exists (
+         select 1 from pg_trigger
+          where tgname = 'intake_documents_clamp_max_files'
+            and not tgisinternal
+       ) then 'yes' else 'NO' end
+
+-- Rows already over the configured limit. Expected to be 0 on a clean
+-- database. Anything here predates this migration and is left alone.
+union all
+select 'documents already over the limit',
+       count(*)::text
+  from (
+    select d.application_id, d.doc_type, count(*) as n,
+           app.doc_file_limit(d.application_id, d.doc_type) as lim
+      from public.application_documents d
+     group by d.application_id, d.doc_type
+  ) g
+ where g.n > g.lim
+
+-- Objects in the bucket with no catalogue row. These are the failed
+-- inserts the headroom exists for. Queue them with part 6 when the
+-- number stops being small.
+union all
+select 'orphaned storage objects',
+       count(*)::text
+  from storage.objects o
+ where o.bucket_id = 'applicant-documents'
+   and not exists (select 1 from public.application_documents d
+                    where d.storage_path = o.name);
+
+
+-- ---------------------------------------------------------------------
+-- 6. Orphan cleanup (run by hand, not part of the migration)
+--
+-- storage.objects cannot be deleted from SQL, so orphans go on the
+-- purge queue and scan-worker.js drains it. Uncomment to queue them.
+--
+-- The 1 hour floor matters: an object younger than that may belong to
+-- an upload whose catalogue insert is still in flight.
+-- ---------------------------------------------------------------------
+-- insert into public.storage_purge_queue (bucket_id, storage_path, application_id, reason)
+-- select 'applicant-documents', o.name,
+--        nullif((storage.foldername(o.name))[1], '')::uuid, 'orphan'
+--   from storage.objects o
+--  where o.bucket_id = 'applicant-documents'
+--    and o.created_at < now() - interval '1 hour'
+--    and not exists (select 1 from public.application_documents d
+--                     where d.storage_path = o.name)
+--    on conflict do nothing;
+
+
+-- ============================================================
+--  SECTION 33 — 015-ncr-status-and-close-path.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1 — Derivation over a row value. The ladder is unchanged.
+-- ---------------------------------------------------------------------
+create or replace function public.ncr_status(n public.ncrs)
+returns text language plpgsql stable as $$
+declare v_actions int; v_done int; v_verified int;
+begin
+  if n.closed_at is not null then return 'closed'; end if;
+  select count(*), count(done_at), count(verified_at)
+    into v_actions, v_done, v_verified
+    from ncr_actions where ncr_id = n.id;
+  if v_actions > 0 and v_verified = v_actions then return 'verified'; end if;
+  if v_actions > 0 and v_done = v_actions     then return 'action_done'; end if;
+  if v_actions > 0                             then return 'action_agreed'; end if;
+  if n.root_cause_id is not null               then return 'cause_identified'; end if;
+  if n.containment is not null and length(btrim(n.containment)) > 0 then return 'contained'; end if;
+  return 'open';
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 2 — The uuid form kept for any other caller, as a wrapper over the row
+--     form, so there is one ladder rather than two that can drift apart.
+-- ---------------------------------------------------------------------
+create or replace function public.ncr_status(p_ncr uuid)
+returns text language sql stable as $$
+  select public.ncr_status(n) from public.ncrs n where n.id = p_ncr;
+$$;
+
+-- ---------------------------------------------------------------------
+-- 3 — Trigger derives from NEW, and guards the closure columns.
+-- ---------------------------------------------------------------------
+create or replace function public.stamp_ncr()
+returns trigger language plpgsql as $$
+begin
+  -- Cost total from its parts when any part is given.
+  if coalesce(new.cost_material, new.cost_labour, new.cost_rework, new.cost_other) is not null then
+    new.cost_total := coalesce(new.cost_material,0) + coalesce(new.cost_labour,0)
+                    + coalesce(new.cost_rework,0)  + coalesce(new.cost_other,0);
+  end if;
+
+  if tg_op = 'UPDATE' then
+    /* Closing is an act with conditions attached, so it happens in one place.
+       close_ncr sets grid.closing for its transaction; a direct PATCH cannot. */
+    if (new.closed_at is distinct from old.closed_at
+        or new.closed_by is distinct from old.closed_by)
+       and coalesce(current_setting('grid.closing', true), '') <> '1' then
+      raise exception 'NCR_CLOSE_PATH: an NCR is closed through close_ncr, which '
+        'requires a root cause and a verified corrective action. It cannot be '
+        'closed by editing the record.';
+    end if;
+
+    -- Who did what, when, written by the database rather than the browser.
+    if new.containment is distinct from old.containment
+       and new.containment is not null and length(btrim(new.containment)) > 0 then
+      new.contained_by := coalesce(new.contained_by, auth.uid());
+      new.contained_at := coalesce(new.contained_at, now());
+    end if;
+    if new.root_cause_id is distinct from old.root_cause_id and new.root_cause_id is not null then
+      new.cause_by := coalesce(new.cause_by, auth.uid());
+      new.cause_at := coalesce(new.cause_at, now());
+    end if;
+  end if;
+
+  new.status := public.ncr_status(new);
+  return new;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 4 — close_ncr.
+--
+--     The redundant second UPDATE comes out: status now follows from
+--     closed_at through the trigger, so it has a single writer and there is
+--     no statement whose only job is correcting the one before it.
+--
+--     The returned status is read back from the row rather than asserted as
+--     a literal, so the caller can no longer be told 'closed' by a function
+--     that closed nothing. The RLS check moves to `returning` for the same
+--     reason.
+-- ---------------------------------------------------------------------
+create or replace function public.close_ncr(p_ncr uuid, p_note text default null)
+returns jsonb language plpgsql as $$
+declare n ncrs; v_actions int; v_verified int; v_ref text; v_status text;
+begin
+  if not has_role('quality_engineer','quality_manager','sysadmin') then
+    raise exception 'NCR_ROLE: only a Quality Engineer or above may close an NCR';
+  end if;
+  select * into n from ncrs where id = p_ncr;
+  if n.id is null then raise exception 'NCR_MISSING: not found'; end if;
+  if n.closed_at is not null then
+    raise exception 'NCR_CLOSED: % is already closed', n.ref;
+  end if;
+
+  -- The two things the old register could not enforce, and did not have.
+  if n.root_cause_id is null then
+    raise exception 'NCR_NO_CAUSE: % cannot be closed without a root cause', n.ref;
+  end if;
+  select count(*), count(verified_at) into v_actions, v_verified
+    from ncr_actions where ncr_id = p_ncr;
+  if v_actions = 0 then
+    raise exception 'NCR_NO_ACTION: % cannot be closed without a corrective action', n.ref;
+  end if;
+  if v_verified < v_actions then
+    raise exception 'NCR_UNVERIFIED: % has % corrective action(s) not yet verified',
+      n.ref, v_actions - v_verified;
+  end if;
+
+  /* Announce the closure to the trigger guard. Transaction-local: it cannot
+     leak into a later statement on the same connection. */
+  perform set_config('grid.closing', '1', true);
+
+  update ncrs
+     set closed_by = auth.uid(), closed_at = now(),
+         concession_note = coalesce(p_note, concession_note)
+   where id = p_ncr
+   returning ref, status into v_ref, v_status;
+
+  perform set_config('grid.closing', '0', true);
+
+  if v_ref is null then
+    raise exception 'NCR_BLOCKED: row level security prevented the change.';
+  end if;
+  if v_status <> 'closed' then
+    raise exception 'NCR_STATUS: % was stamped % rather than closed', v_ref, v_status;
+  end if;
+  return jsonb_build_object('ref', v_ref, 'status', v_status);
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 5 — Repair the rows already stranded.
+--
+--     Scoped to rows whose stored status disagrees with the derivation, so
+--     trg_audit_ncrs records real corrections rather than a no-op per NCR.
+--     The assignment is nominal — the trigger recomputes it — but the WHERE
+--     is what keeps the audit trail honest.
+--
+--     grid.closing is set because these rows already carry closed_at and the
+--     guard would otherwise refuse a repair that changes nothing about it.
+-- ---------------------------------------------------------------------
+do $$
+declare v_rows int;
+begin
+  perform set_config('grid.closing', '1', true);
+  update public.ncrs n
+     set status = public.ncr_status(n)
+   where n.status is distinct from public.ncr_status(n);
+  get diagnostics v_rows = row_count;
+  perform set_config('grid.closing', '0', true);
+  raise notice '015: corrected the status of % NCR(s).', v_rows;
+end $$;
+
+
+-- ============================================================
+--  SECTION 34 — 016-qualification-advisory.sql
+-- ============================================================
+
+-- ---------------------------------------------------------------------
+-- 1. Catalogue
+--
+-- Points come straight from the workbook. patterns are case-insensitive
+-- POSIX regexes, word-bounded with \y so "N4" does not match inside
+-- "N40" and "matric" does not match inside a longer word. supersedes
+-- lists codes that are dropped when this one matches, which is how
+-- "Technical Matric" avoids also counting as "Academic Matric".
+-- ---------------------------------------------------------------------
+
+create table if not exists public.qualification_catalogue (
+  code        text primary key,
+  label       text     not null,
+  points      smallint not null check (points between 0 and 10),
+  patterns    text[]   not null,
+  supersedes  text[]   not null default '{}',
+  sort_order  smallint not null default 0
+);
+
+comment on table public.qualification_catalogue is
+  'Advisory only. Recognises what applications.highest_qualification appears to say. Does not affect auto_score.';
+
+insert into public.qualification_catalogue (code, label, points, patterns, supersedes, sort_order) values
+  ('ACADEMIC_MATRIC', 'Academic Matric', 1,
+   array['\y(academic\s+matric|matric|nsc|national\s+senior\s+certificate|grade\s*12|gr\s*12)\y'],
+   '{}', 10),
+
+  ('TECHNICAL_MATRIC', 'Technical Matric', 2,
+   array['\y(technical\s+matric|technical\s+grade\s*12|technical\s+nsc|nsc\s*\(?\s*technical)\y'],
+   array['ACADEMIC_MATRIC'], 20),
+
+  ('NCV_L4', 'NCV Level 4', 2,
+   array['\yncv\s*(l|level)?\s*4\y', '\ynational\s+certificate\s+vocational\s*(l|level)?\s*4\y'],
+   '{}', 30),
+
+  ('N2', 'N2', 1, array['\yn\s*2\y'], '{}', 40),
+  ('N3', 'N3', 2, array['\yn\s*3\y'], '{}', 50),
+  ('N4', 'N4', 3, array['\yn\s*4\y'], '{}', 60),
+  ('N5', 'N5', 4, array['\yn\s*5\y'], '{}', 70),
+  ('N6', 'N6', 5, array['\yn\s*6\y'], '{}', 80)
+on conflict (code) do update
+  set label      = excluded.label,
+      points     = excluded.points,
+      patterns   = excluded.patterns,
+      supersedes = excluded.supersedes,
+      sort_order = excluded.sort_order;
+
+alter table public.qualification_catalogue enable row level security;
+
+drop policy if exists qualification_catalogue_read on public.qualification_catalogue;
+create policy qualification_catalogue_read on public.qualification_catalogue
+  for select to authenticated using (true);
+
+drop policy if exists qualification_catalogue_write on public.qualification_catalogue;
+create policy qualification_catalogue_write on public.qualification_catalogue
+  for all to authenticated
+  using (app.require_role('admin'))
+  with check (app.require_role('admin'));
+
+revoke all on public.qualification_catalogue from anon;
+grant select on public.qualification_catalogue to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 2. Advisory columns
+--
+-- qual_source records how the reading was arrived at. Today it is
+-- always 'parsed'. It exists so that when a structured field or a
+-- reviewer confirmation replaces the guess, old rows still say which
+-- they were — and so nothing downstream can treat a guess and a
+-- confirmed value as the same thing.
+-- ---------------------------------------------------------------------
+
+alter table public.applications
+  add column if not exists qual_codes    text[]   not null default '{}',
+  add column if not exists qual_points   smallint,
+  add column if not exists qual_highest  text,
+  add column if not exists qual_note     text,
+  add column if not exists qual_source   text not null default 'parsed'
+    check (qual_source in ('parsed', 'confirmed', 'overridden'));
+
+comment on column public.applications.qual_points is
+  'Advisory workbook points for the qualification held. Deliberately NOT part of auto_score.';
+comment on column public.applications.qual_source is
+  'parsed = guessed from free text. Do not use a parsed value in any ranking.';
+
+
+-- ---------------------------------------------------------------------
+-- 3. Parser
+--
+-- Pure: takes text, returns rows. No side effects, so it can be called
+-- in a SELECT to preview what a wording would be read as before
+-- anything is written.
+-- ---------------------------------------------------------------------
+
+create or replace function public.parse_qualifications(p_text text)
+returns table (code text, label text, points smallint)
+language sql
+stable
+as $$
+  with hit as (
+    select q.code, q.label, q.points, q.supersedes, q.sort_order
+      from public.qualification_catalogue q
+     where coalesce(p_text, '') <> ''
+       and exists (
+         select 1 from unnest(q.patterns) pat
+          where p_text ~* pat
+       )
+  ),
+  beaten as (
+    select distinct unnest(supersedes) as code from hit
+  )
+  select h.code, h.label, h.points
+    from hit h
+   where h.code not in (select code from beaten)
+   order by h.points desc, h.sort_order;
+$$;
+
+revoke all on function public.parse_qualifications(text) from anon;
+grant execute on function public.parse_qualifications(text) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 4. Apply to an application
+--
+-- Writes only the qual_* columns. It never touches auto_score,
+-- auto_rank, auto_flags, meets_minimum or scored_at — if a future edit
+-- makes it do so, that is a change of policy, not a refactor.
+-- ---------------------------------------------------------------------
+
+create or replace function app_private.assess_qualification(p_application uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_text    text;
+  v_codes   text[] := '{}';
+  v_points  smallint;
+  v_highest text;
+  v_note    text;
+begin
+  select highest_qualification into v_text
+    from public.applications where id = p_application;
+
+  select array_agg(code order by points desc, code),
+         max(points),
+         (array_agg(label order by points desc, code))[1]
+    into v_codes, v_points, v_highest
+    from public.parse_qualifications(v_text);
+
+  v_codes := coalesce(v_codes, '{}');
+
+  if btrim(coalesce(v_text, '')) = '' then
+    v_note := 'No further qualification captured.';
+  elsif cardinality(v_codes) = 0 then
+    v_note := 'Not recognised from what the applicant typed. Check the certificate.';
+  elsif cardinality(v_codes) > 1 then
+    v_note := 'Reading of free text. Highest counted; the rest are listed for context.';
+  else
+    v_note := 'Reading of free text. Confirm against the certificate.';
+  end if;
+
+  update public.applications
+     set qual_codes   = v_codes,
+         qual_points  = v_points,
+         qual_highest = v_highest,
+         qual_note    = v_note,
+         qual_source  = 'parsed'
+   where id = p_application;
+end;
+$$;
+
+revoke all on function app_private.assess_qualification(uuid) from anon, authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 5. Keep it current
+--
+-- Separate from applications_score deliberately. Scoring fires only on
+-- the draft -> submitted transition and returns early when the intake
+-- has scoring_enabled = false. The qualification reading should be
+-- present regardless, and should follow a later correction to the text.
+-- ---------------------------------------------------------------------
+
+create or replace function app_private.assess_qualification_trg()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'INSERT'
+     or new.highest_qualification is distinct from old.highest_qualification then
+    perform app_private.assess_qualification(new.id);
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists applications_assess_qualification on public.applications;
+create trigger applications_assess_qualification
+  after insert or update of highest_qualification on public.applications
+  for each row execute function app_private.assess_qualification_trg();
+
+
+-- ---------------------------------------------------------------------
+-- 6. Grants
+--
+-- Column-level, matching the auto_score grant in migration 002.
+-- ---------------------------------------------------------------------
+
+grant select (qual_codes, qual_points, qual_highest, qual_note, qual_source)
+  on public.applications to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 7. Backfill
+-- ---------------------------------------------------------------------
+
+do $$
+declare r record;
+begin
+  for r in select id from public.applications loop
+    perform app_private.assess_qualification(r.id);
+  end loop;
+end;
+$$;
+
+
+-- =====================================================================
+-- 8. Verification
+-- =====================================================================
+
+select 'catalogue rows' as check, count(*)::text as result
+  from public.qualification_catalogue;
+
+-- Precedence and word boundaries. Every row below should read as stated.
+select t.wording,
+       coalesce(string_agg(p.code, ' + ' order by p.points desc), '(none)') as reads_as,
+       coalesce(max(p.points)::text, '—') as highest_points
+  from (values
+    ('Academic Matric',            'ACADEMIC_MATRIC only'),
+    ('Technical Matric',           'TECHNICAL_MATRIC only, not also ACADEMIC_MATRIC'),
+    ('Academic matric and NCV L4', 'ACADEMIC_MATRIC + NCV_L4'),
+    ('Academic Matric and N6',     'ACADEMIC_MATRIC + N6'),
+    ('NCV Level 4',                'NCV_L4 only, not N4'),
+    ('N4 and N5',                  'N4 + N5, highest 4'),
+    ('Grade 12',                   'ACADEMIC_MATRIC'),
+    ('BTech Mechanical',           '(none) — unrecognised, flagged for the reviewer'),
+    ('',                           '(none) — nothing captured')
+  ) as t(wording, expected)
+  left join lateral public.parse_qualifications(t.wording) p on true
+ group by t.wording, t.expected
+ order by t.wording;
+
+-- Confirm the ranking columns were untouched.
+select 'applications with a parsed qualification' as check,
+       count(*) filter (where cardinality(qual_codes) > 0)::text as result
+  from public.applications
+union all
+select 'applications where the text was not recognised',
+       count(*) filter (
+         where btrim(coalesce(highest_qualification,'')) <> ''
+           and cardinality(qual_codes) = 0)::text
+  from public.applications;
+
+
+-- ============================================================
+--  SECTION 35 — Group reference data
 -- ============================================================
 
 insert into manufacturing_stages (name, sort_order) values
@@ -2642,7 +7376,7 @@ on conflict (code) do nothing;
 
 
 -- ============================================================
---  SECTION 16 — Division seed — EDIT BEFORE RUNNING
+--  SECTION 36 — Division seed — EDIT BEFORE RUNNING
 -- ============================================================
 
 insert into division_profile (code, name, hold_points)
@@ -2672,7 +7406,7 @@ on conflict (family_id, stage_id) do nothing;
 
 
 -- ============================================================
---  SECTION 17 — Migration ledger stamp
+--  SECTION 37 — Migration ledger stamp
 --
 --  Running this script bypasses scripts/migrate.mjs, so the ledger it
 --  reads would be empty and the next run would try to apply everything
@@ -2690,23 +7424,43 @@ revoke all on public.qgrid_migrations from anon, authenticated;
 insert into public.qgrid_migrations (filename) values
   ('001-init-inspections.sql'),
   ('002-app-wiring.sql'),
+  ('002-form-config.min.sql'),
+  ('002-form-config.sql'),
+  ('003-create-intake.min.sql'),
+  ('003-create-intake.sql'),
   ('003-publish-roles.sql'),
   ('004-publish-approval-optional.sql'),
+  ('004-repair-intake-status.sql'),
   ('005-lock-ref-sequences.sql'),
+  ('005-school-stream.sql'),
   ('006-fix-silent-publish.sql'),
+  ('006-retention-storage-fix.sql'),
+  ('007-apprentice-register.sql'),
+  ('007-no-empty-published-revision.sql'),
   ('007-no-empty-templates.sql'),
   ('008-fault-list.sql'),
+  ('008-fix-role-guard.min.sql'),
+  ('008-fix-role-guard.sql'),
+  ('009-consent-ip-and-status-guard.sql'),
   ('009-photo-storage.sql'),
+  ('010-decline-reason.sql'),
   ('010-handover.sql'),
+  ('011-consent-editor.sql'),
   ('011-fault-clearing.sql'),
   ('012-dashboard.sql'),
+  ('012-journey-steps.min.sql'),
+  ('012-journey-steps.sql'),
   ('013-planned-dates.sql'),
-  ('014-ncr.sql')
+  ('014-ncr.sql'),
+  ('014-restrict-upload-types.sql'),
+  ('015-enforce-upload-limits.sql'),
+  ('015-ncr-status-and-close-path.sql'),
+  ('016-qualification-advisory.sql')
 on conflict (filename) do nothing;
 
 
 -- ============================================================
---  SECTION 18 — Verification
+--  SECTION 38 — Verification
 --  Run these and check the results before going any further.
 -- ============================================================
 

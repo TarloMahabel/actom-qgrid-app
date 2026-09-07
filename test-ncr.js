@@ -155,6 +155,21 @@ const { loadApp, suite } = require('./test/harness');
   s.check('suppliers are reported separately',
     an.$('page').textContent.includes('Schneider Electric'));
 
+  s.group('reports');
+  d.querySelector('#nav button[data-go="ncr"]').click(); await sleep(120);
+  d.querySelector('.tabs button[data-tab="4"]').click(); await sleep(160);
+  const rep = $('page').textContent;
+  s.check('closure time is reported as a median', rep.includes('Median closure'));
+  s.check('causes are grouped by category', rep.includes('Causes by category'));
+  s.check('with a running cumulative share', /cum\./.test(rep));
+  s.check('the open population is banded by age',
+    rep.includes('Open population by age') && rep.includes('Over 90 days'));
+  s.check('closure time is broken down by severity', rep.includes('Closure time by severity'));
+  s.check('repeat parts are listed', rep.includes('Parts raised more than once'));
+  /* A closure with no cause or no action is the one an auditor samples, so it is
+     counted on its own rather than folded into the closed total. */
+  s.check('incomplete closures are counted separately', rep.includes('Incomplete closures'));
+
   s.group('the module degrades before migration 014');
   const old = await loadApp('inspect', {
     afterMock: win => {

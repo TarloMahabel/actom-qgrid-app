@@ -22,10 +22,32 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.17.1";
+window.APP_VERSION = "0.19.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.19.0", d: "2026-09-07", t: "NCR reports",
+    items: [
+      "New Reports tab in NCR management, for the questions asked at the monthly review rather than the ones asked today.",
+      "Causes are grouped by category and ordered by how many nonconformances each accounts for, with a running share. If most of the register has no cause recorded, the chart says so rather than quietly ranking the rest.",
+      "Closure time is reported as a median, raised to closed, overall and by severity, with the slowest in each. A median rather than an average: one NCR forgotten for a year should not move the number everyone quotes.",
+      "The open population is broken into age bands, showing for each how many have no cause and no corrective action — so it is clear whether the old ones are old because they are hard or because nobody has touched them.",
+      "Parts raised more than once are listed with their distinct causes. The same part under the same cause twice means the corrective action did not work.",
+      "Closed NCRs missing a root cause or a corrective action are counted and called out. Closing now requires both, so any that appear predate that rule or were closed by editing the record — they are what an auditor samples."
+    ]
+  },
+  {
+    v: "0.18.0", d: "2026-09-07", t: "Closed NCRs said Verified, and the dashboard split in two",
+    items: [
+      "A closed NCR stayed on the register as \"Verified\" instead of \"Closed\". The closure itself was recorded correctly all along — the date, the person, everything — but the status shown beside it was worked out from the record as it had been a moment earlier, before the closure was written. Seven NCRs were affected and have been corrected.",
+      "The same fault made the earlier stages lag. Saving a root cause left the NCR showing its previous stage until something else happened to touch the record. Each stage now shows the moment it is saved.",
+      "An NCR could be closed by editing the record directly, going around the rule that a closure needs a root cause and a verified corrective action. Nothing in Grid did this, but the database allowed it. It no longer does: closing is only possible through the closing action, which checks both.",
+      "NCR management has moved out of Setup into its own section. It is daily work, not something configured once.",
+      "The dashboard is now two things. A main dashboard covering both inspections and nonconformance shows what needs attention today. The four analysis tabs that used to be the dashboard are now Inspection reports.",
+      "NCR management has a Reports tab. It is empty for now — the reports themselves are next."
+    ]
+  },
   {
     v: "0.17.1", d: "2026-08-28", t: "NCR database update would not apply",
     items: [

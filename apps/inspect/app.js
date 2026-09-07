@@ -53,12 +53,12 @@ const { supabase, DIVISION, BUILD, signIn, signOutNow, signInWithPassword,
 const S = {
   profile: null,
   division: null,                 // division_profile row (holds hold_points)
-  view: "dash", tab: 0,
+  view: "main", tab: 0,
   stages: [], departments: [], families: [], defects: [], equipment: [],
   templates: [], revisions: [], requirements: [],
   projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [], competencies: [], handovers: [],
   faultsByProject: [], actions: [], report: null,
-  ncrs: [], ncrActions: [], rootCauses: [], ncrOpen: null,
+  ncrs: [], ncrActions: [], rootCauses: [], ncrOpen: null, ncrReady: false,
   period: new Date().toISOString().slice(0, 7),
   dash: {},
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
@@ -198,6 +198,9 @@ async function loadData() {
     /* Not load-bearing: a division that has not run migration 014 must still
        be able to capture inspections. */
     S.ncrs = ncr.error ? [] : (ncr.data || []);
+    /* Distinguish "no NCRs" from "this division has not run 014", so the
+       dashboard reports an unmigrated division instead of four healthy zeros. */
+    S.ncrReady = !ncr.error;
     S.ncrActions = ncra.error ? [] : (ncra.data || []);
     S.rootCauses = rcs.error ? [] : (rcs.data || []);
     S.templates = tpl.data; S.revisions = rev.data; S.requirements = req.data;
@@ -246,18 +249,21 @@ function subscribe() {
    4. Views
    ------------------------------------------------------------ */
 const NAV = [
+  { g: "Main" },
+  { id: "main",  n: 1, t: "Dashboard",               col: "--m1", tabs: [] },
   { g: "Inspections" },
-  { id: "dash",  n: 1, t: "Dashboard",               col: "--m1",
-    tabs: ["Overview", "Faults per project", "Actions", "Pass rate by stage"] },
   { id: "work",  n: 2, t: "Inspection workbench",    col: "--m2", tabs: ["My queue", "Capture", "Register", "Failed checks"] },
   { id: "sched", n: 3, t: "Scheduling",              col: "--m3",
     tabs: ["Schedule", "Unassigned", "Projects & works orders"] },
+  { id: "dash",  n: 4, t: "Inspection reports",      col: "--m1",
+    tabs: ["Overview", "Faults per project", "Actions", "Pass rate by stage"] },
+  { g: "Nonconformance" },
+  { id: "ncr",   n: 5, t: "NCR management",          col: "--m7",
+    tabs: ["Register", "Repeat causes", "By department", "By supplier", "Reports"] },
   { g: "Setup" },
-  { id: "dsn",   n: 4, t: "Form designer",           col: "--m4", tabs: [] },
-  { id: "req",   n: 5, t: "Inspection requirements", col: "--m5", tabs: ["Requirements matrix"] },
-  { id: "ncr",   n: 6, t: "NCR management",           col: "--m4",
-    tabs: ["Register", "Repeat causes", "By department", "By supplier"] },
-  { id: "adm",   n: 7, t: "Administration",          col: "--m6",
+  { id: "dsn",   n: 6, t: "Form designer",           col: "--m4", tabs: [] },
+  { id: "req",   n: 7, t: "Inspection requirements", col: "--m5", tabs: ["Requirements matrix"] },
+  { id: "adm",   n: 8, t: "Administration",          col: "--m6",
     tabs: ["Users & roles", "Competency", "Reference lists", "Options", "Audit trail"] },
   { g: "Later phases" },
   ...["Calibration","Document control","Training & competency",
@@ -309,6 +315,35 @@ const myQueue = () => S.inspections.filter(i =>
 const unassigned = () => S.inspections.filter(i => !i.assigned_to && i.status === "scheduled");
 
 /* ---- 1 Dashboard ---- */
+/* The main dashboard spans both modules and is deliberately thin: it answers
+   "what needs attention today" and links into the work. Analysis belongs in the
+   two report surfaces, which is what the management review reads from. */
+function vMain(m) {
+  const open = (S.ncrs || []).filter(n => n.status !== "closed");
+  const kpi = (l, v, act) => `<div class="fld"><label>${l}</label>
+    <div class="ro">${v}</div>${act || ""}</div>`;
+
+  const ncrCard = !S.ncrReady
+    ? `<div class="empty">The nonconformance tables are not present on this division.
+         Database update 014 has not been applied here.</div>`
+    : `${kpi("Open NCRs", open.length)}
+       ${kpi("No root cause", open.filter(n => !n.root_cause).length)}
+       ${kpi("No corrective action", open.filter(n => !n.actions).length)}
+       ${kpi("Older than 30 days", open.filter(n => n.age_days > 30).length)}
+       <button class="btn sm" data-go="ncr">Open the register</button>`;
+
+  return head(m, "Across inspections and nonconformance. The detail is in the reports for each.",
+    `<button class="btn" data-act="refresh">Refresh</button>`)
+    + `<div class="two">
+      <div class="card"><h3>Nonconformance</h3><div class="bd">${ncrCard}</div></div>
+      <div class="card"><h3>Inspections</h3><div class="bd">
+        ${kpi("Failed checks outstanding", (S.failedChecks || []).length)}
+        ${kpi("Inspections in progress", (S.inspections || []).filter(i => i.status === "in_progress").length)}
+        <button class="btn sm" data-go="work">Open the workbench</button>
+      </div></div>
+    </div>`;
+}
+
 function vDash(m) {
   let body = "";
   if (S.tab === 0) body = dashOverview();
@@ -2039,7 +2074,8 @@ function vNcr(m) {
   if (S.tab === 0) body = ncrRegister();
   else if (S.tab === 1) body = ncrRepeat();
   else if (S.tab === 2) body = ncrByGroup("department");
-  else body = ncrByGroup("supplier");
+  else if (S.tab === 3) body = ncrByGroup("supplier");
+  else body = ncrReports();
 
   return head(m, "A non-conformance is recorded, its cause found, and something changed so it does not recur.",
     `<button class="btn" data-act="refresh">Refresh</button>
@@ -2172,6 +2208,177 @@ function ncrByGroup(kind) {
    is already done well; cause and corrective action are the two the old
    register never captured, so they get equal weight on screen instead of
    being the last two columns of twenty-nine. */
+/* ---------------------------------------------------------------
+   NCR reports (tab 5).
+
+   The register answers "what needs attention today". This answers the
+   questions asked once a month at the management review, and the ones
+   Clause 9.1.3 expects an answer to: which causes dominate, how long a
+   closure takes, how old the open population is, and whether closures
+   are complete rather than merely marked closed.
+
+   Everything here is derived from v_ncr_list. Nothing is stored twice.
+   --------------------------------------------------------------- */
+function ncrReports() {
+  const rows = S.ncrs || [];
+  if (!rows.length) return `<div class="card"><div class="empty">Nothing raised yet.
+    These reports need a few closed NCRs before they say anything useful.</div></div>`;
+
+  const closed = rows.filter(r => r.status === "closed");
+  const open = rows.filter(r => r.status !== "closed");
+
+  /* Lead time, raised to closed. Median rather than mean: one NCR left open
+     for a year would drag an average somewhere nobody recognises. */
+  const leads = closed
+    .filter(r => r.raised_at && r.closed_at)
+    .map(r => (new Date(r.closed_at) - new Date(r.raised_at)) / 86400000)
+    .sort((a, b) => a - b);
+  const median = leads.length
+    ? (leads.length % 2 ? leads[(leads.length - 1) / 2]
+       : (leads[leads.length / 2 - 1] + leads[leads.length / 2]) / 2)
+    : null;
+
+  /* A closure is complete when it has both a coded cause and at least one
+     corrective action. A closure without them is a record that something was
+     signed off, not evidence that anything changed. */
+  const incomplete = closed.filter(r => !r.root_cause || !r.actions);
+  const withCost = rows.filter(r => Number(r.cost_total || 0) > 0);
+
+  const bands = [["0–7 days", r => r.age_days <= 7],
+                 ["8–30 days", r => r.age_days > 7 && r.age_days <= 30],
+                 ["31–90 days", r => r.age_days > 30 && r.age_days <= 90],
+                 ["Over 90 days", r => r.age_days > 90]];
+
+  /* Repeats by part number. A part that keeps coming back is the strongest
+     signal in the register that a corrective action did not hold. */
+  const byPart = {};
+  for (const r of rows) {
+    const k = r.part_no || r.part_description;
+    if (!k) continue;
+    (byPart[k] ||= { part: k, n: 0, open: 0, causes: new Set() });
+    byPart[k].n++;
+    if (r.status !== "closed") byPart[k].open++;
+    if (r.root_cause) byPart[k].causes.add(r.root_cause);
+  }
+  const repeats = Object.values(byPart).filter(p => p.n > 1).sort((a, b) => b.n - a.n);
+
+  return `<div class="four" style="margin-bottom:14px">
+      <div class="card kpi"><div class="k">Closed</div><div class="v">${closed.length}</div>
+        <div class="d">of ${rows.length} raised</div></div>
+      <div class="card kpi ${median === null ? "" : median <= 30 ? "good" : "warn"}">
+        <div class="k">Median closure</div>
+        <div class="v">${median === null ? "—" : Math.round(median)}</div>
+        <div class="d">${median === null ? "nothing closed yet" : "days, raised to closed"}</div></div>
+      <div class="card kpi ${incomplete.length ? "alert" : "good"}">
+        <div class="k">Incomplete closures</div><div class="v">${incomplete.length}</div>
+        <div class="d">closed without a cause or an action</div></div>
+      <div class="card kpi ${withCost.length ? "" : "warn"}"><div class="k">Cost recorded</div>
+        <div class="v">${withCost.length}</div>
+        <div class="d">of ${rows.length} — ${rows.length ? Math.round(withCost.length / rows.length * 100) : 0}%</div></div>
+    </div>
+
+    ${incomplete.length ? `<div class="note q" style="margin-bottom:13px">
+      ${incomplete.length} closed NCR${incomplete.length === 1 ? " has" : "s have"} no root cause
+      or no corrective action recorded. Closing now requires both, so these predate that rule
+      or were closed by editing the record directly. They are the ones an auditor samples.
+    </div>` : ""}
+
+    <div class="card" style="margin-bottom:13px"><h3>Causes by category
+        <span class="cl">where the nonconformances actually come from</span></h3>
+      <div class="bd">${causePareto(rows)}</div></div>
+
+    <div class="two" style="margin-bottom:13px">
+      <div class="card"><h3>Open population by age</h3><div class="bd">
+        ${open.length ? T(["Age", "Open", "No cause", "No action"],
+          bands.map(([label, test]) => {
+            const b = open.filter(test);
+            return [label, `<b>${b.length}</b>`,
+                    b.filter(r => !r.root_cause).length || "—",
+                    b.filter(r => !r.actions).length || "—"];
+          })) : `<div class="empty">Nothing open. Worth checking that is true
+                  rather than that nobody is raising them.</div>`}
+      </div></div>
+
+      <div class="card"><h3>Closure time by severity</h3><div class="bd">
+        ${closed.length ? T(["Severity", "Closed", "Median days", "Slowest"],
+          [...new Set(closed.map(r => r.severity))].map(sev => {
+            const g = closed.filter(r => r.severity === sev && r.raised_at && r.closed_at)
+              .map(r => (new Date(r.closed_at) - new Date(r.raised_at)) / 86400000)
+              .sort((a, b) => a - b);
+            if (!g.length) return [pill(sev), "0", "—", "—"];
+            const m = g.length % 2 ? g[(g.length - 1) / 2]
+                    : (g[g.length / 2 - 1] + g[g.length / 2]) / 2;
+            return [pill(sev), String(g.length), `<b>${Math.round(m)}</b>`,
+                    `${Math.round(g[g.length - 1])} days`];
+          })) : `<div class="empty">Nothing closed yet.</div>`}
+      </div></div>
+    </div>
+
+    <div class="card"><h3>Parts raised more than once
+        <span class="cl">${repeats.length} of ${Object.keys(byPart).length} parts</span></h3>
+      <div class="bd">
+        <div class="note" style="margin-bottom:13px">A part appearing twice under the same
+          cause means the corrective action against it did not work. Appearing twice under
+          different causes usually means the part is harder to build than the drawing says.</div>
+        ${repeats.length ? T(["Part", "Raised", "Still open", "Distinct causes"],
+          repeats.slice(0, 20).map(p => [
+            `<b>${esc(p.part)}</b>`, String(p.n),
+            p.open ? pill(`${p.open} open`) : pill("all closed"),
+            p.causes.size ? esc([...p.causes].join(", "))
+              : `<span style="color:var(--warn)">none recorded</span>`]))
+          : `<div class="empty">No part has been raised twice yet.</div>`}
+      </div></div>`;
+}
+
+/* A pareto: bars by count descending, with the running cumulative share
+   beside each. The point of the ordering is that the top two or three bars
+   are usually most of the register, which is the argument for working on
+   them and not on the tail. */
+function causePareto(rows) {
+  const byCat = {};
+  for (const r of rows) {
+    const c = r.cause_category || (r.root_cause ? "Uncategorised" : "Cause not identified");
+    (byCat[c] ||= { cat: c, n: 0, open: 0 });
+    byCat[c].n++;
+    if (r.status !== "closed") byCat[c].open++;
+  }
+  const cats = Object.values(byCat).sort((a, b) => b.n - a.n);
+  if (!cats.length) return `<div class="empty">Nothing to group yet.</div>`;
+
+  const total = cats.reduce((a, c) => a + c.n, 0);
+  const max = cats[0].n;
+  let acc = 0;
+
+  return `<div style="display:flex;flex-direction:column;gap:7px">
+    ${cats.map((c, i) => {
+      acc += c.n;
+      const unknown = c.cat === "Cause not identified";
+      return `<div style="display:grid;grid-template-columns:210px 1fr 108px;
+              gap:11px;align-items:center">
+          <div style="font-size:12.5px;font-weight:600;text-align:right;
+               color:${unknown ? "var(--warn)" : "var(--ink)"}">${esc(c.cat)}</div>
+          <div style="background:var(--line);border-radius:4px;height:22px;position:relative">
+            <div style="width:${(c.n / max) * 100}%;height:100%;border-radius:4px;
+                 background:${unknown ? "var(--warn)" : CAT_COLOURS[i % CAT_COLOURS.length]}"></div>
+            <span style="position:absolute;left:8px;top:3px;font-size:11.5px;font-weight:700;
+                  color:${(c.n / max) > 0.18 ? "#fff" : "var(--ink)"}">${c.n}</span>
+          </div>
+          <div style="font-size:11.5px;color:var(--ink-2)">
+            ${Math.round(c.n / total * 100)}% · ${Math.round(acc / total * 100)}% cum.
+            ${c.open ? `<br><span style="color:var(--muted)">${c.open} open</span>` : ""}</div>
+        </div>`;
+    }).join("")}
+  </div>
+  <div class="note" style="margin-top:13px">${
+    cats[0].cat === "Cause not identified"
+      ? `The largest group is nonconformances with no cause recorded, so this chart is
+         mostly measuring what is not being filled in. Until that group shrinks the
+         ordering below it is not reliable.`
+      : `The top ${Math.min(3, cats.length)} categories are ${
+          Math.round(cats.slice(0, 3).reduce((a, c) => a + c.n, 0) / total * 100)
+        }% of everything raised.`}</div>`;
+}
+
 function ncrDetail(m) {
   const n = S.ncrs.find(x => x.id === S.ncrOpen);
   if (!n) { S.ncrOpen = null; return vNcr(m); }
@@ -3815,8 +4022,8 @@ function closeModal() { $("modal").classList.remove("open"); modalCtx = {}; }
 /* ------------------------------------------------------------
    6. Render and events
    ------------------------------------------------------------ */
-const VIEWS = { dash: vDash, work: vWork, sched: vSched, dsn: vDsn, req: vReq,
-                ncr: vNcr, adm: vAdm };
+const VIEWS = { main: vMain, dash: vDash, work: vWork, sched: vSched, dsn: vDsn,
+                req: vReq, ncr: vNcr, adm: vAdm };
 function render() {
   /* The report is its own view, not a tab: it has to be able to fill the page
      and print without the surrounding chrome. */
@@ -3832,7 +4039,7 @@ function render() {
   }
   document.body.classList.remove("printing");
   const m = NAV.find(x => x.id === S.view);
-  if (!m || (setupIds.includes(m.id) && !canConfigure())) { S.view = "dash"; S.tab = 0; return render(); }
+  if (!m || (setupIds.includes(m.id) && !canConfigure())) { S.view = "main"; S.tab = 0; return render(); }
   $("page").innerHTML = VIEWS[S.view](m) + foot();
 
   $("whoName").textContent = S.profile.full_name;
