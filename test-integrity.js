@@ -13,8 +13,8 @@ const app = read('apps/inspect/app.js');
 const html = read('apps/inspect/index.html');
 /* Only the numbered migrations. schema-complete.sql is generated from them,
    so scanning both counted every table twice. */
-const sql = fs.readdirSync(path.join(REPO, 'db')).filter(f => /^\d{3}-.*\.sql$/.test(f)).sort()
-  .map(f => read('db/' + f)).join('\n');
+const sql = fs.readdirSync(path.join(REPO, 'db/migrations')).filter(f => /^\d{3}-.*\.sql$/.test(f)).sort()
+  .map(f => read('db/migrations/' + f)).join('\n');
 
 s.group('the consolidated schema matches the migrations');
 /* schema-complete.sql is what a new division is built from. It was
@@ -29,7 +29,7 @@ catch (e) { stale = true; msg = (e.stderr || e.stdout || '').trim(); }
 s.check('db/schema-complete.sql is up to date', !stale, msg);
 
 const complete = read('db/schema-complete.sql');
-const migrations = fs.readdirSync(path.join(REPO, 'db')).filter(f => /^\d{3}-/.test(f)).sort();
+const migrations = fs.readdirSync(path.join(REPO, 'db/migrations')).filter(f => /^\d{3}-/.test(f)).sort();
 s.check('every migration is stamped in the ledger section',
   migrations.every(f => complete.includes(`('${f}')`)),
   migrations.filter(f => !complete.includes(`('${f}')`)).join(', '));
@@ -39,7 +39,7 @@ s.group('migrations are ordered and numbered once');
    different names. Both would have been applied, the second failing or
    silently redoing the first, and the ledger would have carried a number that
    did not identify one file. */
-const migFiles = fs.readdirSync(path.join(REPO, 'db'))
+const migFiles = fs.readdirSync(path.join(REPO, 'db/migrations'))
   .filter(f => /^\d{3}-.*\.sql$/.test(f)).sort();
 const numbers = migFiles.map(f => f.slice(0, 3));
 const dupes = numbers.filter((n, i) => numbers.indexOf(n) !== i);
@@ -52,7 +52,7 @@ s.check('numbering has no gaps',
    several statements in with a raw "column does not exist". */
 const dependent = ['007', '008', '010', '011', '012'];
 const unguarded = migFiles.filter(f => dependent.includes(f.slice(0, 3)))
-  .filter(f => !read('db/' + f).includes('PREREQUISITES'));
+  .filter(f => !read('db/migrations/' + f).includes('PREREQUISITES'));
 s.check('migrations that depend on earlier ones check for them',
   unguarded.length === 0, unguarded.join(', '));
 

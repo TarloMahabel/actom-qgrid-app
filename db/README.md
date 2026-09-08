@@ -1,4 +1,25 @@
-# Migrations
+# Database
+
+```
+db/
+  migrations/       ACTOM Grid. Numbered 001-015, one number each, applied in order.
+  seed/             Reference data and the per-division seeds.
+  test/             The PostgreSQL suite (RLS, triggers, RPCs).
+  superseded/       Kept for reference. NOT applied and NOT built into anything.
+  apprenticeship/   The Apprenticeship Portal's schema. A DIFFERENT PRODUCT.
+  schema-complete.sql   Generated. Do not edit.
+```
+
+**`apprenticeship/` is not this system's.** Those files were sitting loose in
+`db/` alongside Grid's, and `scripts/build-schema.mjs` globbed the directory
+flat — so `schema-complete.sql`, the script a new division is provisioned
+from, carried applicant, intake and consent tables into a quality database
+and stamped them into this product's migration ledger as though they were
+Grid's. Nothing outside that folder should ever read from it. The build now
+refuses to run if two migrations share a number, which is the condition that
+let the two sets sit unnoticed in one directory.
+
+## Migrations
 
 Numbered files, applied in order, once each. `scripts/migrate.mjs` records
 every applied file in `public.qgrid_migrations`, so a second run is a no-op.
@@ -52,10 +73,13 @@ select
 | 010 | Handing an in-progress inspection to another inspector, with a reason |
 | 011 | Who cleared a fault and who verified it |
 | 012 | Faults per project, defect categories, and the monthly actions |
+| 013 | Planned dates on generated schedules, with per-stage working-day offsets |
+| 014 | NCR management: the register, severities, causes and corrective actions |
+| 015 | NCR status derived from the row being written, and the closure path |
 
 ## A new division
 
-Do not replay all twelve. `db/schema-complete.sql` is generated from them by
+Do not replay all fifteen. `db/schema-complete.sql` is generated from them by
 `scripts/build-schema.mjs` and includes the ledger stamp, so the next
 migration run picks up from the right place. Regenerate it after adding a
 migration — `test-integrity.js` fails if it is stale.

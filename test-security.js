@@ -91,8 +91,8 @@ for (const [src, dest] of Object.entries(shared)) {
 }
 
 s.group('database controls are present in the migrations');
-const sql = read('db/001-init-inspections.sql') + read('db/002-app-wiring.sql');
-const sql4 = read('db/004-publish-approval-optional.sql');
+const sql = read('db/migrations/001-init-inspections.sql') + read('db/migrations/002-app-wiring.sql');
+const sql4 = read('db/migrations/004-publish-approval-optional.sql');
 /* The CHECK constraint enforced author != approver unconditionally, so it
    would have overridden the division setting and failed the publish with a
    constraint violation even after the function allowed it. Two things had to

@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.19.0";
+window.APP_VERSION = "0.19.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.19.1", d: "2026-09-08", t: "Database scripts separated by product",
+    items: [
+      "The script used to set up a new division was being built from this system's database files and the Apprenticeship Portal's together, because both sat in one folder. A division created from it would have received apprenticeship tables — applicants, intakes, consent records — inside its quality database. The two sets are now in separate folders and the setup script contains only this system's.",
+      "The setup script is less than half the size it was, and the list of migrations it records as applied now names only the fifteen that belong to this system. Previously it claimed the Apprenticeship Portal's as well, so a division would have reported itself running migrations it had never been given.",
+      "The build now stops if it finds two database files claiming the same number, rather than choosing one without saying so. That is what let the two sets sit unnoticed in one folder.",
+      "Nothing on screen changes. Recorded because a quality system's own change history is part of what an auditor asks for, and this affects how a division is set up."
+    ]
+  },
   {
     v: "0.19.0", d: "2026-09-07", t: "NCR reports",
     items: [
