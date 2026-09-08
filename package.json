@@ -9,10 +9,11 @@
     "dev": "npx --yes serve -l 8888 apps/inspect",
     "build": "node scripts/gen-config.mjs",
     "migrate": "node scripts/migrate.mjs",
-    "drift": "node scripts/verify-drift.mjs"
+    "drift": "node scripts/verify-drift.mjs",
+    "redteam": "node scripts/assist-redteam.mjs"
   },
   "devDependencies": {
-    "jsdom": "^24.0.0"
+    "jsdom": "^24.1.3"
   },
   "dependencies": {
     "puppeteer": "^25.9.0"

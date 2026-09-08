@@ -108,6 +108,14 @@
      window — a realtime event, a background reload — destroyed the input the
      dialog belonged to. The chosen file then landed on a detached element and
      the change event never reached the app: no error, nothing happened. -->
+<!-- The suggestion bar, also outside #page and for the same reason. A
+     suggestion carries an id that has to be answered — taken or declined —
+     and a re-render mid-read would destroy the element holding it, leaving
+     an audit row nobody ever answered. -->
+<div id="assistBar" class="hidden" style="position:absolute;z-index:60;background:var(--card);
+     border:1px solid var(--line);border-radius:9px;padding:8px 10px;box-shadow:0 6px 20px rgba(0,0,0,.13);
+     font-size:12px;max-width:min(560px,92vw)"></div>
+
 <input id="photoPicker"  type="file" accept="image/*" multiple hidden>
 <input id="cameraPicker" type="file" accept="image/*" capture="environment" hidden>
 
@@ -118,12 +126,14 @@
        supabase.js         wrapper — exposes window.GRID
        logo.js             ACTOM wordmark
        changelog.js        release notes for "What's new"
+       assist.js           assisted drafting — must precede app.js
        app.js              the application -->
 <script src="vendor/supabase.js"></script>
 <script src="config.js?v=1"></script>
 <script src="supabase.js?v=1"></script>
 <script src="logo.js?v=1"></script>
 <script src="changelog.js?v=1"></script>
+<script src="assist.js?v=1"></script>
 <script src="app.js?v=1"></script>
 </body>
 </html>

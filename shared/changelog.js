@@ -22,10 +22,21 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.19.1";
+window.APP_VERSION = "0.20.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.20.0", d: "2026-09-08", t: "Assisted drafting — suggestions, never decisions",
+    items: [
+      "Free-text fields can now offer help: spelling, a defect code that may fit the fault you have described, and a first draft of an NCR description from a recorded fault. Everything it offers is a suggestion you take, edit or ignore.",
+      "It will not tell you whether anything passes, fails or conforms, and it is not able to. That determination is yours, it is recorded against your name, and any suggestion that reads like a verdict is refused before it reaches your screen. The refusal is recorded too, so how often this happens can be looked at.",
+      "Spelling works with no connection and costs nothing: a list of the misspellings that actually occur in switchgear notes, checked as you type. The rest asks a model when you leave the field, and only then.",
+      "Defect codes suggested are always from this division's own list. A code that is not on your list cannot be suggested, so a fault cannot be filed against a category that does not exist here.",
+      "Every suggestion is written to a register before it is shown, with who it was offered to, on which record, and whether they took it. That register cannot be edited afterwards and nothing can delete from it.",
+      "Switched OFF for every division until someone turns it on in Administration, Optional features. The offline spelling list keeps working either way."
+    ]
+  },
   {
     v: "0.19.1", d: "2026-09-08", t: "Database scripts separated by product",
     items: [
