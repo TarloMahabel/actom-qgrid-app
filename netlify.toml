@@ -43,6 +43,34 @@
 [build.environment]
   NODE_VERSION = "20"
 
+# =====================================================================
+# ASSISTED DRAFTING — /api/assist
+#
+# One function. It holds the Anthropic API key so the browser never does,
+# writes an audit row for every suggestion before that suggestion is
+# shown, and enforces the rule that the assistant never decides whether
+# anything conforms. See netlify/functions/lib/guard.cjs.
+#
+# THREE ENVIRONMENT VARIABLES, PER SITE, SCOPED TO FUNCTIONS
+#
+#   ANTHROPIC_API_KEY   one key per division. Do NOT add it to the `need`
+#                       list in scripts/gen-config.mjs — that list is
+#                       checked at BUILD time and would halt the build on
+#                       every site that has not been given a key yet.
+#   SUPABASE_URL        already set for the build. In the Netlify UI a
+#   SUPABASE_ANON_KEY   variable can be scoped to Builds only, and these
+#                       two default that way. The function needs them at
+#                       RUNTIME as well: tick Functions on both, or every
+#                       call returns 500 while the site itself works.
+#
+# There is deliberately no service role key here. The function acts as the
+# signed-in user, so row level security applies to it exactly as it does
+# to the browser.
+# =====================================================================
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
 [[headers]]
   for = "/*"
   [headers.values]
@@ -96,6 +124,21 @@
   for = "/vendor/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
+
+# ---------------------------------------------------------------------
+# ORDER MATTERS. Redirect rules are first match wins, and the catch-all
+# below rewrites everything to index.html. Netlify is supposed to register
+# a function's own `config.path` ahead of redirects, but relying on that
+# would mean a POST to /api/assist quietly returning the application's
+# HTML with a 200 — which surfaces as a JSON parse error in the browser
+# and looks like the assistant is broken rather than unrouted. Stating it
+# here removes the question.
+# ---------------------------------------------------------------------
+[[redirects]]
+  from = "/api/assist"
+  to = "/.netlify/functions/assist"
+  status = 200
+  force = true
 
 [[redirects]]
   from = "/*"

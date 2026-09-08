@@ -76,6 +76,10 @@ const HP = () => !!S.division?.hold_points;
 /* Off by default: a division with one Quality Manager would otherwise be
    unable to publish anything it had built. */
 const NEEDS_2ND = () => !!S.division?.require_second_approver;
+/* Assisted drafting. Off unless the division switched it on. The server
+   refuses regardless of what this says — this only decides whether the
+   browser bothers asking. */
+const AI = () => !!S.division?.ai_assist;
 const isRole = (...r) => r.includes(S.profile?.role);
 const canConfigure = () => isRole("quality_manager", "sysadmin");
 const canPlan = () => isRole("planner", "quality_engineer", "quality_manager", "sysadmin");
@@ -1185,6 +1189,15 @@ function vAdm(m) {
         ? "On. A draft has to be published by someone other than its author, which means this division needs at least two people holding Quality Manager."
         : "Off. Whoever designs a form can publish it. Every publish is still recorded in the audit trail with who approved it and when, so the evidence exists either way."}</div>
       <div class="note q" style="margin-top:11px">Separating author from approver is the usual reading of ISO 9001 clause 7.5 for a controlled document. It is off because one Quality Manager builds the forms here and the rule would block every publish. Worth switching on once a second Quality Manager exists — and worth expecting a certification body to ask about it.</div>
+
+      <div class="sw" style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
+        <div><div class="t">Assisted drafting</div>
+          <div class="d">Spelling, a defect code that may fit, and a first draft of an NCR. Suggestions only. Off by default.</div></div>
+        <button class="tg ${AI() ? "on" : ""}" data-act="toggle-ai"></button></div>
+      <div class="note" style="margin-top:12px">${AI()
+        ? "On. Every suggestion is recorded before it is shown, with whether the inspector took it. Nothing is sent anywhere until someone types in a field that uses it."
+        : "Off. The offline spelling list still works — it needs no server and costs nothing. Only the parts that ask a model are switched off."}</div>
+      <div class="note q" style="margin-top:11px">It never decides whether anything conforms, passes or fails. That determination stays with the named inspector and is refused on the server, not merely discouraged: a suggestion that reads like a verdict is withheld and the refusal is recorded. Ask to see <b>v_ai_oversight</b> before an audit — how often the boundary fires, and on what, is the question that will be asked.</div>
     </div></div>`;
   }
   else { body = `<div class="card"><h3>Audit trail</h3><div class="bd" id="auditHost"><div class="empty">Loading…</div></div></div>`; loadAudit(); }
@@ -1713,6 +1726,19 @@ async function toggleSecondApprover() {
     if (error) throw error;
     await reload();
     toast(`Second approver ${NEEDS_2ND() ? "required" : "not required"} for templates.`, "ok");
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function toggleAssist() {
+  busy(true);
+  try {
+    const { error } = await supabase.from("division_profile")
+      .update({ ai_assist: !AI() }).eq("id", true);
+    if (error) throw error;
+    await reload();
+    if (window.Assist) window.Assist.init({ enabled: AI(), codes: S.defects });
+    toast(`Assisted drafting ${AI() ? "switched on" : "switched off"} for this division.`, "ok");
   } catch (e) { toast(explain(e), "bad"); }
   finally { busy(false); }
 }
@@ -2591,7 +2617,8 @@ function newNcrModal(fromFault) {
       <div class="fld"><label>Part number</label><input id="cPartNo"></div>
     </div>
     <div class="fld"><label>What is wrong</label>
-      <textarea id="cDetails" rows="3" placeholder="the non-conformance itself">${esc(
+      <textarea id="cDetails" rows="3" placeholder="the non-conformance itself"
+        data-assist="spell" data-assist-context="ncr">${esc(
         fc ? (fc.description
               /* A checkpoint fault carries no description of its own — the
                  checkpoint is the description. Pre-fill it rather than leaving
@@ -2678,7 +2705,8 @@ function ncrActionModal(ncrId) {
   openModal("Add a corrective action", `
     <div class="fld"><label>What will be done</label>
       <textarea id="aAct" rows="3"
-        placeholder="the change that stops this happening again"></textarea>
+        placeholder="the change that stops this happening again"
+        data-assist="spell" data-assist-context="ncr_action"></textarea>
       <div class="hint">Not what was done to this panel — that is containment. This is
         what changes so the next one is right.</div></div>
     <div class="two">
@@ -3035,7 +3063,8 @@ function handoverModal(inspectionId) {
         competency level ${required} can sign it off.</div></div>
     <div class="fld"><label>Why</label>
       <textarea id="hoReason" rows="3"
-        placeholder="e.g. T. Nkosi is off sick, panel is needed for despatch today"></textarea>
+        placeholder="e.g. T. Nkosi is off sick, panel is needed for despatch today"
+        data-assist="spell" data-assist-context="handover"></textarea>
       <div class="hint">Required. Two names on one inspection is defensible only
         if the record also says why.</div></div>
     <div class="note">Answers already captured stay as they are, recorded against
@@ -3165,6 +3194,7 @@ function faultTable(f) {
         </select>
         <input data-fault="${f.id}|${r.id}|description" value="${esc(r.description || "")}"
           placeholder="what is wrong"
+          data-assist="spell defect_code" data-assist-context="failed_check" data-assist-id="${r.id}"
           style="padding:6px 8px;border:1px solid ${r.description ? "var(--line)" : "var(--bad)"};border-radius:7px">
         <input data-fault="${f.id}|${r.id}|location" value="${esc(r.location || "")}"
           placeholder="e.g. LV door, left"
@@ -4166,6 +4196,7 @@ document.addEventListener("click", async e => {
     case "upgrade-inspection": return upgradeInspection(t.dataset.id);
     case "toggle-hp": return toggleHoldPoints();
     case "toggle-2nd": return toggleSecondApprover();
+    case "toggle-ai": return toggleAssist();
     case "add-project": return projectModal(null);
     case "edit-project": return projectModal(byId(S.projects, Number(t.dataset.id)));
     case "del-project": return deleteProject(Number(t.dataset.id));
@@ -4431,6 +4462,10 @@ async function boot() {
     return;
   }
   await withTimeout(loadData(), 30000, "Loading data");
+  /* After loadData, because the defect codes it offers are this
+     division's own list and the assistant may not suggest anything
+     outside it. Before buildNav, so the first render is already wired. */
+  if (window.Assist) window.Assist.init({ enabled: AI(), codes: S.defects });
   buildNav();
   render();
   subscribe();

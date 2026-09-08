@@ -76,6 +76,7 @@ select
 | 013 | Planned dates on generated schedules, with per-stage working-day offsets |
 | 014 | NCR management: the register, severities, causes and corrective actions |
 | 015 | NCR status derived from the row being written, and the closure path |
+| 016 | Assisted drafting: the register of every suggestion, and the division switch |
 
 ## A new division
 
