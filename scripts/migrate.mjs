@@ -51,14 +51,14 @@ for (const d of targets) {
       revoke all on public.qgrid_migrations from anon, authenticated;`],
       { stdio: "inherit" });
 
-    const files = readdirSync("db").filter(f => /^\d{3}-.*\.sql$/.test(f)).sort();
+    const files = readdirSync("db/migrations").filter(f => /^\d{3}-.*\.sql$/.test(f)).sort();
     for (const f of files) {
       const done = execFileSync("psql", [url, "-tAc",
         `select 1 from public.qgrid_migrations where filename = '${f}'`],
         { encoding: "utf8" }).trim();
       if (done === "1") { console.log(`  ${f} already applied`); continue; }
       console.log(`  applying ${f}`);
-      execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-q", "-f", `db/${f}`], { stdio: "inherit" });
+      execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-q", "-f", `db/migrations/${f}`], { stdio: "inherit" });
       execFileSync("psql", [url, "-q", "-c",
         `insert into public.qgrid_migrations (filename) values ('${f}')`], { stdio: "inherit" });
     }
