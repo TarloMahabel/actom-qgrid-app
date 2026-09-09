@@ -134,6 +134,10 @@
         state.enabled = false;
         state.turns.push({ role: 'ai', text: 'The assistant is switched off for this division.', reads: [] });
       } else if (!res.ok) {
+        /* The panel keeps its plain sentence; the console gets the cause.
+           An inspector does not need to read "model 404", and whoever is
+           debugging it should not have to guess. */
+        console.warn('[assist] /api/chat', res.status, data && data.detail, data && data.upstream);
         state.turns.push({
           role: 'ai', reads: [],
           text: (data && data.error) || 'The assistant is unavailable. Carry on without it.'

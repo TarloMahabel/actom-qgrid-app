@@ -181,8 +181,13 @@ s.check('the button is hidden until the division switches it on', /id="btnChat" 
 s.check('chat.js loads before app.js', html.indexOf('chat.js') < html.indexOf('app.js?v='));
 s.check('sync.sh distributes chat.js', read('shared/sync.sh').includes('chat.js'));
 s.check('the two copies are in step', cl === read('apps/inspect/chat.js'));
-s.check('/api/chat is routed above the catch-all',
-  read('netlify.toml').indexOf('from = "/api/chat"') < read('netlify.toml').indexOf('from = "/*"'));
+s.check('there is no forced rewrite fighting the function route',
+  !/from = "\/api\//.test(read('netlify.toml')));
+s.check('the function declares its own route',
+  /export const config = \{ path: "\/api\/chat" \}/.test(fn));
+s.check('the upstream status is carried out for diagnosis', /detail: apiError, upstream: apiDetail/.test(fn));
+s.check('the panel logs the cause without showing it to the inspector',
+  /console\.warn\('\[assist\] \/api\/chat'/.test(cl));
 
 const app = read('apps/inspect/app.js');
 s.check('the switch is separate from assisted drafting', /const AI_CHAT = \(\) =>[^;]*ai_chat/.test(app));

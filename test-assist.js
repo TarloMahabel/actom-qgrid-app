@@ -226,6 +226,9 @@ s.check('withheld suggestions are recorded, not silently dropped',
 s.check('the API key is never echoed to the client',
   !/ANTHROPIC_API_KEY[^;]*json\(/.test(fn));
 s.check('non-POST is refused', /req\.method !== "POST"/.test(fn));
+/* claude-sonnet-5 is not a model this account has. It was hardcoded from
+   memory and returned 400 on every careful-tier call. */
+s.check('no model name that does not exist', !/claude-sonnet-5/.test(fn));
 s.check('input length is capped', /LIMITS\.input/.test(fn));
 
 /* ------------------------------------------------------------------ */
@@ -233,11 +236,17 @@ s.group('deploy wiring');
 
 const toml = read('netlify.toml');
 s.check('the functions directory is declared', /\[functions\]/.test(toml) && /netlify\/functions/.test(toml));
-s.check('/api/assist is routed above the catch-all',
-  toml.indexOf('from = "/api/assist"') > -1 &&
-  toml.indexOf('from = "/api/assist"') < toml.indexOf('from = "/*"'));
+/* The opposite of what this used to assert. A forced rewrite from /api/*
+   to /.netlify/functions/* intercepts the request before function routing
+   and sends it to a path a v2 path-configured function does not occupy,
+   so it 404s with the function deployed and running. */
+s.check('there is no forced rewrite fighting the function route',
+  !/from = "\/api\//.test(toml), 'an /api/* redirect is back in netlify.toml');
+s.check('the function declares its own route',
+  /export const config = \{ path: "\/api\/assist" \}/.test(fn));
 s.check('the CSP already allows a same-origin call',
   read('scripts/gen-config.mjs').includes("connect-src 'self'"));
+s.check('the upstream status reaches the caller', /detail: `model \$\{res\.status\}`/.test(fn));
 s.check('ANTHROPIC_API_KEY is not required at build time',
   !/ANTHROPIC_API_KEY/.test(read('scripts/gen-config.mjs')));
 

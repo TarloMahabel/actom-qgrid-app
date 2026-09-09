@@ -44,7 +44,7 @@ const { checkChat, CHAT_REFUSAL } = guard;
 const { CHAT } = prompts;
 const { toolSchemas, plan, MAX_ROUNDS } = tools;
 
-const MODEL = process.env.ASSIST_MODEL_CHAT || "claude-sonnet-5";
+const MODEL = process.env.ASSIST_MODEL_CHAT || "claude-sonnet-4-5";
 const RATE_PER_MINUTE = 30;
 const HISTORY_TURNS = 10;      // prior exchanges rebuilt from the register
 const MAX_QUESTION = 2000;
@@ -129,7 +129,7 @@ export default async (req) => {
   const schemas = toolSchemas();
   const readsMade = [];
 
-  let answer = null, apiError = null;
+  let answer = null, apiError = null, apiDetail = null;
   try {
     for (let round = 0; round <= MAX_ROUNDS; round++) {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -143,7 +143,15 @@ export default async (req) => {
           ...(round < MAX_ROUNDS ? { tools: schemas } : {})
         })
       });
-      if (!res.ok) { apiError = `model ${res.status}`; break; }
+      if (!res.ok) {
+        /* The status is carried out to the caller. Every upstream failure
+           used to surface as one sentence, so a wrong model name, a dead
+           key and a network drop were indistinguishable — which turned a
+           two-minute fix into a day of elimination. */
+        apiError = `model ${res.status}`;
+        try { apiDetail = ((await res.json()).error || {}).message || null; } catch { }
+        break;
+      }
       const data = await res.json();
       const blocks = data.content || [];
       const calls = blocks.filter(b => b.type === "tool_use");
@@ -182,7 +190,10 @@ export default async (req) => {
     }
   } catch { apiError = "unreachable"; }
 
-  if (apiError) return json(502, { error: "The assistant is unavailable. Carry on without it." });
+  if (apiError) return json(502, {
+    error: "The assistant is unavailable. Carry on without it.",
+    detail: apiError, upstream: apiDetail
+  });
 
   const checked = checkChat(answer);
   const shown = checked.ok ? checked.value : CHAT_REFUSAL;

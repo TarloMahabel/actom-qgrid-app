@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.21.0";
+window.APP_VERSION = "0.21.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.21.1", d: "2026-09-09", t: "The assistant can actually be reached",
+    items: [
+      "Since it was added, the assistant answered \"unavailable\" to everything. Neither cause was in the assistant itself.",
+      "The addresses the panel calls were being intercepted by a routing rule and sent somewhere the assistant does not live, so requests failed before reaching it. The rule was added as a precaution and was itself the fault. Removed.",
+      "The model named for the longer jobs — drafting a nonconformance, explaining a requirement, and the whole question-and-answer panel — is not one this account has, so those were rejected outright. Corrected, and still changeable per division without a new release.",
+      "When it does fail, the reason is now recorded where someone diagnosing it can read it. Inspectors still see the same plain sentence; nobody has to guess between a wrong address, a wrong key and a network fault again."
+    ]
+  },
   {
     v: "0.21.0", d: "2026-09-09", t: "Ask about the register",
     items: [

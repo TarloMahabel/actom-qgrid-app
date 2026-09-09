@@ -126,26 +126,28 @@
     Cache-Control = "public, max-age=31536000, immutable"
 
 # ---------------------------------------------------------------------
-# ORDER MATTERS. Redirect rules are first match wins, and the catch-all
-# below rewrites everything to index.html. Netlify is supposed to register
-# a function's own `config.path` ahead of redirects, but relying on that
-# would mean a POST to /api/assist quietly returning the application's
-# HTML with a 200 — which surfaces as a JSON parse error in the browser
-# and looks like the assistant is broken rather than unrouted. Stating it
-# here removes the question.
+# NO /api/* REDIRECTS HERE. Deliberately, and the reason is worth keeping.
+#
+# Both functions declare their own route:
+#
+#     export const config = { path: "/api/chat" };
+#
+# A v2 function with a path config is served AT that path, and is not
+# necessarily reachable at /.netlify/functions/<name> as the older style
+# was. An earlier version of this file added forced rewrites from /api/*
+# to /.netlify/functions/*, on the reasoning that stating the route
+# explicitly was safer than trusting registration order.
+#
+# It was the opposite. force = true intercepts /api/chat BEFORE function
+# routing and rewrites it to a path the function does not occupy, so the
+# rewrite finds nothing and returns 404 — with the functions deployed,
+# listed and running the whole time. The caution caused the failure it
+# was meant to prevent, and cost most of a day to find.
+#
+# The catch-all below is fine as it stands: function routes are matched
+# ahead of it, so /api/* reaches the function and everything else falls
+# through to the single page.
 # ---------------------------------------------------------------------
-[[redirects]]
-  from = "/api/assist"
-  to = "/.netlify/functions/assist"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/api/chat"
-  to = "/.netlify/functions/chat"
-  status = 200
-  force = true
-
 [[redirects]]
   from = "/*"
   to = "/index.html"

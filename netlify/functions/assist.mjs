@@ -41,7 +41,7 @@ const { systemFor, userFor, SPEC } = prompts;
 
 const MODELS = {
   haiku:  process.env.ASSIST_MODEL_FAST    || "claude-haiku-4-5-20251001",
-  sonnet: process.env.ASSIST_MODEL_CAREFUL || "claude-sonnet-5"
+  sonnet: process.env.ASSIST_MODEL_CAREFUL || "claude-sonnet-4-5"
 };
 
 /* Per person, per minute. Generous for typing, mean enough that a runaway
@@ -133,7 +133,12 @@ export default async (req) => {
         messages: [{ role: "user", content: userFor(intent, { ...body, text }) }]
       })
     });
-    if (!res.ok) return json(502, { error: "The assistant is unavailable. Carry on without it." });
+    if (!res.ok) {
+      let detail = null;
+      try { detail = ((await res.json()).error || {}).message || null; } catch { }
+      return json(502, { error: "The assistant is unavailable. Carry on without it.",
+                         detail: `model ${res.status}`, upstream: detail });
+    }
     const data = await res.json();
     raw = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
   } catch {
