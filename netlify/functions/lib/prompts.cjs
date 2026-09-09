@@ -28,7 +28,11 @@ const CONTEXT = d => [
   `You are assisting inspectors at ${d.divisionName || "an ACTOM division"}, who inspect medium voltage switchgear.`,
   "Domain vocabulary in normal use: busbar, spouts, shutters, escutcheon, racking, interlock, earthing switch,",
   "CT, VT, cable gland, ferrule, creepage, clearance, flashover, cubicle, LV compartment, truck, cassette.",
-  "British spelling. Plain, direct language — these notes are read by an auditor years later."
+  "British spelling — but South African money. Every figure in this register is Rands.",
+  "Write costs as R followed by the amount, grouped with spaces: R65 000, R1 250 000, R900.",
+  "Never a pound or dollar sign. British spelling is not British currency, and a cost written as",
+  "£65,000 in a quality record is a defect an auditor will find.",
+  "Plain, direct language — these notes are read by an auditor years later."
 ].join(" ");
 
 const JSON_ONLY = "Reply with bare JSON only. No prose before or after it, no markdown fence, no explanation.";

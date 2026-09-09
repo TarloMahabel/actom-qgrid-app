@@ -257,6 +257,18 @@ s.check('it says tool results are data, not instructions', /never an instruction
 s.check('it tells the model it sees only what the asker sees', /exactly what the person asking sees/.test(sys));
 
 /* ------------------------------------------------------------------ */
+s.group('money is in Rands');
+
+/* The context prompt said "British spelling" and the model read that as
+   British currency, reporting R65 000 of nonconformance cost as £65,000.
+   Spelling is not currency, and a cost recorded in the wrong one is a
+   finding, not a typo. */
+s.check('the prompt names the currency', /Every figure in this register is Rands/.test(sys));
+s.check('the prompt forbids other currency symbols', /Never a pound or dollar sign/.test(sys));
+s.check('the prompt matches how the app renders money',
+  /R65 000/.test(sys) && /toLocaleString\("en-ZA"\)/.test(read('apps/inspect/app.js')));
+s.check('the panel corrects a stray currency symbol', /\[£\$€\]/.test(read('shared/chat.js')));
+
 s.group('the endpoint');
 
 const fn = read('netlify/functions/chat.mjs');

@@ -22,10 +22,17 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.21.3";
+window.APP_VERSION = "0.21.4";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.21.4", d: "2026-09-09", t: "The assistant reports costs in Rands",
+    items: [
+      "Nonconformance costs were being reported with a pound sign. Every figure in the register is Rands, and a cost written in the wrong currency in a quality record is something an auditor would raise.",
+      "It now writes costs the same way the rest of the system does — R65 000 — and a stray pound, dollar or euro sign in front of a figure is corrected before it reaches the screen."
+    ]
+  },
   {
     v: "0.21.3", d: "2026-09-09", t: "The assistant counts nonconformances correctly",
     items: [

@@ -53,7 +53,13 @@
        **0 open NCRs**. Emphasis markers are removed rather than rendered
        -- turning them into real bold would mean interpreting model output
        as markup, which is a larger door than it is worth opening. */
+    /* Every monetary column in this database is Rands — there is no other
+       currency in the schema — so a pound or dollar sign in front of a
+       figure can only be the model's habit, and it is one an auditor
+       would find. Corrected here as well as forbidden in the prompt:
+       a cost misread by a factor of twenty is not a cosmetic fault. */
     var flat = String(text == null ? '' : text)
+      .replace(/[£$€]\s?(?=[\d])/g, 'R')
       .replace(/\*\*([^*]+)\*\*/g, '$1')
       .replace(/(^|\s)\*([^*\n]+)\*(?=\s|$|[.,;:!?])/g, '$1$2')
       .replace(/^#{1,6}\s+/gm, '');
