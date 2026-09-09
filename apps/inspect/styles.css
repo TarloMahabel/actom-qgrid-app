@@ -288,12 +288,30 @@ tbody tr:last-child td{border-bottom:0}
 
 .modal{position:fixed;inset:0;background:rgba(11,37,64,.45);display:none;align-items:flex-start;justify-content:center;z-index:200;padding:34px 14px;overflow-y:auto}
 .modal.open{display:flex}
-.mbox{background:#fff;border-radius:12px;width:100%;max-width:860px;box-shadow:0 20px 60px rgba(11,37,64,.3)}
-.mhead{padding:14px 19px;background:#fff;border-bottom:1px solid var(--line);border-radius:12px 12px 0 0;display:flex;align-items:center;gap:10px}
+/* A modal is a column that fits the screen: the title and the buttons hold
+   still and the middle scrolls. Before this the box had no height limit and
+   the overlay scrolled instead, so on a tall dialog — Raise an NCR, or
+   What's new after a big release — the heading and the close button
+   scrolled off the top and the Raise button sat below the fold. The same
+   shape as .props .pb, which has done this correctly all along.
+   dvh after vh: on a tablet browser vh includes the address bar, so the
+   footer ends up under it. Browsers that do not know dvh keep the vh line. */
+.mbox{background:#fff;border-radius:12px;width:100%;max-width:860px;box-shadow:0 20px 60px rgba(11,37,64,.3);
+  display:flex;flex-direction:column;max-height:calc(100vh - 68px);max-height:calc(100dvh - 68px)}
+.mhead{padding:14px 19px;background:#fff;border-bottom:1px solid var(--line);border-radius:12px 12px 0 0;display:flex;align-items:center;gap:10px;flex:0 0 auto}
 .mhead h2{margin:0;font-size:16px;font-weight:700;letter-spacing:-.015em;color:var(--ink)}
 .mhead .x{margin-left:auto;background:none;border:0;font-size:22px;color:var(--muted);line-height:1}
 .mhead .x:hover{color:var(--ink)}
-.mbody{padding:19px} .mfoot{padding:13px 19px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;background:#fbfcfd;border-radius:0 0 12px 12px}
+/* overscroll-behavior:contain stops a flick at the end of the list from
+   scrolling the page behind the dialog, which on a tablet reads as the
+   modal having jumped. */
+.mbody{padding:19px;flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.mfoot{padding:13px 19px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;background:#fbfcfd;border-radius:0 0 12px 12px;flex:0 0 auto}
+/* A tablet in landscape is about 700px tall and the trolley ones less.
+   34px of padding top and bottom is a fifth of the screen. */
+@media(max-height:640px){.modal{padding:10px 10px}
+  .mbox{max-height:calc(100vh - 20px);max-height:calc(100dvh - 20px)}
+  .mbody{padding:14px}}
 .timeline{position:relative;padding-left:19px}
 .timeline:before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:2px;background:var(--line)}
 .tl{position:relative;padding:0 0 13px}

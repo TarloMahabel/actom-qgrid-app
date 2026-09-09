@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.20.0";
+window.APP_VERSION = "0.20.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.20.1", d: "2026-09-09", t: "Dialogs fit the screen",
+    items: [
+      "A tall dialog no longer runs off the screen. Raise an NCR, Hand over, Add a corrective action and What's new were all taller than a tablet screen, and the whole dialog scrolled rather than its contents — so the heading and the close button scrolled out of sight and the Raise button sat below the bottom of the screen where it looked as though it was missing.",
+      "The heading and the buttons now stay put and the middle scrolls, which is how the form designer's panels have always worked.",
+      "On a short screen, such as a tablet held sideways, dialogs now use almost the full height instead of leaving a wide border top and bottom.",
+      "The stage table in the Generate dialog can be scrolled sideways on a narrow screen instead of being cut off.",
+      "The suggestion bar from assisted drafting stayed where the page was rather than where the field was once a dialog scrolled, and could be pushed off the right-hand edge entirely. It now follows the field, flips above it when there is no room below, and closes as soon as anything scrolls."
+    ]
+  },
   {
     v: "0.20.0", d: "2026-09-08", t: "Assisted drafting — suggestions, never decisions",
     items: [

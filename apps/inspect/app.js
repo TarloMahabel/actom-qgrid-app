@@ -3997,13 +3997,13 @@ function renderGeneratePreview() {
   host.innerHTML = `<div style="margin:4px 0 12px">
     <div class="eyebrow" style="margin-bottom:7px">${total} inspection${total === 1 ? "" : "s"},
       ${rows[0].when.toLocaleDateString("en-ZA")} to ${rows[rows.length - 1].when.toLocaleDateString("en-ZA")}</div>
-    <table><thead><tr><th>Stage</th><th>Working days out</th><th>Planned</th><th>How many</th>
+    <div style="overflow-x:auto"><table><thead><tr><th>Stage</th><th>Working days out</th><th>Planned</th><th>How many</th>
       </tr></thead><tbody>
       ${rows.map(r => `<tr style="cursor:default"><td>${esc(r.stage)}</td>
         <td>${r.offset === 0 ? "same day" : `+${r.offset}`}</td>
         <td><b>${r.when.toLocaleDateString("en-ZA", { weekday: "short", day: "2-digit", month: "short" })}</b></td>
         <td>${r.n}</td></tr>`).join("")}
-    </tbody></table>
+    </tbody></table></div>
     <div class="hint" style="margin-top:7px">Change how far out a stage falls under
       Administration → Reference lists.</div></div>`;
 }
