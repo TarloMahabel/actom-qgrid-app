@@ -22,10 +22,22 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.20.1";
+window.APP_VERSION = "0.21.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.21.0", d: "2026-09-09", t: "Ask about the register",
+    items: [
+      "A new panel, from the speech bubble at the top right, answers questions about this division's own records: which nonconformances are open, which parts keep coming back, what goes wrong most often, how a works order is progressing.",
+      "It reads exactly what you can read. It runs under your own permissions, so it cannot show you a record you could not open yourself, and if it finds nothing it will say so rather than imply the record does not exist.",
+      "It cannot run arbitrary searches. There is a fixed list of lookups it is allowed to make, and each answer shows which of them it used. An answer with nothing listed came from general knowledge, not from your register.",
+      "It writes nothing. There is no lookup that changes a record, so it cannot raise, close or edit anything.",
+      "It will not tell you whether something conforms, passes or should be accepted, and will not give you a tolerance, a torque figure or a disposition. Ask it and the whole answer is replaced with a note pointing you to your Quality Engineer — the refusal is recorded, and Quality Managers can read the list of them.",
+      "Every question and answer is kept, including refused ones, and cannot be edited or deleted afterwards.",
+      "Switched off for every division until someone turns it on in Administration. It is a separate switch from assisted drafting, so a division can have one without the other."
+    ]
+  },
   {
     v: "0.20.1", d: "2026-09-09", t: "Dialogs fit the screen",
     items: [
