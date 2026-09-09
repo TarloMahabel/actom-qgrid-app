@@ -56,12 +56,24 @@ const oneOf = (v, list) => (typeof v === "string" && list.includes(v)) ? v : nul
 const month = v => (typeof v === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(v)) ? v : null;
 
 const SEVERITY = ["minor", "major", "critical"];
-const NCR_STATUS = ["open", "in_progress", "closed"];
-const INSP_STATUS = ["planned", "in_progress", "submitted", "approved", "rejected"];
+/* Derived by a trigger, not an enum. Only these two values occur. */
+const NCR_STATUS = ["open", "closed"];
+const INSP_STATUS = ["scheduled", "in_progress"];
 
 /* Each tool: what the model is told it does, what it may pass, and how
    that becomes exactly one PostgREST request. `count` asks for an exact
-   total in the Content-Range header. */
+   total in the Content-Range header.
+
+   EVERY COLUMN NAMED BELOW IS ASSERTED AGAINST THE MIGRATIONS by
+   test-chat.js. The first version of this file was written from memory
+   and got four column names wrong on the very first tool — raised_on for
+   raised_at, part for part_description, part_number for part_no, and a
+   summary column that does not exist. PostgREST rejects the whole select,
+   so the tool returned nothing and the model told the inspector the
+   lookup had failed. Worse, `repeat_parts` was pointed at v_ncr_repeat,
+   which is causes by month and not parts at all — a mislabelled tool is
+   more dangerous than a broken one, because the answer comes back
+   confident and wrong. */
 const TOOLS = {
   open_ncrs: {
     description: "Nonconformance reports, most recently raised first. Filter by status or severity. Returns a total count as well as the rows.",
@@ -71,10 +83,10 @@ const TOOLS = {
       limit:    { type: "integer", description: `1 to ${MAX_ROWS}, default 10.` }
     },
     build(a) {
-      const q = ["select=ref,raised_on,severity,status,part,part_number,department,supplier,summary"];
+      const q = ["select=ref,raised_at,severity,status,disposition,part_description,part_no,department,project_code,supplier,root_cause,age_days,actions_open"];
       q.push(`status=eq.${oneOf(a.status, NCR_STATUS) || "open"}`);
       const sev = oneOf(a.severity, SEVERITY); if (sev) q.push(`severity=eq.${sev}`);
-      q.push("order=raised_on.desc", `limit=${int(a.limit, 1, MAX_ROWS) || 10}`);
+      q.push("order=raised_at.desc", `limit=${int(a.limit, 1, MAX_ROWS) || 10}`);
       return { path: `v_ncr_list?${q.join("&")}`, count: true };
     }
   },
@@ -89,53 +101,49 @@ const TOOLS = {
     }
   },
 
-  repeat_parts: {
-    description: "Parts with more than one nonconformance raised against them, and the distinct causes. The same part under the same cause twice means a corrective action did not work.",
-    params: { limit: { type: "integer", description: `1 to ${MAX_ROWS}, default 10.` } },
-    build(a) { return { path: `v_ncr_repeat?select=*&limit=${int(a.limit, 1, MAX_ROWS) || 10}` }; }
+  ncr_by_cause: {
+    description: "Nonconformances grouped by root cause and month, with how many are still open and what they have cost. Use this for 'what causes most of our nonconformance'.",
+    params: { limit: { type: "integer", description: `1 to ${MAX_ROWS}, default 15.` } },
+    build(a) {
+      return { path: `v_ncr_repeat?select=period,cause,category,ncrs,cost,still_open&order=ncrs.desc&limit=${int(a.limit, 1, MAX_ROWS) || 15}` };
+    }
   },
 
   ncr_by_department: {
-    description: "Nonconformance counts grouped by the department held responsible.",
+    description: "Nonconformance counts and costs grouped by the department held responsible, by month.",
     params: {},
-    build() { return { path: "v_ncr_by_department?select=*&limit=" + MAX_ROWS }; }
+    build() { return { path: `v_ncr_by_department?select=department,period,ncrs,cost,still_open&order=ncrs.desc&limit=${MAX_ROWS}` }; }
   },
 
   faults_by_project: {
-    description: "Faults recorded per project and defect category for a given month.",
+    description: "Faults recorded per project and defect category for a given month, and how many are still outstanding.",
     params: { period: { type: "string", description: "Month as YYYY-MM. Defaults to this month." } },
     build(a) {
       const p = month(a.period) || new Date().toISOString().slice(0, 7);
-      return { path: `v_faults_by_project?select=*&period=eq.${p}-01&limit=${MAX_ROWS}` };
+      return { path: `v_faults_by_project?select=period,project_code,project_name,category,faults,outstanding&period=eq.${p}-01&limit=${MAX_ROWS}` };
     }
   },
 
   defect_pareto: {
     description: "Defect codes ordered by how many faults each accounts for. Use this for 'what goes wrong most often'.",
     params: { limit: { type: "integer", description: `1 to ${MAX_ROWS}, default 10.` } },
-    build(a) { return { path: `v_defect_pareto?select=*&limit=${int(a.limit, 1, MAX_ROWS) || 10}` }; }
-  },
-
-  inspections: {
-    description: "Inspections, most recent first. Filter by status or works order code. Returns a total count as well as the rows.",
-    params: {
-      status: { type: "string", enum: INSP_STATUS },
-      works_order: { type: "string", description: "The works order code, such as RE9127." },
-      limit:  { type: "integer", description: `1 to ${MAX_ROWS}, default 10.` }
-    },
     build(a) {
-      const q = ["select=ref,status,stage,serial,planned_on,submitted_at"];
-      const st = oneOf(a.status, INSP_STATUS); if (st) q.push(`status=eq.${st}`);
-      const wo = str(a.works_order, 40); if (wo) q.push(`works_order=eq.${encodeURIComponent(wo)}`);
-      q.push("order=planned_on.desc", `limit=${int(a.limit, 1, MAX_ROWS) || 10}`);
-      return { path: `inspections?${q.join("&")}`, count: true };
+      return { path: `v_defect_pareto?select=code,defect,occurrences,units_affected,awaiting&limit=${int(a.limit, 1, MAX_ROWS) || 10}` };
     }
   },
 
-  requirements: {
-    description: "Which inspections are required for a product family and manufacturing stage, and which template applies.",
-    params: {},
-    build() { return { path: `inspection_requirements?select=*&limit=${MAX_ROWS}` }; }
+  open_inspections: {
+    description: "Inspections still to be done — scheduled or in progress. Filter by status. This does not include completed or cancelled ones.",
+    params: {
+      status: { type: "string", enum: INSP_STATUS },
+      limit:  { type: "integer", description: `1 to ${MAX_ROWS}, default 10.` }
+    },
+    build(a) {
+      const q = ["select=ref,status,stage_name,unit_ref,planned_date,inspector"];
+      const st = oneOf(a.status, INSP_STATUS); if (st) q.push(`status=eq.${st}`);
+      q.push("order=planned_date.asc", `limit=${int(a.limit, 1, MAX_ROWS) || 10}`);
+      return { path: `v_open_work?${q.join("&")}`, count: true };
+    }
   }
 };
 

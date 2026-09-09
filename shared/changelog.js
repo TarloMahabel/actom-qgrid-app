@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.21.1";
+window.APP_VERSION = "0.21.2";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.21.2", d: "2026-09-09", t: "The assistant can read the register properly",
+    items: [
+      "Asking the assistant anything about nonconformances came back saying the lookup had failed. The list of fields it asked the database for had four names that do not exist, so the whole request was rejected.",
+      "One lookup was worse than broken: it was labelled as listing parts with more than one nonconformance, but was actually reading causes by month. A wrong label is more dangerous than a failure, because the answer comes back confident. It is now described as what it is, and there is no repeat-parts lookup until one exists properly.",
+      "Inspections can now be asked about — what is scheduled and what is in progress, with the stage and who it is assigned to.",
+      "The tests now check every field every lookup asks for against the actual database, so a lookup that names something that does not exist cannot be released again."
+    ]
+  },
   {
     v: "0.21.1", d: "2026-09-09", t: "The assistant can actually be reached",
     items: [

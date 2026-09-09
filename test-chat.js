@@ -78,6 +78,87 @@ s.check('no tool declares a required argument to the model',
   schemas.every(t => Array.isArray(t.input_schema.required) && t.input_schema.required.length === 0));
 
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   Every column and relation a tool names must actually exist.
+
+   This exists because the first version of tools.cjs was written from
+   memory. open_ncrs alone named four columns that are not on v_ncr_list
+   (raised_on, part, part_number, summary), PostgREST rejected the whole
+   select, and the panel told the inspector the lookup had failed. A
+   static check is the right shape for this: it costs nothing and it
+   catches the whole class.
+   ------------------------------------------------------------------ */
+s.group('every tool queries columns that exist');
+
+const migDir = path.join(REPO, 'db/migrations');
+const allSql = fs.readdirSync(migDir).filter(f => /^\d{3}-.*\.sql$/.test(f))
+  .map(f => fs.readFileSync(path.join(migDir, f), 'utf8')).join('\n');
+
+/* The text of one view or table definition, so a column is checked
+   against ITS OWN relation rather than against the schema as a whole —
+   otherwise a column that exists on some other table passes. */
+function rawDef(rel) {
+  const v = new RegExp(`create or replace view ${rel}\\b[\\s\\S]*?;`, 'i').exec(allSql);
+  if (v) return v[0];
+  const t = new RegExp(`create table (?:if not exists )?(?:public\\.)?${rel}\\b[\\s\\S]*?\\n\\);`, 'i').exec(allSql);
+  return t ? t[0] : null;
+}
+
+/* A view written as `select i.*, ...` inherits every column of its base
+   table, so checking the view text alone reports real columns as missing.
+   v_open_work is exactly that. Pull in the tables it selects from. */
+function defOf(rel) {
+  const def = rawDef(rel);
+  if (!def || !/\w+\.\*/.test(def)) return def;
+  const bases = [...def.matchAll(/\b(?:from|join)\s+([a-z_]+)/gi)].map(m => m[1]);
+  return def + bases.map(b => rawDef(b) || '').join('\n');
+}
+
+const SAMPLE = {
+  open_ncrs: { status: 'open', limit: 5 },
+  ncr_by_ref: { ref: 'NCR-26-0001' },
+  ncr_by_cause: {}, ncr_by_department: {}, faults_by_project: {},
+  defect_pareto: {}, open_inspections: {}
+};
+
+for (const name of Object.keys(TOOLS)) {
+  const built = plan(name, SAMPLE[name] || {});
+  s.check(`${name} builds a query`, !!built);
+  if (!built) continue;
+
+  const rel = built.path.split('?')[0];
+  const def = defOf(rel);
+  s.check(`${name} targets a relation that exists: ${rel}`, !!def);
+  if (!def) continue;
+
+  /* security_invoker is what makes RLS apply to a view. A tool pointed at
+     a view without it would read past the asking person's permissions —
+     the one failure this whole design is meant to prevent. */
+  if (rel.startsWith('v_')) {
+    s.check(`${rel} is security_invoker`, /security_invoker\s*=\s*on/i.test(def));
+    s.check(`${rel} is granted to authenticated`,
+      new RegExp(`grant select on [^;]*\\b${rel}\\b`, 'i').test(allSql));
+  }
+
+  const sel = /select=([^&]+)/.exec(built.path);
+  const cols = sel && sel[1] !== '*' ? sel[1].split(',') : [];
+  const missing = cols.filter(c => !new RegExp(`\\b${c}\\b`).test(def));
+  s.check(`${name} selects only columns ${rel} has`, missing.length === 0, missing.join(', '));
+
+  /* An order or filter on a column that is not there fails the same way
+     a bad select does, and is easier to miss. */
+  const refs = [...built.path.matchAll(/[?&](?:order=)?([a-z_]+)(?:=eq\.|\.(?:asc|desc))/g)]
+    .map(m => m[1]).filter(c => !['select', 'limit', 'order', 'offset'].includes(c));
+  const badRefs = refs.filter(c => !new RegExp(`\\b${c}\\b`).test(def));
+  s.check(`${name} filters and orders on real columns`, badRefs.length === 0, badRefs.join(', '));
+}
+
+/* The mislabelling that prompted all of this. v_ncr_repeat groups by
+   cause and month; it says nothing about parts. */
+s.check('no tool claims to list repeat parts', !Object.keys(TOOLS).includes('repeat_parts'));
+s.check('the cause tool is described as causes, not parts',
+  /grouped by root cause/i.test(TOOLS.ncr_by_cause.description));
+
 s.group('what it may say');
 
 const REFUSE = [
