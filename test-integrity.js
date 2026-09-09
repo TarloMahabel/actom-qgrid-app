@@ -273,6 +273,43 @@ s.check('a background reload defers while a dialog is open',
 s.check('the CSP allows images from the project origin',
   read('scripts/gen-config.mjs').includes("img-src 'self' data: blob: ${url}"));
 
+s.group('a modal fits the screen it is shown on');
+/* The Raise an NCR dialog was taller than the viewport, and because the box
+   had no height limit the OVERLAY scrolled instead of the body: the heading
+   and the close button scrolled off the top and the Raise button sat below
+   the fold. Every field is asserted because the broken version looked
+   finished — it only failed on a dialog tall enough, on a screen short
+   enough. */
+const mCss = read('shared/inspect.css');
+s.check('the modal box is capped to the viewport', /\.mbox\{[^}]*max-height:calc\(100dvh/.test(mCss));
+s.check('and has a vh fallback for browsers without dvh', /\.mbox\{[^}]*max-height:calc\(100vh/.test(mCss));
+s.check('the modal box is a column', /\.mbox\{[^}]*flex-direction:column/.test(mCss));
+s.check('the body is what scrolls', /\.mbody\{[^}]*overflow-y:auto/.test(mCss));
+s.check('the heading does not scroll away', /\.mhead\{[^}]*flex:0 0 auto/.test(mCss));
+s.check('the buttons do not scroll away', /\.mfoot\{[^}]*flex:0 0 auto/.test(mCss));
+s.check('a short screen gets its padding back', /@media\(max-height:640px\)/.test(mCss));
+
+/* A table wider than the dialog needs somewhere to scroll. The generate
+   dialog's stage table had no wrapper. */
+const screenTables = [...app.matchAll(/<table(?![^>]*class="r)/g)];
+const unwrappedT = screenTables.filter(m => {
+  const before = app.slice(Math.max(0, m.index - 260), m.index);
+  return !/overflow-x:auto|class="mx"/.test(before);
+});
+s.check('every on-screen table can scroll sideways', unwrappedT.length === 0,
+  unwrappedT.map(m => app.slice(m.index, m.index + 60).split('\n')[0]).join(' | '));
+
+s.group('the suggestion bar cannot be pushed off screen');
+const aCl = read('shared/assist.js');
+s.check('it is positioned against the viewport, not the document',
+  !/window\.scrollY|window\.scrollX/.test(aCl));
+s.check('it is clamped to the window', /window\.innerWidth - w - 8/.test(aCl));
+s.check('it flips above the field when there is no room below', /r\.top - h - 6/.test(aCl));
+s.check('it is dismissed when anything scrolls',
+  /addEventListener\('scroll', hide, true\)/.test(aCl));
+s.check('and the shell element is fixed, not absolute',
+  /id="assistBar"[^>]*position:fixed/.test(html));
+
 s.group('no dead code left behind');
 for (const token of ['generateSchedule', 'saveGenerate', 'refCard', 'WORK_LISTS', 'tplPick']) {
   s.check(`${token} is gone`, !app.includes(token));

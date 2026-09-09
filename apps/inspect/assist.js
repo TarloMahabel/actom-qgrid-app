@@ -145,16 +145,33 @@
     state.field = null;
   }
 
+  /* Fixed to the viewport, not the document.
+     Every field that uses this sits inside a modal, and a modal body scrolls
+     independently of the page — so document coordinates put the bar somewhere
+     the field no longer is. Viewport coordinates are right for both, and the
+     bar is dismissed on any scroll rather than chased, which is why there is
+     a capturing scroll listener in init.
+     It also has to stay on screen: anchoring to the left edge of a field on
+     the right-hand side of a two-column dialog pushed the bar off the page,
+     where it was still focusable but invisible. */
   function show(field, html) {
     var el = bar();
     if (!el) return;
     state.field = field;
     el.innerHTML = html;
     el.classList.remove('hidden');
+    el.style.top = '-9999px';          // measure before placing
     var r = field.getBoundingClientRect();
-    el.style.top = (window.scrollY + r.bottom + 6) + 'px';
-    el.style.left = (window.scrollX + r.left) + 'px';
-    el.style.minWidth = Math.max(260, r.width) + 'px';
+    var room = Math.min(560, Math.max(260, window.innerWidth - 24));
+    el.style.minWidth = Math.max(260, Math.min(r.width, room)) + 'px';
+    var w = el.offsetWidth || 260, h = el.offsetHeight || 44;
+    /* Below the field if it fits, above if it does not, and never off the
+       top — a suggestion an inspector cannot see is worse than none, because
+       the audit row says one was offered. */
+    var top = (window.innerHeight - r.bottom > h + 14) ? r.bottom + 6
+            : Math.max(8, r.top - h - 6);
+    el.style.top = Math.min(top, Math.max(8, window.innerHeight - h - 8)) + 'px';
+    el.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
   }
 
   function chip(label, value, note) {
@@ -359,6 +376,10 @@
     document.addEventListener('input', onInput);
     document.addEventListener('focusout', function (e) { onLeave(e).catch(function () { }); });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') hide(); });
+    /* Capturing, so it fires for a scroll inside a modal body as well as the
+       page. Dismissing leaves the audit row unanswered, which is a state the
+       register models deliberately — accepted is null means nobody said. */
+    document.addEventListener('scroll', hide, true);
     window.addEventListener('resize', hide);
   }
 

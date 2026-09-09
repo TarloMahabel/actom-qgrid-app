@@ -80,6 +80,9 @@ const NEEDS_2ND = () => !!S.division?.require_second_approver;
    refuses regardless of what this says — this only decides whether the
    browser bothers asking. */
 const AI = () => !!S.division?.ai_assist;
+/* The question-and-answer assistant, switched separately: a division may
+   want drafting help in a field without a chatbot over its register. */
+const AI_CHAT = () => !!S.division?.ai_chat;
 const isRole = (...r) => r.includes(S.profile?.role);
 const canConfigure = () => isRole("quality_manager", "sysadmin");
 const canPlan = () => isRole("planner", "quality_engineer", "quality_manager", "sysadmin");
@@ -1197,7 +1200,16 @@ function vAdm(m) {
       <div class="note" style="margin-top:12px">${AI()
         ? "On. Every suggestion is recorded before it is shown, with whether the inspector took it. Nothing is sent anywhere until someone types in a field that uses it."
         : "Off. The offline spelling list still works — it needs no server and costs nothing. Only the parts that ask a model are switched off."}</div>
-      <div class="note q" style="margin-top:11px">It never decides whether anything conforms, passes or fails. That determination stays with the named inspector and is refused on the server, not merely discouraged: a suggestion that reads like a verdict is withheld and the refusal is recorded. Ask to see <b>v_ai_oversight</b> before an audit — how often the boundary fires, and on what, is the question that will be asked.</div>
+      <div class="sw" style="margin-top:18px">
+        <div><div class="t">Ask about the register</div>
+          <div class="d">A panel that answers questions from this division's own records — open NCRs, repeat parts, what goes wrong most often. Read-only.</div></div>
+        <button class="tg ${AI_CHAT() ? "on" : ""}" data-act="toggle-chat"></button></div>
+      <div class="note" style="margin-top:12px">${AI_CHAT()
+        ? "On. It reads the same records the person asking can already open — nothing is exempted from row level security for it — and it can only run a fixed list of lookups, not arbitrary queries. Every question and answer is kept, including the ones it refused."
+        : "Off. Turning this on does not change who can see what: it reads under the asking person's own permissions."}</div>
+      <div class="note q" style="margin-top:11px">It writes nothing. It cannot raise, close or edit anything, and there is no lookup that changes a record. Read <b>v_ai_refusals</b> before an audit: it lists every question the boundary stopped an answer to, and who asked.</div>
+
+      <div class="note q" style="margin-top:11px">Neither of these decides whether anything conforms, passes or fails. That determination stays with the named inspector and is refused on the server, not merely discouraged: a suggestion that reads like a verdict is withheld and the refusal is recorded. Ask to see <b>v_ai_oversight</b> before an audit — how often the boundary fires, and on what, is the question that will be asked.</div>
     </div></div>`;
   }
   else { body = `<div class="card"><h3>Audit trail</h3><div class="bd" id="auditHost"><div class="empty">Loading…</div></div></div>`; loadAudit(); }
@@ -1739,6 +1751,19 @@ async function toggleAssist() {
     await reload();
     if (window.Assist) window.Assist.init({ enabled: AI(), codes: S.defects });
     toast(`Assisted drafting ${AI() ? "switched on" : "switched off"} for this division.`, "ok");
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function toggleChat() {
+  busy(true);
+  try {
+    const { error } = await supabase.from("division_profile")
+      .update({ ai_chat: !AI_CHAT() }).eq("id", true);
+    if (error) throw error;
+    await reload();
+    if (window.Chat) window.Chat.init({ enabled: AI_CHAT() });
+    toast(`The assistant is ${AI_CHAT() ? "switched on" : "switched off"} for this division.`, "ok");
   } catch (e) { toast(explain(e), "bad"); }
   finally { busy(false); }
 }
@@ -3997,13 +4022,13 @@ function renderGeneratePreview() {
   host.innerHTML = `<div style="margin:4px 0 12px">
     <div class="eyebrow" style="margin-bottom:7px">${total} inspection${total === 1 ? "" : "s"},
       ${rows[0].when.toLocaleDateString("en-ZA")} to ${rows[rows.length - 1].when.toLocaleDateString("en-ZA")}</div>
-    <table><thead><tr><th>Stage</th><th>Working days out</th><th>Planned</th><th>How many</th>
+    <div style="overflow-x:auto"><table><thead><tr><th>Stage</th><th>Working days out</th><th>Planned</th><th>How many</th>
       </tr></thead><tbody>
       ${rows.map(r => `<tr style="cursor:default"><td>${esc(r.stage)}</td>
         <td>${r.offset === 0 ? "same day" : `+${r.offset}`}</td>
         <td><b>${r.when.toLocaleDateString("en-ZA", { weekday: "short", day: "2-digit", month: "short" })}</b></td>
         <td>${r.n}</td></tr>`).join("")}
-    </tbody></table>
+    </tbody></table></div>
     <div class="hint" style="margin-top:7px">Change how far out a stage falls under
       Administration → Reference lists.</div></div>`;
 }
@@ -4197,6 +4222,7 @@ document.addEventListener("click", async e => {
     case "toggle-hp": return toggleHoldPoints();
     case "toggle-2nd": return toggleSecondApprover();
     case "toggle-ai": return toggleAssist();
+    case "toggle-chat": return toggleChat();
     case "add-project": return projectModal(null);
     case "edit-project": return projectModal(byId(S.projects, Number(t.dataset.id)));
     case "del-project": return deleteProject(Number(t.dataset.id));
@@ -4466,6 +4492,7 @@ async function boot() {
      division's own list and the assistant may not suggest anything
      outside it. Before buildNav, so the first render is already wired. */
   if (window.Assist) window.Assist.init({ enabled: AI(), codes: S.defects });
+  if (window.Chat) window.Chat.init({ enabled: AI_CHAT() });
   buildNav();
   render();
   subscribe();

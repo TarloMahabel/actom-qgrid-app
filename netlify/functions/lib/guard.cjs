@@ -31,6 +31,9 @@
    ===================================================================== */
 
 const INTENTS = ["spell", "defect_code", "ncr_draft", "similar_faults", "explain_check"];
+/* chat is not in INTENTS: it is a different endpoint with a different
+   shape, and letting it through validate() would mean the drafting
+   intents and free prose shared a code path. They should not. */
 
 /* Hard caps. A spelling correction is a word; an explanation is a
    paragraph. Anything wildly outside that is not the answer to the
@@ -69,7 +72,10 @@ const VERDICT_PATTERNS = [
               `(?!\\s+to\\s+(?!meet|comply|satisfy|conform|achieve))`, "i"),
    "a pass/fail verdict on the item"],
   // "this is acceptable", "the panel is non-conforming", "it is within tolerance"
-  [/\b(?:this|that|it|the|these|those)(?:\s+\w+){0,2}\s+(?:is|are|was|were|appears?\s+to\s+be|looks?)\s+(?:not\s+)?(?:acceptable|unacceptable|satisfactory|unsatisfactory|compliant|non-?compliant|conforming|non-?conforming|in\s+conformance|out\s+of\s+(?:spec|specification|tolerance)|within\s+(?:spec|specification|tolerance))\b/i,
+  /* The lookbehinds matter more than they look. An assistant declining to
+     judge says "whether that is acceptable is your determination", and a
+     filter that blocks its own refusal is a filter that gets removed. */
+  [/(?<!\bwhether\s)(?<!\bif\s)(?<!\bnot\s)\b(?:this|that|it|the|these|those)(?:\s+\w+){0,2}\s+(?:is|are|was|were|appears?\s+to\s+be|looks?)\s+(?:not\s+)?(?:acceptable|unacceptable|satisfactory|unsatisfactory|compliant|non-?compliant|conforming|non-?conforming|in\s+conformance|out\s+of\s+(?:spec|specification|tolerance)|within\s+(?:spec|specification|tolerance))\b/i,
    "a conformance judgement"],
   // "meets the requirement", "does not satisfy the specification"
   [/\b(?:meets?|satisfies|complies\s+with|conforms\s+to|does\s+not\s+meet|fails\s+to\s+meet|does\s+not\s+satisfy|does\s+not\s+comply|fails\s+to\s+comply)\s+(?:with\s+)?(?:the\s+|this\s+|all\s+|any\s+)?(?:requirement|specification|spec|standard|criteria|criterion|clause|tolerance)/i,
@@ -89,6 +95,22 @@ const VERDICT_PATTERNS = [
   // Numeric grading invites the same deference a verdict does.
   [/\b(?:conformance|compliance|quality)\s+(?:score|rating|grade)\b/i,
    "a conformance score"]
+];
+
+/* Applied to chat as well as explain_check, plus the disposition and
+   criteria patterns below. Chat is the widest surface in the system and
+   gets the strictest reading. */
+const CHAT_EXTRA = [
+  [/\b(?:i(?:'d| would)?\s+(?:recommend|suggest|advise)|you\s+(?:could|might|should)\s+(?:rework|scrap|quarantine|concession))\b/i,
+   "advice on a disposition"],
+  [/\b(?:rework|scrap|quarantine|concession)\s+(?:it|this|that|the\s+\w+)\b/i,
+   "a disposition instruction"],
+  [/\b(?:limit|tolerance|threshold|minimum|maximum|clearance|creepage|torque)\b(?:\s+[\w-]+){0,3}\s+(?:is|are|of|for|=)\s*(?:about\s+|approx\.?\s+|around\s+)?[\d.]+\s*(?:mm|cm|m|nm|n\.?m|kn|kv|kva|v|a|%|degrees?|°)\b/i,
+   "a stated numeric limit"],
+  [/\b(?:at\s+least|no\s+less\s+than|no\s+more\s+than|must\s+not\s+exceed|should\s+not\s+exceed|minimum\s+of|maximum\s+of|torqued?\s+to)\s+(?:about\s+)?[\d.]+\s*(?:mm|cm|m|nm|n\.?m|kn|kv|kva|v|a|%|degrees?|°)\b/i,
+   "a stated numeric limit"],
+  [/\b(?:root\s+cause\s+(?:is|was|appears\s+to\s+be)|caused\s+by\s+(?:the\s+)?(?:operator|inspector|welder|fitter))\b/i,
+   "an inferred cause or an attribution to a person"]
 ];
 
 /* Applied to explain_check only, which is the intent closest to the line:
@@ -213,6 +235,33 @@ function validate(intent, data, ctx) {
   return { ok: true, value: { explanation: ex.value, what_to_look_at: look } };
 }
 
+/* ---------------------------------------------------------------------
+   Chat answers.
+
+   Whole-reply refusal, deliberately. Stripping the offending sentence and
+   showing the rest looks more helpful and teaches the reader to rephrase
+   until something slips through — and leaves them holding a partial
+   answer they think is complete. A refusal that names why is honest and
+   is recorded as a refusal.
+
+   There is no length cap on the way in beyond a generous one: the reply
+   has already been paid for by the time it is checked, and truncating it
+   would produce a sentence that ends mid-clause and reads as a bug.
+   --------------------------------------------------------------------- */
+const CHAT_REFUSAL =
+  "I can look up what the record says, but not whether something conforms, passes or should be accepted — " +
+  "that determination is yours and is recorded against your name. Your Quality Engineer is the person to ask " +
+  "about acceptance. Ask me again for the facts in the register and I will pull them.";
+
+function checkChat(text) {
+  const t = typeof text === "string" ? text.trim() : "";
+  if (!t) return fail("the assistant returned nothing");
+  if (t.length > 8000) return fail(`the answer was ${t.length} characters, which is not an answer to a question`);
+  const hit = verdictHit(t, CHAT_EXTRA);
+  if (hit) return fail(`the answer contained ${hit}`);
+  return { ok: true, value: t };
+}
+
 /* The model is asked for bare JSON. It sometimes wraps it in a fence
    anyway, and a rejected suggestion because of three backticks is a
    support call, not a safety win. */
@@ -225,4 +274,5 @@ function parseJson(raw) {
   try { return JSON.parse(t.slice(a, b + 1)); } catch { return null; }
 }
 
-module.exports = { INTENTS, LIMITS, VERDICT_PATTERNS, EXPLAIN_EXTRA, verdictHit, validate, parseJson };
+module.exports = { INTENTS, LIMITS, VERDICT_PATTERNS, EXPLAIN_EXTRA, CHAT_EXTRA,
+                   CHAT_REFUSAL, verdictHit, validate, checkChat, parseJson };

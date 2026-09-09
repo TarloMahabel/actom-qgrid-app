@@ -26,6 +26,7 @@ copy "$HERE/supabase.js"         "$ROOT/apps/inspect/supabase.js"
 copy "$HERE/logo.js"             "$ROOT/apps/inspect/logo.js"
 copy "$HERE/changelog.js"        "$ROOT/apps/inspect/changelog.js"
 copy "$HERE/assist.js"           "$ROOT/apps/inspect/assist.js"
+copy "$HERE/chat.js"             "$ROOT/apps/inspect/chat.js"
 copy "$HERE/vendor-supabase.js"  "$ROOT/apps/inspect/vendor/supabase.js"
 
 echo
