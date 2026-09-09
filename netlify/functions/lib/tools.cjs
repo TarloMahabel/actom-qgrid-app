@@ -51,13 +51,29 @@ const int = (v, lo, hi) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.trunc(n))) : null;
 };
-const oneOf = (v, list) => (typeof v === "string" && list.includes(v)) ? v : null;
+/* Returns null when nothing was supplied, false when something invalid
+   was. The caller must distinguish them: silently defaulting an
+   unrecognised value is how `status=open` became a confident "0 open
+   NCRs" when the register held one at a different stage. A refusal the
+   model reports honestly beats a number that is wrong. */
+const oneOf = (v, list) => v === undefined || v === null ? null : (list.includes(v) ? v : false);
 /* YYYY-MM only. A free-text date is a filter grammar in disguise. */
 const month = v => (typeof v === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(v)) ? v : null;
 
 const SEVERITY = ["minor", "major", "critical"];
-/* Derived by a trigger, not an enum. Only these two values occur. */
-const NCR_STATUS = ["open", "closed"];
+
+/* Derived by the ncr_status trigger, not an enum, and it is a LADDER
+   rather than a set of states:
+       open -> contained -> cause_identified -> action_agreed
+            -> action_done -> verified -> closed
+   `open` therefore means "nothing done yet", NOT "not closed". Reading it
+   as the latter is the mistake this tool made on its first outing: it
+   filtered status=eq.open against a register whose only outstanding
+   record sat at `contained`, and reported zero with complete confidence.
+   Anyone asking "how many are open" means "how many are not closed", so
+   that is the default, and the ladder is spelled out to the model. */
+const NCR_STATUS = ["open", "contained", "cause_identified", "action_agreed",
+                    "action_done", "verified", "closed"];
 const INSP_STATUS = ["scheduled", "in_progress"];
 
 /* Each tool: what the model is told it does, what it may pass, and how
@@ -76,16 +92,26 @@ const INSP_STATUS = ["scheduled", "in_progress"];
    confident and wrong. */
 const TOOLS = {
   open_ncrs: {
-    description: "Nonconformance reports, most recently raised first. Filter by status or severity. Returns a total count as well as the rows.",
+    description:
+      "Nonconformance reports, most recently raised first, with a total count. " +
+      "Status is a progression, not a set of states: open (nothing done yet), contained, " +
+      "cause_identified, action_agreed, action_done, verified, closed. " +
+      "IMPORTANT: 'open' means only the first rung. Anything not yet closed is 'outstanding', " +
+      "which is what someone means when they ask how many are open — leave status unset for that.",
     params: {
-      status:   { type: "string", enum: NCR_STATUS, description: "Defaults to open." },
+      status:   { type: "string", enum: NCR_STATUS,
+                  description: "One specific rung. Omit for everything not closed." },
       severity: { type: "string", enum: SEVERITY },
       limit:    { type: "integer", description: `1 to ${MAX_ROWS}, default 10.` }
     },
     build(a) {
       const q = ["select=ref,raised_at,severity,status,disposition,part_description,part_no,department,project_code,supplier,root_cause,age_days,actions_open"];
-      q.push(`status=eq.${oneOf(a.status, NCR_STATUS) || "open"}`);
-      const sev = oneOf(a.severity, SEVERITY); if (sev) q.push(`severity=eq.${sev}`);
+      const st = oneOf(a.status, NCR_STATUS);
+      if (st === false) return null;                 // asked for a rung that does not exist
+      q.push(st ? `status=eq.${st}` : "status=neq.closed");
+      const sev = oneOf(a.severity, SEVERITY);
+      if (sev === false) return null;
+      if (sev) q.push(`severity=eq.${sev}`);
       q.push("order=raised_at.desc", `limit=${int(a.limit, 1, MAX_ROWS) || 10}`);
       return { path: `v_ncr_list?${q.join("&")}`, count: true };
     }
@@ -140,7 +166,9 @@ const TOOLS = {
     },
     build(a) {
       const q = ["select=ref,status,stage_name,unit_ref,planned_date,inspector"];
-      const st = oneOf(a.status, INSP_STATUS); if (st) q.push(`status=eq.${st}`);
+      const st = oneOf(a.status, INSP_STATUS);
+      if (st === false) return null;
+      if (st) q.push(`status=eq.${st}`);
       q.push("order=planned_date.asc", `limit=${int(a.limit, 1, MAX_ROWS) || 10}`);
       return { path: `v_open_work?${q.join("&")}`, count: true };
     }

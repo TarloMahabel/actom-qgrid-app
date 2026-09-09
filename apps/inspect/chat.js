@@ -48,7 +48,16 @@
      shaped partly by text an inspector typed, so it is untrusted on two
      counts. */
   function body(text) {
-    return esc(text).split(/\n{2,}/).map(function (p) {
+    /* The prompt forbids markdown, but a habit that strong is worth
+       catching here too: an inspector should never be shown a literal
+       **0 open NCRs**. Emphasis markers are removed rather than rendered
+       -- turning them into real bold would mean interpreting model output
+       as markup, which is a larger door than it is worth opening. */
+    var flat = String(text == null ? '' : text)
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/(^|\s)\*([^*\n]+)\*(?=\s|$|[.,;:!?])/g, '$1$2')
+      .replace(/^#{1,6}\s+/gm, '');
+    return esc(flat).split(/\n{2,}/).map(function (p) {
       return '<p style="margin:0 0 8px">' + p.replace(/\n/g, '<br>') + '</p>';
     }).join('');
   }

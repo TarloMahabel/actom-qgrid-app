@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.21.2";
+window.APP_VERSION = "0.21.3";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.21.3", d: "2026-09-09", t: "The assistant counts nonconformances correctly",
+    items: [
+      "Asked how many nonconformances were open, the assistant answered nought when there was one. It was filtering on the first stage of the workflow rather than on everything not yet closed.",
+      "A nonconformance moves through stages: open, contained, cause identified, action agreed, action done, verified, closed. Only the first is called open. Asked how many are open, the assistant now reports everything not yet closed, which is what the question means, and it can still be asked about any single stage by name.",
+      "This was worse than an error. It gave a precise, confident, wrong number and nothing flagged it. Where a lookup is given a value it does not recognise, it now refuses and says so rather than quietly substituting something else.",
+      "The tests read the list of stages out of the database rule that produces them, so the assistant and the register cannot drift apart again.",
+      "Answers no longer show stray asterisks around figures."
+    ]
+  },
   {
     v: "0.21.2", d: "2026-09-09", t: "The assistant can read the register properly",
     items: [

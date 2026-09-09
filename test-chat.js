@@ -55,8 +55,11 @@ s.check('an injected filter is encoded as a value', inj && !/&select=\*/.test(in
 s.check('an injected filter cannot add an or clause', inj && !/&or=/.test(inj.path));
 s.check('a parameter the catalogue does not name is dropped',
   !/works_order/.test(plan('open_ncrs', { works_order: 'RE9127', status: 'open' }).path));
-s.check('an enum value that is not offered falls back to the default',
-  /status=eq\.open/.test(plan('open_ncrs', { status: 'deleted' }).path));
+/* This used to assert the opposite -- that an unrecognised value quietly
+   fell back to a default. That was the bug, written down as a test and
+   passing. A filter value the catalogue does not know must refuse. */
+s.check('an enum value that is not offered refuses the whole lookup',
+  plan('open_ncrs', { status: 'deleted' }) === null);
 s.check('a row limit above the cap is clamped',
   new RegExp(`limit=${MAX_ROWS}$`).test(plan('open_ncrs', { limit: 9999 }).path));
 s.check('a negative limit is clamped up', /limit=1$/.test(plan('open_ncrs', { limit: -5 }).path));
@@ -152,6 +155,41 @@ for (const name of Object.keys(TOOLS)) {
   const badRefs = refs.filter(c => !new RegExp(`\\b${c}\\b`).test(def));
   s.check(`${name} filters and orders on real columns`, badRefs.length === 0, badRefs.join(', '));
 }
+
+/* Column names were checked; the VALUES in them were not, and that is
+   where the real damage was. `status` on ncrs is free text derived by the
+   ncr_status trigger, so a column check passes while the filter value is
+   invented. status=eq.open matched nothing and the assistant reported
+   "0 open NCRs" against a register holding one — precise, confident and
+   wrong, which is the failure this whole design exists to avoid.
+
+   So the enum is read out of the trigger that produces it. */
+const ncrSql = fs.readFileSync(path.join(migDir, '014-ncr.sql'), 'utf8');
+const fnBody = /create or replace function ncr_status[\s\S]*?\$\$;/.exec(ncrSql);
+const produced = fnBody
+  ? [...new Set([...fnBody[0].matchAll(/return\s+'([a-z_]+)'/g)].map(m => m[1]))].sort()
+  : [];
+s.check('the status ladder can be read from the trigger', produced.length > 2, produced.join(','));
+s.check('the tool offers exactly the statuses the trigger produces',
+  JSON.stringify([...TOOLS.open_ncrs.params.status.enum].sort()) === JSON.stringify(produced),
+  `tool=${[...TOOLS.open_ncrs.params.status.enum].sort()} trigger=${produced}`);
+
+/* "How many are open" means "not closed". open is the first rung. */
+s.check('with no status, everything not closed is returned',
+  /status=neq\.closed/.test(plan('open_ncrs', {}).path));
+s.check('a named rung filters to that rung',
+  /status=eq\.contained/.test(plan('open_ncrs', { status: 'contained' }).path));
+s.check('the model is told open is a rung, not a category',
+  /'open' means only the first rung/.test(TOOLS.open_ncrs.description));
+
+/* A value the catalogue does not know must refuse, not quietly default —
+   the silent fallback is what turned a mismatch into a wrong number. */
+s.check('an unknown status refuses rather than defaulting',
+  plan('open_ncrs', { status: 'pending' }) === null);
+s.check('an unknown severity refuses rather than defaulting',
+  plan('open_ncrs', { severity: 'catastrophic' }) === null);
+s.check('an unknown inspection status refuses rather than defaulting',
+  plan('open_inspections', { status: 'completed' }) === null);
 
 /* The mislabelling that prompted all of this. v_ncr_repeat groups by
    cause and month; it says nothing about parts. */
@@ -253,7 +291,13 @@ s.check('the client sends only a thread id and the question',
   /JSON\.stringify\(\{ thread_id: threadId\(\), text: text \}\)/.test(cl));
 s.check('the client does not send the conversation', !/turns:|messages:|history:/.test(cl.split('fetch(')[1] || ''));
 s.check('the answer is escaped before it is given structure',
-  cl.indexOf('function body') > -1 && /esc\(text\)\.split/.test(cl));
+  cl.indexOf('function body') > -1 && /esc\(flat\)\.split/.test(cl));
+/* Emphasis markers are stripped, never interpreted. Rendering model output
+   as markup would be a much larger door than the problem justifies. */
+s.check('markdown is removed rather than rendered',
+  /replace\(\/\\\*\\\*/.test(cl) && !/innerHTML\s*=\s*(?:text|answer)/.test(cl));
+s.check('the model is told not to write markdown',
+  /No markdown: no asterisks/.test(prompts.CHAT({})));
 s.check('which lookups were made is shown to the reader', /Looked up:/.test(cl));
 s.check('an answer with no lookups says so', /No records looked up/.test(cl));
 s.check('a new conversation can be started', /function reset\(\)/.test(cl));
