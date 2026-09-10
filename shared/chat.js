@@ -31,8 +31,34 @@
     thread: null,
     turns: [],        // what is on screen, not the authoritative history
     busy: false,
-    open: false
+    open: false,
+    waitTimer: null
   };
+
+
+  /* A machine, not a character. Geometric, no face — see the note in
+     inspect.css about why a mascot is the wrong thing here. */
+  function botMark(cls) {
+    return '<svg class="aibot ' + (cls || '') + '" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">' +
+      '<rect x="4" y="7" width="16" height="12" rx="3"/>' +
+      '<path d="M12 3.5v3.5"/><circle cx="12" cy="2.6" r="1.1" fill="currentColor" stroke="none"/>' +
+      '<path d="M1.6 12v3M22.4 12v3"/>' +
+      '<circle class="eye" cx="9.2" cy="12.4" r="1.15" fill="currentColor" stroke="none"/>' +
+      '<circle class="eye" cx="14.8" cy="12.4" r="1.15" fill="currentColor" stroke="none"/>' +
+      '<path class="scan" d="M8.4 15.8h7.2"/></svg>';
+  }
+
+  /* Captions rotate while waiting. Each is true of some part of what is
+     actually happening — the request goes to the model, which may call
+     lookups, which may take another round. Inventing a fake progress bar
+     for work whose length is unknown would be worse than saying nothing. */
+  var WAITING = [
+    'Reading the register',
+    'Checking the records',
+    'Putting that together',
+    'Still going — some questions need a few lookups'
+  ];
 
   function client() { return window.GRID && window.GRID.supabase; }
   function $(id) { return document.getElementById(id); }
@@ -87,6 +113,8 @@
     if (!log) return;
     if (!state.turns.length) {
       log.innerHTML =
+        '<div style="display:flex;justify-content:center;padding:6px 0 14px;opacity:.5">' +
+          botMark() + '</div>' +
         '<div class="note" style="margin:0">Ask about what is in this division\'s register — open ' +
         'nonconformances, what goes wrong most often, parts that keep coming back, the state of a works ' +
         'order. It reads the same records you can see and nothing more.</div>' +
@@ -127,8 +155,19 @@
     var log = $('chatLog');
     if (log) {
       log.insertAdjacentHTML('beforeend',
-        '<div id="chatWait" class="cnt" style="margin:0 0 14px">Reading the register…</div>');
+        '<div id="chatWait" class="aiwait">' + botMark() +
+        '<span class="cap" id="chatWaitCap">' + WAITING[0] +
+        '<span class="aidots"><i></i><i></i><i></i></span></span></div>');
       log.scrollTop = log.scrollHeight;
+      /* Move on through the captions so a long wait does not look stuck.
+         Slow — a caption changing every second is its own kind of noise. */
+      var n = 0;
+      state.waitTimer = setInterval(function () {
+        var cap = $('chatWaitCap');
+        if (!cap) return;
+        n = Math.min(n + 1, WAITING.length - 1);
+        cap.innerHTML = WAITING[n] + '<span class="aidots"><i></i><i></i><i></i></span>';
+      }, 3200);
     }
 
     try {
@@ -164,6 +203,8 @@
       state.turns.push({ role: 'ai', reads: [], text: 'The assistant could not be reached.' });
     } finally {
       state.busy = false;
+      clearInterval(state.waitTimer);
+      state.waitTimer = null;
       var w = $('chatWait');
       if (w) w.remove();
       render();

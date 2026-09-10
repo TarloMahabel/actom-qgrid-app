@@ -22,10 +22,18 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.21.4";
+window.APP_VERSION = "0.21.5";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.21.5", d: "2026-09-10", t: "The assistant shows it is working",
+    items: [
+      "A question can take several seconds while the assistant looks things up, and the panel used to sit on one unchanging line of text, which reads as a hang. There is now a mark that moves while it works, and the wording changes as the wait goes on so a longer answer does not look stuck.",
+      "It is a plain geometric mark rather than a character with a face. Everything about this feature depends on it being a suggestion you overrule, and people defer more readily to something that seems to be someone.",
+      "If your device is set to reduce motion, the mark stays still."
+    ]
+  },
   {
     v: "0.21.4", d: "2026-09-09", t: "The assistant reports costs in Rands",
     items: [

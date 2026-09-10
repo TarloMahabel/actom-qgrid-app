@@ -332,6 +332,18 @@ s.check('the switch has a handler', /case "toggle-chat"/.test(app) && /function 
 s.check('the panel is started from boot', /window\.Chat\.init\(\{ enabled: AI_CHAT\(\) \}\)/.test(app));
 
 /* ------------------------------------------------------------------ */
+s.group('the waiting state');
+
+const css = read('shared/inspect.css');
+s.check('there is a moving indicator while a question is in flight', /\.aiwait/.test(css) && /@keyframes aidot/.test(css));
+s.check('the caption changes on a long wait', /WAITING\[n\]/.test(cl));
+s.check('the timer is cleared when the answer arrives', /clearInterval\(state\.waitTimer\)/.test(cl));
+s.check('reduced motion is respected', /prefers-reduced-motion:reduce/.test(css));
+/* Not decoration. A mascot invites the deference this whole design is
+   built to discourage, so the mark stays geometric. */
+s.check('the mark has no face', !/mouth|smile|antenna-wave|emoji|😀/i.test(cl));
+s.check('and the reason is written down', /not a character/i.test(cl) || /mascot/i.test(css));
+
 s.group('the register');
 
 const mig = read('db/migrations/017-ai-chat.sql');
