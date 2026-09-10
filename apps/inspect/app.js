@@ -59,6 +59,7 @@ const S = {
   projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [], competencies: [], handovers: [],
   faultsByProject: [], actions: [], report: null,
   ncrs: [], ncrActions: [], rootCauses: [], ncrOpen: null, ncrReady: false,
+  regFilter: "all",               // Register tab: which records are shown
   period: new Date().toISOString().slice(0, 7),
   dash: {},
   refDraft: {},                   // pending reference-list edits, keyed table|id|field
@@ -557,9 +558,43 @@ function vWork(m) {
   }
   else if (S.tab === 1) body = renderCapture();
   else if (S.tab === 2) {
-    const done = S.inspections.filter(i => i.status === "completed");
-    body = T(["Reference", "Template", "Stage", "Unit", "Inspector", "Completed", "Result", ""],
-      done.slice(0, 60).map(i => {
+    /* An inspection with a fault on it stays out of `completed` until the
+       fault is dealt with, so filtering the register on status alone hid
+       exactly the records people most need to find — the ones with
+       something wrong. The register is now everything completed PLUS
+       anything carrying a failed check, whatever its status. */
+    const faulted = new Set((S.failedChecks || []).map(f => f.inspection_id));
+    const openFault = new Set((S.failedChecks || [])
+      .filter(f => !f.verified_at).map(f => f.inspection_id));
+    const pool = S.inspections.filter(i => i.status === "completed" || faulted.has(i.id));
+
+    const F = {
+      all:    ["Everything",        () => true],
+      fail:   ["Failed",            i => i.result === "fail"],
+      faults: ["Faults outstanding", i => openFault.has(i.id)],
+      open:   ["Not yet completed", i => i.status !== "completed"],
+      pass:   ["Passed",            i => i.result === "pass"]
+    };
+    const active = F[S.regFilter] ? S.regFilter : "all";
+    const done = pool.filter(i => F[active][1](i))
+      .sort((a, b) => String(b.completed_at || b.planned_date || "")
+                        .localeCompare(String(a.completed_at || a.planned_date || "")));
+
+    const CAP = 200;
+    const filters = `<div class="filters">
+      ${Object.entries(F).map(([k, [label, test]]) => {
+        const n = pool.filter(test).length;
+        return `<button class="btn sm ${k === active ? "pri" : ""}" data-act="reg-filter" data-f="${k}">
+          ${esc(label)} <span class="cl">${n}</span></button>`;
+      }).join("")}
+      <span class="spacer"></span>
+      <span class="cnt">${done.length > CAP
+        ? `showing the ${CAP} most recent of ${done.length}`
+        : `${done.length} record${done.length === 1 ? "" : "s"}`}</span>
+    </div>`;
+
+    body = filters + (done.length ? T(["Reference", "Template", "Stage", "Unit", "Inspector", "Completed", "Result", ""],
+      done.slice(0, CAP).map(i => {
         const r = byId(S.revisions, i.template_rev_id), t = tplForRev(i.template_rev_id);
         /* Two names on one inspection is a fact the register has to show, not
            hide behind whoever signed it. */
@@ -571,11 +606,18 @@ function vWork(m) {
           esc(stageName(i.stage_id)), esc(i.unit_ref || "—"),
           `${esc(signedBy?.full_name || "—")}${handed
             ? `<div class="sub">started by ${esc(startedBy.full_name)}</div>` : ""}`,
-          i.completed_at ? new Date(i.completed_at).toLocaleString("en-ZA") : "—",
-          pill(i.result || "—"),
+          i.completed_at ? new Date(i.completed_at).toLocaleString("en-ZA")
+            : `<span class="cnt">${esc(i.status)}</span>`,
+          /* A record still open shows why it is here rather than an empty
+             cell: it is in the register because it carries a fault. */
+          i.result ? pill(i.result)
+            : openFault.has(i.id) ? `<span class="tag ncr">fault outstanding</span>`
+            : pill(i.status),
           `<button class="btn sm" data-act="print-report" data-id="${i.id}"
              title="Open the printable report">Report</button>`];
-      }));
+      }))
+      : emptyBecause("Nothing matches that filter",
+          "Nothing matches that filter. Choose Everything to see the whole register."));
   }
   else {
     const cols = ["Reference", "Inspection", "Found", "Defect", "What", "Progress"]
@@ -4486,6 +4528,7 @@ document.addEventListener("click", async e => {
     case "print-report": return openReport(t.dataset.id);
     case "ncr-report": return openNcrReport(t.dataset.id);
     case "ncr-csv": return downloadNcrRegister();
+    case "reg-filter": S.regFilter = t.dataset.f; return render();
     case "do-print": return window.print();
     case "close-report": {
       /* Back to where the report was opened from. Returning an NCR report

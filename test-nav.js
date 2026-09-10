@@ -1,5 +1,5 @@
 /* Boot, authentication gate, navigation, and every module and tab. */
-const { loadApp, suite } = require('./test/harness');
+const { loadApp, suite , REPO } = require('./test/harness');
 
 (async () => {
   const s = suite('test-nav — boot, gate and navigation');
@@ -46,5 +46,21 @@ const { loadApp, suite } = require('./test/harness');
       s.check(`${id} tab ${t}`, len > 900, len + ' chars');
     }
   }
-  s.done();
+  s.group('the register shows what failed');
+/* An inspection carrying a fault stays out of `completed` until the fault
+   is dealt with, so a register filtered on status alone hid exactly the
+   records people go looking for. */
+const regSrc = require('fs').readFileSync(require('path').join(REPO, 'apps/inspect/app.js'), 'utf8');
+s.check('the register is not filtered on completed alone',
+  !/const done = S\.inspections\.filter\(i => i\.status === "completed"\);/.test(regSrc));
+s.check('anything carrying a failed check is included',
+  /i\.status === "completed" \|\| faulted\.has\(i\.id\)/.test(regSrc));
+s.check('outstanding means not yet verified', /!f\.verified_at/.test(regSrc));
+s.check('there is a filter', /data-act="reg-filter"/.test(regSrc));
+s.check('the filter has a handler', /case "reg-filter"/.test(regSrc));
+s.check('each filter shows how many records it holds', /pool\.filter\(test\)\.length/.test(regSrc));
+s.check('an open record says why it is listed', /fault outstanding/.test(regSrc));
+s.check('truncation is stated rather than silent', /showing the \$\{CAP\} most recent of/.test(regSrc));
+
+s.done();
 })();

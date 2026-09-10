@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.21.7";
+window.APP_VERSION = "0.21.8";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.21.8", d: "2026-09-10", t: "The register shows inspections that failed",
+    items: [
+      "An inspection carrying a failed check stays out of \"completed\" until the fault is dealt with, and the Register only listed completed ones — so the records people most need to find, the ones with something wrong, were the ones missing from it. The register now lists everything completed plus anything carrying a failed check, whatever its state.",
+      "Filters across the top: everything, failed, faults outstanding, not yet completed, passed. Each shows how many records it holds, so an empty category is visibly empty rather than just absent.",
+      "A record still open shows why it is in the list — fault outstanding — instead of a blank result, and shows its state where a completion date would be.",
+      "The register showed at most 60 records with no indication there were more. It now shows 200 and says so when there are more than that."
+    ]
+  },
   {
     v: "0.21.7", d: "2026-09-10", t: "Download the NCR register",
     items: [
