@@ -2727,6 +2727,8 @@ function ncrDetail(m) {
         </div>`).join("")}
     </div></div></div>`;
 
+  const prior = priorActions(n, (S.ncrs || []).find(x => x.id === n.id) || {});
+
   const fld = (label, value, hint) => `<div class="fld"><label>${esc(label)}</label>
     <div class="ro">${value || "—"}</div>${hint ? `<div class="hint">${esc(hint)}</div>` : ""}</div>`;
 
@@ -2749,6 +2751,10 @@ function ncrDetail(m) {
         ${n.inspection_ref ? ` · from inspection ${esc(n.inspection_ref)}` : ""}
       </span></div>`
     + trail
+    /* After the stage trail, before the detail: an engineer about to write
+       a corrective action should see what was tried before they write it,
+       not after. */
+    + prior
     + `<div class="two">
       <div class="card"><h3>What happened</h3><div class="bd">
         ${fld("Part", esc(n.part_description))}
@@ -2881,6 +2887,89 @@ function ncrDetail(m) {
       by ${esc(byId(S.people, full.closed_by)?.full_name || "—")}. Nothing further can be changed.</div>` : ""}`;
 }
 
+
+
+/* ---------------------------------------------------------------------
+   What was done before, under this cause.
+
+   No model involved. This is a query over the division's own register,
+   and that is the whole point: an assistant that proposes corrective
+   actions fills the field without anyone investigating, which is how the
+   register this replaces reached 19% corrective action while stopping
+   recurrence nowhere. Showing what was actually tried is a prompt to go
+   and look. Generating something plausible is a way to avoid looking.
+
+   The line that matters is the recurrence one. An action that was
+   verified, against a part that came back afterwards under the same
+   cause, did not correct anything — and that is a finding, not a
+   suggestion.
+   --------------------------------------------------------------------- */
+function priorActions(n, row) {
+  const cause = row && row.root_cause;
+  if (!cause) return "";
+
+  const peers = (S.ncrs || []).filter(x => x.root_cause === cause && x.id !== n.id);
+  if (!peers.length) {
+    return `<div class="card" style="margin-bottom:13px">
+      <h3>Done before under this cause <span class="cl">${esc(cause)}</span></h3>
+      <div class="bd"><div class="note">Nothing yet. This is the first nonconformance recorded
+        under this cause, so there is no history to draw on — which also means the action you
+        write here is the one somebody reads next time.</div></div></div>`;
+  }
+
+  const ids = new Set(peers.map(p => p.id));
+  const acts = (S.ncrActions || []).filter(a => ids.has(a.ncr_id));
+  const byId_ = id => peers.find(p => p.id === id) || {};
+
+  /* Same part, same cause, raised later than this one was actioned. The
+     register carries the parts, so this is arithmetic rather than
+     judgement. */
+  const recurred = a => {
+    const src = byId_(a.ncr_id);
+    if (!src.part_no) return 0;
+    const after = a.verified_at || a.done_at || src.raised_at;
+    return (S.ncrs || []).filter(x => x.root_cause === cause && x.id !== src.id &&
+      x.part_no && x.part_no === src.part_no && String(x.raised_at) > String(after)).length;
+  };
+
+  if (!acts.length) {
+    return `<div class="card" style="margin-bottom:13px">
+      <h3>Done before under this cause <span class="cl">${esc(cause)}</span></h3>
+      <div class="bd"><div class="note q">${peers.length} other nonconformance${peers.length === 1 ? " was" : "s were"}
+        recorded under this cause and <b>none carries a corrective action</b>. Nothing has yet been
+        changed to stop this recurring.</div></div></div>`;
+  }
+
+  const failed = acts.filter(a => a.verified_at && recurred(a));
+
+  return `<div class="card" style="margin-bottom:13px">
+    <h3>Done before under this cause <span class="cl">${esc(cause)}</span>
+      <span class="cnt" style="margin-left:auto">${acts.length} action${acts.length === 1 ? "" : "s"}
+        across ${peers.length} nonconformance${peers.length === 1 ? "" : "s"}</span></h3>
+    <div class="bd">
+      ${failed.length ? `<div class="note q" style="margin-bottom:12px"><b>${failed.length}
+        action${failed.length === 1 ? " was" : "s were"} signed off and the same part came back
+        under this cause afterwards.</b> Repeating one of those is unlikely to be the answer.</div>` : ""}
+      ${T(["From", "Part", "What was done", "Owner", "Verified", ""],
+        acts.map(a => {
+          const src = byId_(a.ncr_id);
+          const again = a.verified_at ? recurred(a) : 0;
+          return [
+            `<span class="id">${esc(src.ref || "—")}</span><div class="sub">${fmtDate(src.raised_at)}</div>`,
+            `${esc((src.part_description || "").slice(0, 32))}<div class="sub">${esc(src.part_no || "")}</div>`,
+            esc(a.action || "—"),
+            esc(byId(S.people, a.owner_id)?.full_name || "—"),
+            a.verified_at
+              ? `<span class="tag ok">yes</span><div class="sub">${fmtDate(a.verified_at)}</div>`
+              : a.done_at ? `<span class="cnt">done, not verified</span>` : `<span class="cnt">not yet</span>`,
+            again ? `<span class="tag ncr">came back ${again}&times;</span>` : ""
+          ];
+        }))}
+      <div class="note" style="margin-top:11px">This is what the register already contains, not a
+        recommendation. What stops this recurring is a decision for the Quality Engineer, and it is
+        recorded against their name.</div>
+    </div></div>`;
+}
 
 /* ---- NCR actions ---- */
 async function openNcr(id) {

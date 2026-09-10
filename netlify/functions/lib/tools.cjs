@@ -158,6 +158,31 @@ const TOOLS = {
     }
   },
 
+  actions_for_cause: {
+    description:
+      "Corrective actions this division has ALREADY RECORDED under a given root cause, with who owned " +
+      "them, whether they were verified, and whether the same part came back afterwards. " +
+      "Use this when asked what has been done before about a kind of problem. " +
+      "It is history, not advice: report what is here and do not propose an action of your own. " +
+      "recurred_on_same_part above zero means the part returned under the same cause after that action " +
+      "was signed off, which is worth pointing out plainly.",
+    params: {
+      cause: { type: "string", description: "The root cause exactly as named in the register, e.g. 'Poor workmanship'." },
+      limit: { type: "integer", description: `1 to ${MAX_ROWS}, default 15.` }
+    },
+    build(a) {
+      const q = ["select=cause,category,ncr_ref,part_description,part_no,raised_on,severity,action,owner,due_date,done_on,verified_on,verified,recurred_on_same_part"];
+      const c = str(a.cause, 80);
+      /* An exact match on the cause name. The catalogue does not offer a
+         free-text search: `like` with a model-supplied pattern is a
+         filter grammar handed to the model, which is the thing this file
+         exists to avoid. */
+      if (c) q.push(`cause=eq.${encodeURIComponent(c)}`);
+      q.push("order=raised_on.desc", `limit=${int(a.limit, 1, MAX_ROWS) || 15}`);
+      return { path: `v_ncr_actions_by_cause?${q.join("&")}`, count: true };
+    }
+  },
+
   open_inspections: {
     description: "Inspections still to be done — scheduled or in progress. Filter by status. This does not include completed or cancelled ones.",
     params: {

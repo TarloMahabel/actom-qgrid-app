@@ -11,7 +11,7 @@
 --  Paste into the Supabase SQL editor of a NEW, EMPTY project and run.
 --  Order matters; do not run sections out of sequence.
 --
---  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 009-photo-storage.sql, 010-handover.sql, 011-fault-clearing.sql, 012-dashboard.sql, 013-planned-dates.sql, 014-ncr.sql, 015-ncr-status-and-close-path.sql, 016-ai-suggestions.sql, 017-ai-chat.sql
+--  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 009-photo-storage.sql, 010-handover.sql, 011-fault-clearing.sql, 012-dashboard.sql, 013-planned-dates.sql, 014-ncr.sql, 015-ncr-status-and-close-path.sql, 016-ai-suggestions.sql, 017-ai-chat.sql, 018-actions-by-cause.sql
 --
 --  This script is for a fresh project. It is not idempotent: running it
 --  twice will fail on "type user_role already exists", which is the
@@ -3112,7 +3112,70 @@ end $verify$;
 
 
 -- ============================================================
---  SECTION 18 — Group reference data
+--  SECTION 18 — 018-actions-by-cause.sql
+-- ============================================================
+
+do $prereq$
+begin
+  if to_regclass('public.ncr_actions') is null then
+    raise exception '018 needs 014-ncr.sql first (ncr_actions is missing).';
+  end if;
+end $prereq$;
+
+create or replace view v_ncr_actions_by_cause with (security_invoker = on) as
+select rc.name                     as cause,
+       rc.category                 as category,
+       n.ref                       as ncr_ref,
+       n.part_description          as part_description,
+       n.part_no                   as part_no,
+       n.raised_at::date           as raised_on,
+       n.severity                  as severity,
+       a.action                    as action,
+       ow.full_name                as owner,
+       a.due_date                  as due_date,
+       a.done_at::date             as done_on,
+       a.verified_at::date         as verified_on,
+       (a.verified_at is not null) as verified,
+       -- The part came back under the same cause AFTER this action was
+       -- verified. Null part numbers are not matched to each other:
+       -- "unknown part" is not a part, and treating it as one would
+       -- manufacture recurrences out of missing data.
+       (select count(*)
+          from ncrs later
+         where later.root_cause_id = n.root_cause_id
+           and later.id <> n.id
+           and later.part_no is not null
+           and n.part_no is not null
+           and later.part_no = n.part_no
+           and later.raised_at > coalesce(a.verified_at, a.done_at, n.raised_at)
+       )                           as recurred_on_same_part
+  from ncr_actions a
+  join ncrs n         on n.id = a.ncr_id
+  join root_causes rc on rc.id = n.root_cause_id
+  left join profiles ow on ow.id = a.owner_id
+ where n.root_cause_id is not null;
+
+grant select on v_ncr_actions_by_cause to authenticated;
+
+comment on view v_ncr_actions_by_cause is
+  'Corrective actions that have actually been recorded, grouped by root cause. '
+  'For recall, not recommendation: the assistant may show what this division '
+  'has done before under a cause, and may not invent an action. '
+  'recurred_on_same_part > 0 means the part came back after this action was '
+  'signed off, which is a corrective action that did not correct anything.';
+
+do $verify$
+begin
+  if not exists (select 1 from pg_class c join pg_namespace nsp on nsp.oid = c.relnamespace
+                  where nsp.nspname = 'public' and c.relname = 'v_ncr_actions_by_cause') then
+    raise exception 'The view was not created.';
+  end if;
+  raise notice '018 applied. Prior corrective actions are visible on an NCR once a root cause is recorded.';
+end $verify$;
+
+
+-- ============================================================
+--  SECTION 19 — Group reference data
 -- ============================================================
 
 insert into manufacturing_stages (name, sort_order) values
@@ -3137,7 +3200,7 @@ on conflict (code) do nothing;
 
 
 -- ============================================================
---  SECTION 19 — Division seed — EDIT BEFORE RUNNING
+--  SECTION 20 — Division seed — EDIT BEFORE RUNNING
 -- ============================================================
 
 insert into division_profile (code, name, hold_points)
@@ -3167,7 +3230,7 @@ on conflict (family_id, stage_id) do nothing;
 
 
 -- ============================================================
---  SECTION 20 — Migration ledger stamp
+--  SECTION 21 — Migration ledger stamp
 --
 --  Running this script bypasses scripts/migrate.mjs, so the ledger it
 --  reads would be empty and the next run would try to apply everything
@@ -3199,12 +3262,13 @@ insert into public.qgrid_migrations (filename) values
   ('014-ncr.sql'),
   ('015-ncr-status-and-close-path.sql'),
   ('016-ai-suggestions.sql'),
-  ('017-ai-chat.sql')
+  ('017-ai-chat.sql'),
+  ('018-actions-by-cause.sql')
 on conflict (filename) do nothing;
 
 
 -- ============================================================
---  SECTION 21 — Verification
+--  SECTION 22 — Verification
 --  Run these and check the results before going any further.
 -- ============================================================
 

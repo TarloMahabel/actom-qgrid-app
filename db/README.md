@@ -78,6 +78,7 @@ select
 | 015 | NCR status derived from the row being written, and the closure path |
 | 016 | Assisted drafting: the register of every suggestion, and the division switch |
 | 017 | The question-and-answer assistant: chat turns, thread grouping, refusals view |
+| 018 | Corrective actions by root cause, with whether the part came back afterwards |
 
 ## A new division
 

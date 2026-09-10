@@ -121,6 +121,7 @@ const SAMPLE = {
   open_ncrs: { status: 'open', limit: 5 },
   ncr_by_ref: { ref: 'NCR-26-0001' },
   ncr_by_cause: {}, ncr_by_department: {}, faults_by_project: {},
+  actions_for_cause: { cause: 'Poor workmanship' },
   defect_pareto: {}, open_inspections: {}
 };
 
@@ -196,6 +197,19 @@ s.check('an unknown inspection status refuses rather than defaulting',
 s.check('no tool claims to list repeat parts', !Object.keys(TOOLS).includes('repeat_parts'));
 s.check('the cause tool is described as causes, not parts',
   /grouped by root cause/i.test(TOOLS.ncr_by_cause.description));
+
+s.group('it recalls actions, it does not propose them');
+s.check('there is a lookup for actions already recorded under a cause',
+  !!TOOLS.actions_for_cause);
+s.check('the tool describes itself as history', /history, not advice/i.test(TOOLS.actions_for_cause.description));
+const chatSys = prompts.CHAT({ divisionName: 'ACTOM MV Switchgear' });
+s.check('the prompt forbids proposing an action',
+  /Do not propose a corrective action of your own/.test(chatSys));
+s.check('the prompt says why', /without anyone investigating/.test(chatSys));
+s.check('the cause is matched exactly, not by a pattern the model supplies',
+  !/like\./.test(plan('actions_for_cause', { cause: 'Poor workmanship' }).path));
+s.check('a wildcard in the cause is sent as a literal value',
+  /cause=eq\.%2A|cause=eq\.\*/.test(plan('actions_for_cause', { cause: '*' }).path));
 
 s.group('what it may say');
 

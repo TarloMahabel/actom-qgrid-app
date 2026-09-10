@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.21.8";
+window.APP_VERSION = "0.22.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.22.0", d: "2026-09-10", t: "What was done before, under this cause",
+    items: [
+      "Once a root cause is recorded on a nonconformance, the NCR now shows every corrective action this division has already taken under that same cause — what was done, who owned it, and whether it was verified.",
+      "Where an action was signed off and the same part came back afterwards under the same cause, it is marked. That action did not correct anything, and repeating it is unlikely to be the answer. This is the question the old spreadsheet could never be asked.",
+      "If other nonconformances share the cause and none of them carries an action, it says so plainly: nothing has yet been changed to stop this recurring.",
+      "The assistant can be asked the same question — what have we done before about drawing errors — and will answer from the register.",
+      "It does not propose actions of its own, and that is deliberate. Filling the field with something plausible makes the numbers look better without anybody investigating, which is how the old register reached 475 records with corrective action on 19% of them and recurrence stopped nowhere. What to do stays with the Quality Engineer and is recorded against their name."
+    ]
+  },
   {
     v: "0.21.8", d: "2026-09-10", t: "The register shows inspections that failed",
     items: [

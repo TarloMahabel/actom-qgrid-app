@@ -8,6 +8,7 @@
    So the tests below weight the CLOSING half. The register half already
    worked in Excel; it is closing that never happened. */
 const { loadApp, suite, REPO } = require('./test/harness');
+const read = p => require('fs').readFileSync(require('path').join(REPO, p), 'utf8');
 
 (async () => {
   const s = suite('test-ncr — NCR management');
@@ -240,6 +241,33 @@ s.check('the object URL is released', /revokeObjectURL/.test(appSrc));
 s.check('the file names the division and the date', /NCR-register-\$\{DIVISION\.code/.test(appSrc));
 s.check('an empty register says so rather than downloading nothing',
   /nothing in the register to download/.test(appSrc));
+
+s.group('what was done before, under this cause');
+/* The feature exists because a generator would be worse than nothing:
+   filling the corrective action field with something plausible makes the
+   numbers improve while recurrence carries on. Every assertion here is
+   about it staying recall rather than becoming advice. */
+s.check('prior actions are shown on an NCR', /function priorActions/.test(appSrc));
+s.check('only once a root cause is recorded', /const cause = row && row\.root_cause;\s*if \(!cause\) return ""/.test(appSrc.replace(/\n\s*/g, ' ')) || /if \(!cause\) return ""/.test(appSrc));
+s.check('it is shown before the detail, not after',
+  appSrc.indexOf('+ prior') < appSrc.indexOf('<h3>What happened</h3>'));
+s.check('no model is involved', !/priorActions[\s\S]{0,2000}?Assist\.|priorActions[\s\S]{0,2000}?api\/chat/.test(appSrc));
+s.check('an action that was verified and came back is marked', /came back \$\{again\}/.test(appSrc));
+s.check('a cause with peers but no actions says so', /none carries a corrective action/.test(appSrc));
+s.check('a first-of-its-kind cause says so', /first nonconformance recorded/.test(appSrc));
+s.check('it states that it is not a recommendation', /not a\s*\n?\s*recommendation/.test(appSrc));
+/* Null part numbers must not be matched to each other, or missing data
+   manufactures recurrences. */
+s.check('recurrence needs a part number on both sides', /if \(!src\.part_no\) return 0/.test(appSrc));
+
+const mig018 = read('db/migrations/018-actions-by-cause.sql');
+s.check('the view exists', /create or replace view v_ncr_actions_by_cause/.test(mig018));
+s.check('it is security_invoker', /v_ncr_actions_by_cause with \(security_invoker = on\)/.test(mig018));
+s.check('it is granted to authenticated', /grant select on v_ncr_actions_by_cause/.test(mig018));
+s.check('it carries the recurrence count', /recurred_on_same_part/.test(mig018));
+s.check('null part numbers are excluded from the recurrence match',
+  /later\.part_no is not null/.test(mig018) && /n\.part_no is not null/.test(mig018));
+s.check('it states its prerequisites', /PREREQUISITES|prereq/.test(mig018));
 
 s.done();
 })();
