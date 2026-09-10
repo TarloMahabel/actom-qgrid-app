@@ -148,7 +148,7 @@ This is the part a spreadsheet cannot do, and the reason to build it here:
 | 3 | Containment / cause / corrective-action workflow with states | medium |
 | 4 | Import the 475, with a report of everything that needed cleaning | medium, needs your answers to §4 |
 | 5 | Analysis tabs, repeat-defect trend | medium |
-| 6 | Printable NCR, same treatment as the inspection report | small, pattern exists |
+| 6 | Printable NCR, same treatment as the inspection report | DONE v0.21.6 |
 
 Steps 1–3 are the useful minimum: you could raise and close an NCR properly.
 Step 4 is where the decisions above bite. Step 5 replaces the pivots.

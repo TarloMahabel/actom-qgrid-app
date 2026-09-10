@@ -1938,7 +1938,173 @@ async function openReport(id) {
   } finally { busy(false); render(); }
 }
 
+/* Step 6 of NCR-PLAN: the printable NCR, same treatment as the inspection
+   report. The two loaders sit next to each other deliberately — an NCR
+   report that drifts from the inspection report in layout or rigour is
+   the thing an auditor notices first. */
+async function openNcrReport(id) {
+  S.report = { kind: "ncr", id, loading: true };
+  S.view = "print";
+  buildNav(); render();
+  busy(true);
+  try {
+    /* The register is a view and carries neither the long text nor the
+       cost breakdown, so the row is refetched in full. */
+    const [full, acts, att] = await Promise.all([
+      supabase.from("ncrs").select("*").eq("id", id).maybeSingle(),
+      supabase.from("ncr_actions").select("*").eq("ncr_id", id).order("seq"),
+      supabase.from("attachments").select("*").eq("ncr_id", id)
+    ]);
+    if (full.error) throw full.error;
+    if (!full.data) throw new Error("That NCR could not be read.");
+
+    const paths = (att.data || []).map(a => a.storage_path);
+    let signed = [];
+    if (paths.length) {
+      const sr = await supabase.storage.from("inspection-photos").createSignedUrls(paths, 7200);
+      signed = sr.data || [];
+    }
+    const url = {};
+    for (const x of signed) url[x.path] = x.signedUrl;
+
+    S.report = {
+      kind: "ncr", id, loading: false,
+      ncr: full.data,
+      actions: acts.error ? [] : (acts.data || []),
+      photos: (att.data || []).filter(a => a.kind === "photo")
+        .map(a => ({ ...a, url: url[a.storage_path] }))
+    };
+  } catch (e) {
+    S.report = { kind: "ncr", id, loading: false, error: explain(e) };
+  } finally { busy(false); render(); }
+}
+
+function vNcrPrint() {
+  const rep = S.report || {};
+  if (rep.loading) return `<div class="card"><div class="empty">Loading the report…</div></div>`;
+  if (rep.error) return `<div class="card"><div class="bd">
+    <div class="note q">Could not load the report. ${esc(rep.error)}</div></div></div>`;
+  const n = rep.ncr;
+  if (!n) return `<div class="card"><div class="empty">That NCR is not loaded.</div></div>`;
+
+  const row = (S.ncrs || []).find(x => x.id === n.id) || {};
+  const project = byId(S.projects, n.project_id);
+  const wo = byId(S.worksOrders, n.works_order_id);
+  const raisedBy = byId(S.people, n.raised_by);
+  const closedBy = byId(S.people, n.closed_by);
+  const containedBy = byId(S.people, n.contained_by);
+  const causeBy = byId(S.people, n.cause_by);
+  const money = v => Number(v || 0) ? "R" + Number(v).toLocaleString("en-ZA") : "—";
+  const when = d => d ? new Date(d).toLocaleString("en-ZA") : "—";
+
+  const costs = [["Material", n.cost_material], ["Labour", n.cost_labour],
+                 ["Rework", n.cost_rework], ["Other", n.cost_other]]
+    .filter(([, v]) => Number(v || 0));
+  const costBlock = !costs.length && !Number(n.cost_total || 0) ? "" : `<div class="rsec">
+    <h4>Cost of this nonconformance</h4>
+    <table class="rtab"><tbody>
+      ${costs.map(([l, v]) => `<tr><td style="width:70%">${esc(l)}</td><td><b>${money(v)}</b></td></tr>`).join("")}
+      <tr><td><b>Total</b></td><td><b>${money(n.cost_total)}</b></td></tr>
+    </tbody></table></div>`;
+
+  /* Actions are the part an auditor reads hardest: a nonconformance with
+     no verified corrective action has not changed anything. Verified is
+     shown separately from done for exactly that reason. */
+  const acts = rep.actions || [];
+  const actionBlock = !acts.length
+    ? `<div class="rsec"><h4>Corrective action</h4>
+        <div class="note q">No corrective action is recorded against this nonconformance.</div></div>`
+    : `<div class="rsec"><h4>Corrective action</h4>
+      <table class="rtab"><thead><tr><th>No</th><th>Action</th><th>Owner</th><th>Due</th>
+        <th>Done</th><th>Verified</th></tr></thead><tbody>
+      ${acts.map((a, i) => `<tr>
+        <td>${a.seq ?? i + 1}</td>
+        <td>${esc(a.action || "—")}</td>
+        <td>${esc(byId(S.people, a.owner_id)?.full_name || "—")}</td>
+        <td>${a.due_date ? esc(a.due_date) : "—"}</td>
+        <td>${esc(byId(S.people, a.done_by)?.full_name || "not yet")}
+          ${a.done_at ? `<div class="sub">${new Date(a.done_at).toLocaleDateString("en-ZA")}</div>` : ""}</td>
+        <td>${esc(byId(S.people, a.verified_by)?.full_name || "not yet")}
+          ${a.verified_at ? `<div class="sub">${new Date(a.verified_at).toLocaleDateString("en-ZA")}</div>` : ""}</td>
+      </tr>`).join("")}
+      </tbody></table></div>`;
+
+  const photos = (rep.photos || []).filter(p => p.url);
+  const photoBlock = !photos.length ? "" : `<div class="rsec"><h4>Photographs</h4>
+    <div class="rphotos">${photos.map(p =>
+      `<figure><img src="${esc(p.url)}" alt=""><figcaption>${esc(p.storage_path.split("/")[2] || "")}</figcaption></figure>`).join("")}</div></div>`;
+
+  const text = (label, value, missing) => `<div class="rsec"><h4>${esc(label)}</h4>
+    ${value && String(value).trim()
+      ? `<p style="margin:0;white-space:pre-wrap">${esc(value)}</p>`
+      : `<div class="note q">${esc(missing)}</div>`}</div>`;
+
+  return `<div class="report" id="report">
+    <div class="rhead">
+      <div class="rlogo">${window.ACTOM_LOGO ? window.ACTOM_LOGO.onLight(46) : ""}</div>
+      <div class="rtitle">
+        <h2>Nonconformance report</h2>
+        <div class="sub">${esc(DIVISION.name)} · ACTOM (Pty) Ltd</div>
+      </div>
+      <div class="rref">
+        <div class="id">${esc(n.ref || "—")}</div>
+        <div class="sub">${esc(String(n.severity || "").toUpperCase())} · ${esc(ncrStateLabel(row.status || n.status))}</div>
+      </div>
+    </div>
+
+    <table class="rmeta"><tbody>
+      <tr><th>Part or panel</th><td>${esc(n.part_description || "—")}</td>
+          <th>Part number</th><td>${esc(n.part_no || "—")}</td></tr>
+      <tr><th>Project</th><td>${esc(project?.code || "—")} ${esc(project?.name || "")}</td>
+          <th>Works order</th><td>${esc(wo?.code || "—")}</td></tr>
+      <tr><th>Origin</th><td>${esc(n.origin || "—")}${row.inspection_ref
+            ? ` · from ${esc(row.inspection_ref)}` : ""}</td>
+          <th>Department</th><td>${esc(row.department || "not allocated")}</td></tr>
+      <tr><th>Supplier</th><td>${esc(n.supplier || "internal")}</td>
+          <th>Quantity</th><td>${n.qty ? esc(n.qty) + " " + esc(n.qty_unit || "") : "—"}</td></tr>
+      <tr><th>Raised</th><td>${when(n.raised_at)} by ${esc(raisedBy?.full_name || "—")}</td>
+          <th>Disposition</th><td>${esc(n.disposition || "not yet decided")}</td></tr>
+    </tbody></table>
+
+    ${text("The nonconformance", n.details, "No description was recorded.")}
+    ${text("Containment", n.containment,
+        "No containment was recorded — nothing is stated as having stopped this spreading.")}
+    ${n.contained_at ? `<div class="sub" style="margin:-8px 0 14px">Contained ${when(n.contained_at)}${containedBy ? " by " + esc(containedBy.full_name) : ""}</div>` : ""}
+
+    ${text("Root cause", row.root_cause
+        ? row.root_cause + (n.root_cause_detail ? " — " + n.root_cause_detail : "")
+        : n.root_cause_detail,
+        "No root cause is recorded. A nonconformance cannot be closed without one.")}
+    ${n.cause_at ? `<div class="sub" style="margin:-8px 0 14px">Identified ${when(n.cause_at)}${causeBy ? " by " + esc(causeBy.full_name) : ""}</div>` : ""}
+
+    ${actionBlock}
+    ${costBlock}
+    ${photoBlock}
+
+    <div class="rsec rsign">
+      <h4>Closure</h4>
+      <div class="rsignrow">
+        <div>
+          <div class="rsigbox">${n.closed_at ? "closed" : "still open"}</div>
+          <div class="rsigline">${esc(closedBy?.full_name || "—")}</div>
+          <div class="sub">${esc(closedBy?.role || "")}${closedBy && closedBy.email ? " · " + esc(closedBy.email) : ""}</div>
+        </div>
+        <div class="rfacts">
+          <div><span>Closed</span> ${when(n.closed_at)}</div>
+          <div><span>Age</span> ${row.age_days != null ? esc(row.age_days) + " days" : "—"}</div>
+          ${n.concession_by ? `<div><span>Concession</span> ${esc(byId(S.people, n.concession_by)?.full_name || "—")}${n.concession_note ? " — " + esc(n.concession_note) : ""}</div>` : ""}
+          ${n.legacy_ref ? `<div><span>Was</span> ${esc(n.legacy_ref)}</div>` : ""}
+          <div><span>Printed</span> ${new Date().toLocaleString("en-ZA")} by ${esc(S.profile.full_name)}</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
 function vPrint() {
+  /* One print view, two kinds of record. */
+  if ((S.report || {}).kind === "ncr") return vNcrPrint();
+
   const rep = S.report || {};
   const insp = byId(S.inspections, rep.id);
   if (!insp) return `<div class="card"><div class="empty">That inspection is not loaded.</div></div>`;
@@ -2183,7 +2349,9 @@ function ncrRegister() {
           r.actions ? `${r.actions - r.actions_open}/${r.actions} verified`
                     : `<span style="color:var(--warn)">none</span>`,
           pill(ncrStateLabel(r.status)),
-          `<button class="btn sm" data-act="open-ncr" data-id="${r.id}">Open</button>`]))}
+          `<button class="btn sm" data-act="open-ncr" data-id="${r.id}">Open</button>
+           <button class="btn sm" data-act="ncr-report" data-id="${r.id}"
+             title="Open the printable report">Report</button>`]))}
     </div></div>`;
 }
 
@@ -2466,9 +2634,7 @@ function ncrDetail(m) {
 
   return head(m, `${esc(n.part_description || "")}`,
     `<button class="btn" data-act="close-ncr-view">← Register</button>
-     ${/* A printable NCR is step 6 of the plan and is not built yet. Better no
-           button than one that does nothing — a dead control is the fault this
-           build has hit most often. */ ""}
+     <button class="btn" data-act="ncr-report" data-id="${n.id}">Report</button>
      ${canClose && n.status !== "closed"
        ? `<button class="btn pri" data-act="do-close-ncr" data-id="${n.id}">Close this NCR</button>` : ""}`)
     + `<div class="filters"><span class="cnt">
@@ -4256,9 +4422,18 @@ document.addEventListener("click", async e => {
     case "do-close-ncr": return closeNcr(t.dataset.id);
     case "raise-ncr": return raiseNcrFromFault(t.dataset.id);
     case "print-report": return openReport(t.dataset.id);
+    case "ncr-report": return openNcrReport(t.dataset.id);
     case "do-print": return window.print();
-    case "close-report":
-      S.report = null; S.view = "work"; S.tab = 2; buildNav(); return render();
+    case "close-report": {
+      /* Back to where the report was opened from. Returning an NCR report
+         to the inspection workbench is the kind of small wrongness that
+         makes people stop trusting the navigation. */
+      const wasNcr = (S.report || {}).kind === "ncr";
+      S.report = null;
+      if (wasNcr) { S.view = "ncr"; S.tab = 0; }
+      else { S.view = "work"; S.tab = 2; }
+      buildNav(); return render();
+    }
     case "hand-over": return handoverModal(t.dataset.id);
     case "save-handover": return saveHandover();
     case "add-wo": return worksOrderModal(Number(t.dataset.id), null);

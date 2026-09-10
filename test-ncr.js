@@ -7,7 +7,7 @@
 
    So the tests below weight the CLOSING half. The register half already
    worked in Excel; it is closing that never happened. */
-const { loadApp, suite } = require('./test/harness');
+const { loadApp, suite, REPO } = require('./test/harness');
 
 (async () => {
   const s = suite('test-ncr — NCR management');
@@ -185,5 +185,40 @@ const { loadApp, suite } = require('./test/harness');
   s.check('and points at raising one from a failed check',
     old.$('page').textContent.includes('failed check'));
 
-  s.done();
+  s.group('the printable NCR');
+/* Step 6 of NCR-PLAN. The register carried an Open button and a comment
+   saying the report did not exist yet; a dead control is worse than a
+   missing one, so the comment was right until the thing was built. */
+const appSrc = require('fs').readFileSync(require('path').join(REPO, 'apps/inspect/app.js'), 'utf8');
+s.check('the register offers a report', /data-act="ncr-report"/.test(appSrc));
+s.check('so does the detail view', (appSrc.match(/data-act="ncr-report"/g) || []).length >= 2);
+s.check('the action has a handler', /case "ncr-report"/.test(appSrc));
+s.check('there is a loader', /async function openNcrReport/.test(appSrc));
+s.check('and a view', /function vNcrPrint/.test(appSrc));
+s.check('the print view dispatches on the kind of record',
+  /\(S\.report \|\| \{\}\)\.kind === "ncr"/.test(appSrc));
+s.check('the placeholder comment is gone', !/printable NCR is step 6/.test(appSrc));
+
+/* The things an auditor samples. Each was absent from the old register
+   and each is why this report exists at all. */
+for (const [what, needle] of [
+  ['the root cause', 'Root cause'],
+  ['corrective action, with verified separate from done', 'Verified'],
+  ['a warning when no corrective action is recorded', 'No corrective action is recorded'],
+  ['a warning when no root cause is recorded', 'cannot be closed without one'],
+  ['containment', 'Containment'],
+  ['the cost breakdown', 'Cost of this nonconformance'],
+  ['photographs', 'Photographs'],
+  ['who closed it and when', 'Closure'],
+  ['who printed it', 'Printed']
+]) s.check(`the report shows ${what}`, appSrc.includes(needle));
+
+s.check('costs are in Rands', /money = v => Number\(v \|\| 0\) \? "R" \+/.test(appSrc));
+/* Returning an NCR report to the inspection workbench is the kind of
+   small wrongness that makes people distrust the navigation. */
+s.check('closing an NCR report returns to the register',
+  /wasNcr \) \{ S\.view = "ncr"/.test(appSrc.replace(/\s+/g, ' ')) ||
+  /if \(wasNcr\) \{ S\.view = "ncr"/.test(appSrc));
+
+s.done();
 })();

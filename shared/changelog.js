@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.21.5";
+window.APP_VERSION = "0.21.6";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.21.6", d: "2026-09-10", t: "Printable nonconformance report",
+    items: [
+      "A Report button on the NCR register and on each NCR, alongside the one the inspection register has had. It opens a printable page you can save as a PDF and send out.",
+      "It carries what an auditor samples: what was found, what was done to contain it, the root cause, and every corrective action with who did it and, separately, who verified it. Done and verified are not the same thing and the report does not let them look the same.",
+      "Where a root cause or a corrective action is missing, the report says so plainly rather than leaving a blank. A nonconformance with no verified action has not changed anything, and a printed report that hides that is worse than no report.",
+      "Costs are broken down by material, labour, rework and other, with the total, all in Rands. Photographs taken against the NCR are included.",
+      "Closing the report returns you to the NCR register rather than the inspection workbench."
+    ]
+  },
   {
     v: "0.21.5", d: "2026-09-10", t: "The assistant shows it is working",
     items: [
