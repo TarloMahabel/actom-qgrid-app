@@ -1938,6 +1938,66 @@ async function openReport(id) {
   } finally { busy(false); render(); }
 }
 
+
+/* ---------------------------------------------------------------------
+   CSV download.
+
+   Two things here are not optional.
+
+   FORMULA INJECTION. Excel executes a cell beginning =, +, - or @. Every
+   text field in this register was typed by an inspector, so a part
+   description of =HYPERLINK(...) or a cause note beginning with a minus
+   sign is a live formula the moment somebody opens the file. Those cells
+   are prefixed with an apostrophe, which Excel strips on display and
+   treats as text. A quality register that can execute is not a record.
+
+   THE BYTE ORDER MARK. Without it Excel on Windows reads the file as the
+   local code page and mangles anything non-ASCII — names, °, ø. One
+   three-byte prefix and it reads UTF-8 correctly.
+   --------------------------------------------------------------------- */
+function csvCell(v) {
+  if (v == null) return "";
+  let t = String(v);
+  if (/^[=+\-@\t\r]/.test(t)) t = "'" + t;
+  return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+}
+
+function csvDownload(filename, headers, rows) {
+  const body = [headers.map(csvCell).join(",")]
+    .concat(rows.map(r => r.map(csvCell).join(","))).join("\r\n");
+  /* A blob rather than a data: URL — browsers block navigation to data:
+     URLs, and a register of any size exceeds what one would take. */
+  const blob = new Blob(["\ufeff" + body], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  /* Revoked on a timer: revoking immediately cancels the download in
+     some browsers before it has read the blob. */
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function downloadNcrRegister() {
+  const rows = S.ncrs || [];
+  if (!rows.length) { toast("There is nothing in the register to download.", "bad"); return; }
+  /* The whole register, not the 120 the table draws. Someone downloading
+     it wants the file to be the record, and a silently truncated export
+     is the kind of thing an auditor finds rather than you. */
+  const headers = ["Reference", "Was", "Raised", "Days old", "Part or panel", "Part number",
+    "Project", "From inspection", "Department", "Supplier", "Severity", "Progress",
+    "Disposition", "Root cause", "Actions", "Actions outstanding", "Cost (R)"];
+  const data = rows.map(r => [
+    r.ref, r.legacy_ref, r.raised_at ? String(r.raised_at).slice(0, 10) : "", r.age_days,
+    r.part_description, r.part_no, r.project_code, r.inspection_ref,
+    r.department, r.supplier, r.severity, ncrStateLabel(r.status),
+    r.disposition, r.root_cause, r.actions, r.actions_open,
+    r.cost_total == null ? "" : Number(r.cost_total)
+  ]);
+  const stamp = new Date().toISOString().slice(0, 10);
+  csvDownload(`NCR-register-${DIVISION.code || "grid"}-${stamp}.csv`, headers, data);
+  toast(`${rows.length} nonconformance${rows.length === 1 ? "" : "s"} downloaded.`, "ok");
+}
+
 /* Step 6 of NCR-PLAN: the printable NCR, same treatment as the inspection
    report. The two loaders sit next to each other deliberately — an NCR
    report that drifts from the inspection report in layout or rigour is
@@ -2334,7 +2394,9 @@ function ncrRegister() {
       be closed, and one with no corrective action has not changed anything — the register
       this replaces sat at 1% root cause and 19% corrective action across 475 records.</div>` : ""}
 
-    <div class="card"><h3>Register <span class="cl">${rows.length}</span></h3><div class="bd">
+    <div class="card"><h3>Register <span class="cl">${rows.length}</span>
+      <button class="btn sm" data-act="ncr-csv" style="margin-left:auto"
+        title="Download the whole register as a spreadsheet">Download</button></h3><div class="bd">
       ${T(["Reference", "Raised", "What", "Department", "Severity", "Cause", "Actions", "Progress", ""],
         rows.slice(0, 120).map(r => [
           `<span class="id">${esc(r.ref || "—")}</span>${r.legacy_ref
@@ -4423,6 +4485,7 @@ document.addEventListener("click", async e => {
     case "raise-ncr": return raiseNcrFromFault(t.dataset.id);
     case "print-report": return openReport(t.dataset.id);
     case "ncr-report": return openNcrReport(t.dataset.id);
+    case "ncr-csv": return downloadNcrRegister();
     case "do-print": return window.print();
     case "close-report": {
       /* Back to where the report was opened from. Returning an NCR report

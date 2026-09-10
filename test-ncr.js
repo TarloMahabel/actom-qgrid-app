@@ -220,5 +220,26 @@ s.check('closing an NCR report returns to the register',
   /wasNcr \) \{ S\.view = "ncr"/.test(appSrc.replace(/\s+/g, ' ')) ||
   /if \(wasNcr\) \{ S\.view = "ncr"/.test(appSrc));
 
+s.group('downloading the register');
+/* A register you cannot get out of the system is a register somebody
+   keeps a private copy of in Excel, which is how the last one ended up
+   with 475 records and 1% root cause. */
+s.check('the register offers a download', /data-act="ncr-csv"/.test(appSrc));
+s.check('the action has a handler', /case "ncr-csv"/.test(appSrc));
+s.check('it exports every row, not the 120 drawn', /const rows = S\.ncrs \|\| \[\]/.test(appSrc));
+
+/* Excel executes a cell beginning = + - or @. Every text field in this
+   register was typed by an inspector, so this is a live exposure and not
+   a theoretical one. */
+s.check('formula characters are neutralised', /\^\[=\+\\-@/.test(appSrc));
+s.check('quotes are doubled and fields containing separators are quoted',
+  /replace\(\/"\/g, '""'\)/.test(appSrc));
+s.check('a byte order mark is written so Excel reads UTF-8', /\\ufeff/.test(appSrc));
+s.check('a blob is used rather than a data URL', /new Blob\(/.test(appSrc) && !/href = "data:text\/csv/.test(appSrc));
+s.check('the object URL is released', /revokeObjectURL/.test(appSrc));
+s.check('the file names the division and the date', /NCR-register-\$\{DIVISION\.code/.test(appSrc));
+s.check('an empty register says so rather than downloading nothing',
+  /nothing in the register to download/.test(appSrc));
+
 s.done();
 })();

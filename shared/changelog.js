@@ -22,10 +22,18 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.21.6";
+window.APP_VERSION = "0.21.7";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.21.7", d: "2026-09-10", t: "Download the NCR register",
+    items: [
+      "A Download button on the register produces a spreadsheet of every nonconformance — reference, part, department, severity, cause, actions outstanding, cost and progress. The whole register, not just the rows on screen.",
+      "The file opens correctly in Excel, including names and symbols that used to come out garbled.",
+      "Text an inspector typed cannot run as a formula when the file is opened. A description beginning with an equals or minus sign is treated as text, which is what it is."
+    ]
+  },
   {
     v: "0.21.6", d: "2026-09-10", t: "Printable nonconformance report",
     items: [
