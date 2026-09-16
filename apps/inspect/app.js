@@ -180,7 +180,7 @@ async function loadData() {
     S.defects = df.data; S.equipment = eq.data;
 
     const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd, fbp, acts,
-           ncr, ncra, rcs, dash, cmp, cmpT, cmpS] = await Promise.all([
+           ncr, ncra, rcs, dash, cmp, cmpT, cmpS, cbm, cbd] = await Promise.all([
       supabase.from("inspection_templates").select("*").order("code"),
       supabase.from("template_revisions").select("*").order("rev", { ascending: false }),
       supabase.from("inspection_requirements").select("*"),
@@ -199,7 +199,9 @@ async function loadData() {
       supabase.from("v_dashboard").select("*").maybeSingle(),
       supabase.from("v_complaints").select("*").order("called_at", { ascending: false }).limit(500),
       supabase.from("complaint_types").select("*").eq("active", true).order("sort"),
-      supabase.from("complaint_sections").select("*").eq("active", true).order("sort")
+      supabase.from("complaint_sections").select("*").eq("active", true).order("sort"),
+      supabase.from("v_care_by_month").select("*").order("period"),
+      supabase.from("v_care_by_defect").select("*").order("period")
     ]);
     for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd]) if (r.error) throw r.error;
     /* The dashboard views are not load-bearing: a division that has not run
@@ -221,6 +223,11 @@ async function loadData() {
     S.complaintReady = !cmp.error;
     S.complaintTypes = cmpT.error ? [] : (cmpT.data || []);
     S.complaintSections = cmpS.error ? [] : (cmpS.data || []);
+    /* Counted in the database rather than from S.complaints, which is
+       capped at 500 — a chart built from a capped list is a chart that
+       quietly stops counting. */
+    S.careByMonth = cbm.error ? [] : (cbm.data || []);
+    S.careByDefect = cbd.error ? [] : (cbd.data || []);
     S.templates = tpl.data; S.revisions = rev.data; S.requirements = req.data;
     S.projects = prj.data; S.worksOrders = wo.data;
     S.inspections = ins.data; S.failedChecks = fc.data;
@@ -280,7 +287,7 @@ const NAV = [
     tabs: ["Register", "Repeat causes", "By department", "By supplier", "Reports"] },
   { g: "Customer" },
   { id: "cust",  n: 6, t: "Customer cares",          col: "--m3",
-    tabs: ["Register", "Open", "Response times"] },
+    tabs: ["Register", "Open", "After Sales report"] },
   { g: "Setup" },
   { id: "dsn",   n: 7, t: "Form designer",           col: "--m4", tabs: [] },
   { id: "req",   n: 8, t: "Inspection requirements", col: "--m5", tabs: ["Requirements matrix"] },
@@ -4761,6 +4768,7 @@ async function openComplaint(id) {
           : c.is_technical
             ? `<span class="tag ncr">none linked — required before this can be closed</span>`
             : "none linked")}`}
+    ${row("Documents", `<div id="careDocs"><div class="cnt">Loading…</div></div>`)}
   `, c.status === "closed" || c.legacy_closed
       ? [["Print the form", "care-report", "", c.id], ["Close", "close-modal", ""]]
       : [
@@ -4769,6 +4777,7 @@ async function openComplaint(id) {
           ["Print the form", "care-report", "", c.id],
           ["Cancel", "close-modal", ""]
         ]);
+  loadCareDocs(id).catch(() => { });
 }
 
 function downloadComplaints() {
@@ -4806,6 +4815,221 @@ function downloadComplaints() {
    RPC that refuses without a correction, and the register leads with the
    two numbers rather than burying them in a report nobody opens.
    ===================================================================== */
+
+
+/* ---------------------------------------------------------------------
+   Documents on a customer care.
+
+   Quotes, printed emails, delivery notes. The picker lives in the shell
+   rather than in the modal, for the reason the photo pickers do: a file
+   dialog outlives a repaint, and an input replaced while the dialog is
+   open swallows the selection without saying anything.
+
+   Nothing can be attached to a cleared care. What was considered when a
+   complaint was signed off is part of the record, and a document added
+   afterwards changes what the signature appears to cover.
+   --------------------------------------------------------------------- */
+async function loadCareDocs(id) {
+  /* try/catch as well as the returned error: checking `error` covers a
+     Postgres refusal but not a network failure, which throws — and this
+     is called without await from a modal that has already rendered. */
+  let data = null;
+  try {
+    const r = await supabase.from("complaint_documents")
+      .select("*").eq("complaint_id", id).order("uploaded_at");
+    if (r.error) throw r.error;
+    data = r.data;
+  } catch (e) {
+    const host = $("careDocs");
+    if (host) host.innerHTML = `<div class="cnt">Could not load the documents.</div>`;
+    return;
+  }
+  S.careDocs = data || [];
+  const host = $("careDocs");
+  if (!host) return;
+  const care = (S.complaints || []).find(c => c.id === id) || {};
+  const cleared = !!care.closed_at || !!care.legacy_closed;
+  host.innerHTML = (S.careDocs.length
+      ? S.careDocs.map(d => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+          <button class="btn sm" data-act="open-care-doc" data-id="${esc(d.storage_path)}">${esc(d.filename)}</button>
+          <span class="cnt">${d.bytes ? Math.round(d.bytes / 1024) + " kB · " : ""}${fmtDate(d.uploaded_at)}</span>
+        </div>`).join("")
+      : `<div class="cnt">Nothing attached.</div>`)
+    + (cleared
+      ? `<div class="hint">This customer care is cleared, so nothing further can be attached.</div>`
+      : `<button class="btn sm" data-act="add-care-doc" data-id="${id}" style="margin-top:8px">Attach a document</button>`);
+}
+
+async function addCareDoc(id) {
+  S.careUploadFor = id;
+  const picker = $("docPicker");
+  if (picker) { picker.value = ""; picker.click(); }
+}
+
+async function uploadCareDocs(files) {
+  const id = S.careUploadFor;
+  if (!id || !files.length) return;
+  busy(true);
+  try {
+    for (const file of files) {
+      if (file.size > 15 * 1024 * 1024) {
+        toast(`${file.name} is larger than 15 MB and was not attached.`, "bad");
+        continue;
+      }
+      /* The path carries the care id so storage stays navigable, and a
+         timestamp so two files of the same name from the same person do
+         not overwrite one another. */
+      const safe = file.name.replace(/[^\w.\- ]+/g, "_").slice(-90);
+      const path = `${id}/${Date.now()}-${safe}`;
+      const up = await supabase.storage.from("customer-care-docs").upload(path, file);
+      if (up.error) throw up.error;
+      const { error } = await supabase.from("complaint_documents").insert({
+        complaint_id: id, storage_path: path, filename: file.name,
+        bytes: file.size, uploaded_by: S.profile.id
+      });
+      if (error) throw error;
+    }
+    await loadCareDocs(id);
+    toast("Attached.", "ok");
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); S.careUploadFor = null; }
+}
+
+async function openCareDoc(path) {
+  busy(true);
+  try {
+    const { data, error } = await supabase.storage.from("customer-care-docs")
+      .createSignedUrl(path, 300);
+    if (error) throw error;
+    window.open(data.signedUrl, "_blank", "noopener");
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+/* ---------------------------------------------------------------------
+   The After Sales report.
+
+   The shape follows the spreadsheet it replaces, because people already
+   read that page at the monthly review and a redesign would cost more in
+   re-explaining than it gained.
+
+   One departure. The spreadsheet plots a zero for a month where nothing
+   was answered, which draws as an instant response and is the best
+   number on the chart. Here a month with nothing to measure has no bar
+   and is labelled, because the honest answer to "how fast did we respond
+   in October" is sometimes "nobody recorded".
+   --------------------------------------------------------------------- */
+function lineBarChart(rows, opts) {
+  const W = 760, H = 260, padL = 44, padR = 16, padT = 26, padB = 46;
+  if (!rows.length) return `<div class="empty">${esc(opts.empty || "No data yet.")}</div>`;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const vals = rows.map(r => Number(r.v) || 0);
+  const max = Math.max(opts.limit || 0, ...vals, 1) * 1.18;
+  const step = plotW / rows.length;
+  const barW = Math.min(46, step * 0.55);
+  const y = v => padT + plotH - (v / max) * plotH;
+  const tick = Math.max(1, Math.round(max / 4));
+  const ticks = []; for (let v = 0; v <= max; v += tick) ticks.push(v);
+
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+    ${ticks.map(v => `<line x1="${padL}" x2="${W - padR}" y1="${y(v)}" y2="${y(v)}"
+        stroke="var(--line)" stroke-width="1"/>
+      <text x="${padL - 7}" y="${y(v) + 4}" text-anchor="end" font-size="10"
+        fill="var(--muted)">${v}</text>`).join("")}
+    ${rows.map((r, i) => {
+      const cx = padL + step * i + step / 2;
+      if (r.v == null) {
+        /* No bar, and said so. See the note above. */
+        return `<text x="${cx}" y="${y(0) - 6}" text-anchor="middle" font-size="9"
+                  fill="var(--muted)">none</text>
+          <text x="${cx}" y="${H - padB + 16}" text-anchor="middle" font-size="9.5"
+            fill="var(--ink-2)" transform="rotate(-42 ${cx} ${H - padB + 16})">${esc(r.k)}</text>`;
+      }
+      const over = opts.limit != null && Number(r.v) > opts.limit;
+      return `<rect x="${cx - barW / 2}" y="${y(r.v)}" width="${barW}" height="${y(0) - y(r.v)}"
+          rx="2" fill="${over ? "var(--bad, #c0392b)" : "var(--brand, #1f4e79)"}"
+          ><title>${esc(r.k)}: ${r.v}${esc(opts.unit || "")}</title></rect>
+        <text x="${cx}" y="${y(r.v) - 6}" text-anchor="middle" font-size="12"
+          font-weight="700" fill="${over ? "var(--bad, #c0392b)" : "var(--brand-dk, #16304f)"}">${r.v}</text>
+        <text x="${cx}" y="${H - padB + 16}" text-anchor="middle" font-size="9.5"
+          fill="var(--ink-2)" transform="rotate(-42 ${cx} ${H - padB + 16})">${esc(r.k)}</text>`;
+    }).join("")}
+    ${opts.limit != null ? `<line x1="${padL}" x2="${W - padR}" y1="${y(opts.limit)}" y2="${y(opts.limit)}"
+        stroke="var(--bad, #c0392b)" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="${W - padR}" y="${y(opts.limit) - 5}" text-anchor="end" font-size="10"
+        font-weight="600" fill="var(--bad, #c0392b)">limit ${opts.limit}${esc(opts.unit || "")}</text>` : ""}
+    <line x1="${padL}" x2="${W - padR}" y1="${y(0)}" y2="${y(0)}" stroke="var(--ink-2)" stroke-width="1"/>
+  </svg>`;
+}
+
+function vAfterSales() {
+  const months = (S.careByMonth || []).slice(-14);
+  const target = S.division?.response_target_days ?? 3;
+  const limit = S.division?.care_target_per_month ?? 4;
+  const mLabel = p => new Date(p).toLocaleDateString("en-ZA", { month: "short", year: "2-digit" });
+  const period = months.length ? months[months.length - 1].period : null;
+
+  const defects = (S.careByDefect || []).filter(d => d.period === period)
+    .sort((a, b) => b.cares - a.cares);
+  const acts = (S.actions || []).filter(a => a.module === "customer")
+    .sort((a, b) => String(b.period).localeCompare(String(a.period)));
+  /* The report's words for the three states quality_actions already has.
+     Same facts; the vocabulary belongs to the report. */
+  const STATE = { open: "Not yet started", monitoring: "Started", closed: "Completed" };
+
+  const breaches = months.filter(m => m.avg_response_days != null && m.avg_response_days > target);
+
+  return `<div class="card"><h3>Customer cares per month
+      <span class="cnt" style="margin-left:auto">limit ${limit} a month</span></h3>
+      <div class="bd">${lineBarChart(
+        months.map(m => ({ k: mLabel(m.period), v: Number(m.cares) })),
+        { limit, empty: "No customer cares recorded yet." })}</div></div>
+
+    <div class="card"><h3>First response, average days
+      <span class="cnt" style="margin-left:auto">target ${target} days</span></h3>
+      <div class="bd">${lineBarChart(
+        months.map(m => ({ k: mLabel(m.period),
+                           v: m.avg_response_days == null ? null : Number(m.avg_response_days) })),
+        { limit: target, unit: " d", empty: "Nothing has a response time recorded yet." })}
+      <div class="note${breaches.length ? " q" : ""}" style="margin-top:11px">${breaches.length
+        ? `${breaches.length} month${breaches.length === 1 ? "" : "s"} averaged over ${target} days
+           to a first response. A month with no bar had nothing answered at all, which is not the
+           same as answering quickly — the spreadsheet drew those as zero.`
+        : `No month has averaged over ${target} days. A month with no bar had nothing answered,
+           which is not the same as answering quickly.`}</div></div></div>
+
+    <div class="two">
+      <div class="card"><h3>Defect type${period ? ` — ${mLabel(period)}` : ""}</h3><div class="bd">
+        ${defects.length
+          ? T(["Defect", "Cares", "Cost"], defects.map(d => [
+              esc(d.defect), d.cares,
+              Number(d.cost || 0) ? "R" + Number(d.cost).toLocaleString("en-ZA") : "—"]))
+          : `<div class="empty">Nothing recorded for that month.</div>`}
+      </div></div>
+      <div class="card"><h3>This year so far</h3><div class="bd">
+        ${T(["", ""], [
+          ["Customer cares", months.reduce((a, m) => a + Number(m.cares), 0)],
+          ["Still open", months.reduce((a, m) => a + Number(m.still_open), 0)],
+          ["Cleared with a date", months.reduce((a, m) => a + Number(m.cleared), 0)],
+          ["Cost recorded", "R" + months.reduce((a, m) => a + Number(m.cost || 0), 0).toLocaleString("en-ZA")]
+        ])}
+      </div></div>
+    </div>
+
+    <div class="card"><h3>Actions <span class="cnt">${acts.length}</span>
+      <span class="cnt" style="margin-left:auto">shared with the monthly quality review</span></h3>
+      <div class="bd">${acts.length
+        ? T(["No", "Item", "Action", "Deadline", "Status"], acts.map((a, i) => [
+            a.seq ?? i + 1, esc(a.item), esc(a.action),
+            a.deadline ? fmtDate(a.deadline) : "—",
+            pill(STATE[a.status] || a.status)]))
+        : `<div class="empty">No actions raised from a customer care review yet.</div>`}
+        <div class="note" style="margin-top:11px">These sit in the same register as the monthly
+          inspection review actions, so an action cannot be filed somewhere the person looking
+          for it will not open.</div>
+      </div></div>`;
+}
+
 function vCust(m) {
   if (!S.complaintReady) {
     return head(m) + `<div class="card"><div class="bd">
@@ -4861,42 +5085,7 @@ function vCust(m) {
                         : "No customer cares have been logged yet."));
   }
 
-  else {
-    /* Response times. Median rather than mean, for the same reason the
-       NCR reports use it: one complaint forgotten for a year should not
-       move the number everyone quotes. */
-    const medResp = median(answered.map(c => Number(c.response_hours)));
-    const medClose = median(closed.map(c => Number(c.days_to_close)));
-    const noReply = open.filter(c => c.response_hours == null);
-    const bySection = {};
-    for (const c of answered) {
-      const k = c.section || "not stated";
-      (bySection[k] = bySection[k] || []).push(Number(c.response_hours));
-    }
-
-    body = `<div class="three">
-        <div class="card kpi"><div class="k">Median first response</div>
-          <div class="v">${medResp == null ? "—" : medResp + " h"}</div>
-          <div class="d">${answered.length} of ${all.length} have a response recorded</div></div>
-        <div class="card kpi"><div class="k">Median time to close</div>
-          <div class="v">${medClose == null ? "—" : medClose + " d"}</div>
-          <div class="d">${closed.length} closed with a date</div></div>
-        <div class="card kpi ${noReply.length ? "alert" : "good"}"><div class="k">Open, no reply yet</div>
-          <div class="v">${noReply.length}</div>
-          <div class="d">${noReply.length ? "the customer has not heard anything" : "every open complaint has been answered"}</div></div>
-      </div>`
-      + (Object.keys(bySection).length ? `<div class="card"><h3>First response by section</h3><div class="bd">
-        ${T(["Section", "Complaints", "Median hours", "Slowest"],
-          Object.entries(bySection).sort((a, b) => median(b[1]) - median(a[1]))
-            .map(([k, v]) => [esc(k), v.length, median(v) + " h", Math.max(...v) + " h"]))}
-        </div></div>` : "")
-      + `<div class="card"><div class="bd"><div class="note q">
-        These two numbers are the point of this module. The register it replaces held
-        989 complaints, marked 957 of them closed, and recorded a closing date on 38 —
-        so neither number could be produced at all. They will look thin until this
-        register has a year behind it, and thin but true beats absent.
-      </div></div></div>`;
-  }
+  else body = vAfterSales();
 
   return head(m) + body + foot();
 }
@@ -5082,6 +5271,8 @@ document.addEventListener("click", async e => {
     case "print-report": return openReport(t.dataset.id);
     case "ncr-report": return openNcrReport(t.dataset.id);
     case "care-report": return openCareReport(t.dataset.id);
+    case "add-care-doc": return addCareDoc(t.dataset.id);
+    case "open-care-doc": return openCareDoc(t.dataset.id);
     case "ncr-csv": return downloadNcrRegister();
     case "new-complaint": return newComplaintModal();
     case "save-complaint": return saveComplaint();
@@ -5222,6 +5413,14 @@ function onPicked(e) {
   if (field && files.length) addPhotos(field, files);
 }
 $("photoPicker").addEventListener("change", onPicked);
+/* Array.from before anything else touches the input: input.files is a
+   live FileList, and resetting the input empties the list a variable is
+   still holding. That cost four versions in the photo path. */
+$("docPicker")?.addEventListener("change", e => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = "";
+  uploadCareDocs(files).catch(() => { });
+});
 $("cameraPicker").addEventListener("change", onPicked);
 $("whatsNew").addEventListener("click", () => {
   const log = window.CHANGELOG || [];

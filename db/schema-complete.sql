@@ -11,7 +11,7 @@
 --  Paste into the Supabase SQL editor of a NEW, EMPTY project and run.
 --  Order matters; do not run sections out of sequence.
 --
---  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 009-photo-storage.sql, 010-handover.sql, 011-fault-clearing.sql, 012-dashboard.sql, 013-planned-dates.sql, 014-ncr.sql, 015-ncr-status-and-close-path.sql, 016-ai-suggestions.sql, 017-ai-chat.sql, 018-actions-by-cause.sql, 019-customer-complaints.sql, 020-complaint-import.sql, 021-customer-care-form.sql
+--  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 009-photo-storage.sql, 010-handover.sql, 011-fault-clearing.sql, 012-dashboard.sql, 013-planned-dates.sql, 014-ncr.sql, 015-ncr-status-and-close-path.sql, 016-ai-suggestions.sql, 017-ai-chat.sql, 018-actions-by-cause.sql, 019-customer-complaints.sql, 020-complaint-import.sql, 021-customer-care-form.sql, 022-after-sales-report.sql
 --
 --  This script is for a fresh project. It is not idempotent: running it
 --  twice will fail on "type user_role already exists", which is the
@@ -3982,7 +3982,114 @@ end $verify$;
 
 
 -- ============================================================
---  SECTION 22 — Group reference data
+--  SECTION 22 — 022-after-sales-report.sql
+-- ============================================================
+
+do $prereq$
+begin
+  if to_regclass('public.quality_actions') is null then
+    raise exception '022 needs 012-dashboard.sql first (quality_actions is missing).';
+  end if;
+  if to_regclass('public.complaints') is null then
+    raise exception '022 needs 019-customer-complaints.sql first.';
+  end if;
+end $prereq$;
+
+-- ------------------------------------------------------------
+--  1. Which review an action belongs to.
+--
+--  Defaulting to 'inspection' keeps every existing row where it is: the
+--  monthly inspection review is where they were all raised.
+-- ------------------------------------------------------------
+alter table quality_actions
+  add column if not exists module text not null default 'inspection'
+    check (module in ('inspection', 'customer'));
+
+-- An action may hang off a specific customer care, or off none — the
+-- report shows both, and "Customer Response Time" as an item belongs to
+-- the month rather than to any one care.
+alter table quality_actions
+  add column if not exists complaint_id uuid references complaints(id) on delete set null;
+
+create index if not exists quality_actions_module_idx on quality_actions (module, period desc);
+
+comment on column quality_actions.module is
+  'Which monthly review raised this. One register, so an action cannot be '
+  'filed in a place the person looking for it will not open.';
+
+-- ------------------------------------------------------------
+--  2. The monthly volume target.
+--
+--  The existing report draws a limit line on cares per month. 021 added
+--  response_target_days; this is the other line on the same page.
+-- ------------------------------------------------------------
+alter table division_profile
+  add column if not exists care_target_per_month smallint not null default 4;
+
+comment on column division_profile.care_target_per_month is
+  'The limit line on customer cares per month. Four is roughly where the '
+  'existing After Sales report draws it against a 2026 monthly average of three.';
+
+-- ------------------------------------------------------------
+--  3. Cares per month, and response time per month.
+--
+--  Computed in the database rather than in the browser: the register is
+--  capped at 500 rows on load, and a chart built from a capped list is a
+--  chart that quietly stops counting.
+-- ------------------------------------------------------------
+create or replace view v_care_by_month with (security_invoker = on) as
+select date_trunc('month', c.called_at)::date                    as period,
+       count(*)                                                   as cares,
+       count(*) filter (where c.responded_at is not null)          as answered,
+       count(*) filter (where c.closed_at is not null)             as cleared,
+       count(*) filter (where c.closed_at is null
+                          and not c.legacy_closed)                 as still_open,
+       -- Average days to first response, over the ones that HAVE one.
+       -- Null where nothing was answered, rather than zero: the existing
+       -- spreadsheet reports a zero for a month with no data, which reads
+       -- as instant response.
+       round(avg(extract(epoch from (c.responded_at - c.called_at)) / 86400.0)
+             filter (where c.responded_at is not null)::numeric, 1) as avg_response_days,
+       max(extract(epoch from (c.responded_at - c.called_at)) / 86400.0)
+             filter (where c.responded_at is not null)              as worst_response_days,
+       sum(coalesce(c.cost_total, 0))                              as cost
+  from complaints c
+ group by 1;
+
+grant select on v_care_by_month to authenticated;
+
+comment on view v_care_by_month is
+  'Customer cares per month with average days to first response. '
+  'avg_response_days is null for a month where nothing was answered — a '
+  'zero there would read as an instant response, which is how the '
+  'spreadsheet version flattered itself.';
+
+-- ------------------------------------------------------------
+--  4. Defect type for a month.
+-- ------------------------------------------------------------
+create or replace view v_care_by_defect with (security_invoker = on) as
+select date_trunc('month', c.called_at)::date              as period,
+       coalesce(dc.description, c.legacy_defect, 'not recorded') as defect,
+       count(*)                                             as cares,
+       sum(coalesce(c.cost_total, 0))                       as cost
+  from complaints c
+  left join defect_codes dc on dc.id = c.defect_code_id
+ group by 1, 2;
+
+grant select on v_care_by_defect to authenticated;
+
+do $verify$
+begin
+  if not exists (select 1 from information_schema.columns
+                  where table_name = 'quality_actions' and column_name = 'module') then
+    raise exception 'quality_actions.module was not added.';
+  end if;
+  raise notice '022 applied. The After Sales report reads from v_care_by_month and v_care_by_defect, and its actions share the monthly register.';
+end $verify$;
+
+
+-- ============================================================
+--  SECTION 23 — Group reference data
 -- ============================================================
 
 insert into manufacturing_stages (name, sort_order) values
@@ -4007,7 +4114,7 @@ on conflict (code) do nothing;
 
 
 -- ============================================================
---  SECTION 23 — Division seed — EDIT BEFORE RUNNING
+--  SECTION 24 — Division seed — EDIT BEFORE RUNNING
 -- ============================================================
 
 insert into division_profile (code, name, hold_points)
@@ -4037,7 +4144,7 @@ on conflict (family_id, stage_id) do nothing;
 
 
 -- ============================================================
---  SECTION 24 — Migration ledger stamp
+--  SECTION 25 — Migration ledger stamp
 --
 --  Running this script bypasses scripts/migrate.mjs, so the ledger it
 --  reads would be empty and the next run would try to apply everything
@@ -4073,12 +4180,13 @@ insert into public.qgrid_migrations (filename) values
   ('018-actions-by-cause.sql'),
   ('019-customer-complaints.sql'),
   ('020-complaint-import.sql'),
-  ('021-customer-care-form.sql')
+  ('021-customer-care-form.sql'),
+  ('022-after-sales-report.sql')
 on conflict (filename) do nothing;
 
 
 -- ============================================================
---  SECTION 25 — Verification
+--  SECTION 26 — Verification
 --  Run these and check the results before going any further.
 -- ============================================================
 

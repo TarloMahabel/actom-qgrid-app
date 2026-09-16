@@ -140,6 +140,11 @@
   </div>
 </aside>
 
+<!-- Documents on a customer care. In the shell for the same reason as the
+     photo pickers: a file dialog outlives a repaint, and an input replaced
+     mid-dialog swallows the selection silently. -->
+<input id="docPicker" type="file" accept="application/pdf,image/jpeg,image/png" multiple hidden>
+
 <input id="photoPicker"  type="file" accept="image/*" multiple hidden>
 <input id="cameraPicker" type="file" accept="image/*" capture="environment" hidden>
 

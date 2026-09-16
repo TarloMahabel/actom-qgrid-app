@@ -66,7 +66,7 @@ s.check('a complaint cannot be answered before it was made',
 s.check('nor closed before it was made', /complaint_closed_after_answer/.test(mig));
 s.check('the register shows hours waited, not a status word', /no reply yet/.test(app));
 s.check('medians rather than means', /const median = xs =>/.test(app));
-s.check('open with no reply is called out', /Open, no reply yet/.test(app));
+s.check('a care with no reply is called out in the register', /no reply yet/.test(app));
 
 /* ------------------------------------------------------------------ */
 s.group('the link to nonconformances');
@@ -225,5 +225,47 @@ s.check('a document cannot be removed once attached',
 s.group('the response target is a setting, not a constant');
 s.check('it lives on the division', /response_target_days/.test(mig021));
 s.check('it starts at what the existing report uses', /default 3/.test(mig021));
+
+s.group('documents can be attached');
+const mig022 = read('db/migrations/022-after-sales-report.sql');
+s.check('there is an upload path', /function uploadCareDocs/.test(app));
+s.check('the picker is in the shell, not the modal',
+  /id="docPicker"/.test(read('apps/inspect/index.html')));
+/* input.files is a live FileList and resetting the input empties the
+   list a variable is still holding. That cost four versions in the
+   photo path; it is not going to cost another four here. */
+s.check('the file list is copied before the input is reset',
+  /Array\.from\(e\.target\.files \|\| \[\]\)[\s\S]{0,80}e\.target\.value = ""/.test(app));
+s.check('a size limit is enforced in the browser too', /15 \* 1024 \* 1024/.test(app));
+s.check('the path cannot be collided by two files of the same name', /Date\.now\(\)/.test(app));
+s.check('documents open through a signed URL, not a public one', /createSignedUrl/.test(app));
+s.check('a cleared care says why nothing can be attached',
+  /cleared, so nothing further can be attached/.test(app));
+
+s.group('the After Sales report');
+s.check('the tab exists', /"After Sales report"/.test(app) && /function vAfterSales/.test(app));
+s.check('it is drawn, not fetched', /function lineBarChart/.test(app));
+s.check('the monthly counts come from the database, not the capped list',
+  /v_care_by_month/.test(app) && /capped at 500/.test(app));
+/* The spreadsheet drew a month with nothing answered as zero days, which
+   made it the best month on the chart. */
+s.check('a month with nothing answered has no bar', /r\.v == null/.test(app));
+s.check('and is labelled rather than left blank', /">none<\/text>/.test(app));
+s.check('the view returns null rather than zero for such a month',
+  /avg_response_days is null for a month where nothing was answered/.test(mig022));
+s.check('both limit lines are division settings',
+  /response_target_days/.test(app) && /care_target_per_month/.test(mig022));
+s.check('months over the target are drawn against the limit', /const over = opts\.limit != null/.test(app));
+
+s.group('one actions register, not two');
+s.check('actions carry which review raised them', /module text not null default 'inspection'/.test(mig022));
+s.check('existing rows stay where they are', /default 'inspection'/.test(mig022));
+s.check('an action can hang off a specific care', /complaint_id uuid references complaints\(id\)/.test(mig022));
+s.check('the report reads the shared register', /a\.module === "customer"/.test(app));
+s.check('the three states are reused rather than duplicated',
+  /STATE = \{ open: "Not yet started", monitoring: "Started", closed: "Completed" \}/.test(app));
+s.check('and the reasoning is written down',
+  /how an enum reaches nine values\s*\n?--\s*meaning three things|nine values meaning three things/.test(mig022) ||
+  /Same three facts, different words/.test(mig022));
 
 s.done();

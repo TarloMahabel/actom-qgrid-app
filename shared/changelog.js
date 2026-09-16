@@ -22,10 +22,21 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.24.0";
+window.APP_VERSION = "0.25.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.25.0", d: "2026-09-16", t: "The After Sales report, and documents on a customer care",
+    items: [
+      "Quotes, printed emails and anything else that belongs with a customer care can now be attached to it. PDFs and photographs, up to 15 MB each. Nothing can be attached once a customer care is cleared: what was in front of the person who signed it off is part of the record, and a document added afterwards changes what that signature appears to cover.",
+      "A new After Sales report tab: customer cares per month against the monthly limit, average days to a first response against the target, defect types for the latest month, and the year so far.",
+      "One difference from the spreadsheet worth knowing. A month where nothing was answered used to draw as zero days, which made it the best month on the chart. It now shows no bar and the word \"none\", because having answered nothing is not the same as having answered instantly.",
+      "Months that averaged over the response target are drawn in red against the limit line, and counted underneath.",
+      "The actions listed on the report share the same register as the monthly inspection review, rather than sitting in a second list. An action filed somewhere the person looking for it does not open may as well not exist.",
+      "Both limits are now division settings — three days to respond and four cares a month to start with, matching the existing report — rather than numbers fixed in a spreadsheet."
+    ]
+  },
   {
     v: "0.24.0", d: "2026-09-16", t: "Customer cares, and the QA-FM-005 form",
     items: [
