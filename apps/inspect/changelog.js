@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.23.0";
+window.APP_VERSION = "0.23.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.23.1", d: "2026-09-16", t: "Importing the complaint workbook",
+    items: [
+      "The old complaint workbook can now be brought in. 951 of the 989 records import; the report says exactly which did not and why.",
+      "909 of them were marked closed with no date ever recorded. They come in as \"closed, date not recorded\" and are deliberately kept out of the time-to-close figures. Giving them a made-up date would have put a number in a quality record that nobody can stand behind, and it is the number this module exists to make honest.",
+      "Thirteen were left in the workbook: seven with a call date that is not a date, four duplicate reference numbers, one with no customer and one with nothing recorded about what was reported. Somebody should decide whether those matter rather than the import deciding for them.",
+      "Twenty-four spellings were corrected — a typo in \"Technical / Quality\", \"Transport\" against \"Damage in Transit\", lower-case sections. Seven types had no equivalent and are kept as typed rather than forced into the nearest match. In every case the original text is stored beside the corrected one, so a mapping that turns out to be wrong can be found.",
+      "The people named in the old register are kept as names. They are not system users, and losing the one part of that register that was consistently filled would have been the wrong trade."
+    ]
+  },
   {
     v: "0.23.0", d: "2026-09-16", t: "Customer complaints",
     items: [

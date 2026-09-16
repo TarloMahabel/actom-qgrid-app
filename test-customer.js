@@ -123,4 +123,41 @@ s.check('row level security is on', /alter table complaints\s+enable row level s
 s.check('it states its prerequisites', /PREREQUISITES|prereq/.test(mig));
 s.check('it verifies itself', /Complaint types were not seeded/.test(mig));
 
+s.group('the import tells the truth about closure');
+
+const mig020 = read('db/migrations/020-complaint-import.sql');
+const imp = read('scripts/import-complaints.mjs');
+
+/* 957 of 989 say Closed; 38 say when. Fabricating the other 950 dates
+   would put a median time-to-close into a quality record that nobody can
+   stand behind, and somebody would eventually quote it to a customer. */
+s.check('closed-without-a-date is its own state', /legacy_closed/.test(mig020));
+s.check('it is not the same state as closed',
+  /when c\.closed_at    is not null then 'closed'[\s\S]{0,120}legacy_closed\s+then 'legacy_closed'/.test(mig020));
+s.check('a row cannot be both', /complaint_legacy_closure/.test(mig020));
+s.check('only imported rows may carry it', /complaint_legacy_needs_import/.test(mig020));
+s.check('the script never invents a closing date',
+  /legacyClosed = status\.startsWith\("closed"\) && !closed/.test(imp));
+s.check('and says so where someone will read it',
+  /Inventing a date/.test(imp) && /nobody can stand behind/.test(imp) &&
+  /falsification/.test(mig020));
+
+/* Dating a 2016 complaint as today would be worse than leaving it out. */
+s.check('a row with no usable call date is refused, not defaulted to now',
+  /call date unusable/.test(imp));
+s.check('pre-2009 serials are treated as formula failures', /n > 40000/.test(imp));
+
+s.group('the import can be reconciled against the workbook');
+s.check('the original text is kept beside the mapping',
+  /legacy_type/.test(mig020) && /legacy_section/.test(mig020) && /legacy_defect/.test(mig020));
+s.check('an unmapped value is kept rather than forced to the nearest match',
+  /UNMAPPED — kept as text/.test(imp));
+s.check('every substitution is reported', /SPELLINGS CORRECTED/.test(imp));
+s.check('every refusal is reported with its reason', /NOT IMPORTED/.test(imp));
+s.check('running it twice does not double the register', /return 'skipped: '/.test(mig020));
+s.check('importing is restricted to a system administrator', /IMPORT_ROLE/.test(mig020));
+s.check('the workbook people are kept as names', /owner_name/.test(mig020));
+s.check('generated import SQL is not committed',
+  /db\/import\//.test(read('.gitignore')));
+
 s.done();
