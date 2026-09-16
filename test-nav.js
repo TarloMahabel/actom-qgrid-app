@@ -31,8 +31,10 @@ const { loadApp, suite , REPO } = require('./test/harness');
 
   s.group('navigation');
   const nav = Array.from(d.querySelectorAll('#nav button[data-go]'));
-  s.check('8 modules in nav', nav.length === 8, nav.length + ' found');
-  s.check('later phases shown but disabled', d.querySelectorAll('#nav button.off').length === 7);
+  /* Nine since Module 5 (customer complaints) moved out of Later phases,
+     which is why the deferred count drops by one at the same time. */
+  s.check('9 modules in nav', nav.length === 9, nav.length + ' found');
+  s.check('later phases shown but disabled', d.querySelectorAll('#nav button.off').length === 6);
 
   s.group('every module and tab renders');
   const views = { main: 1, dash: 4, work: 4, sched: 3, dsn: 1, req: 1, ncr: 5, adm: 5 };

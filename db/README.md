@@ -79,6 +79,7 @@ select
 | 016 | Assisted drafting: the register of every suggestion, and the division switch |
 | 017 | The question-and-answer assistant: chat turns, thread grouping, refusals view |
 | 018 | Corrective actions by root cause, with whether the part came back afterwards |
+| 019 | Customer complaints: the register, its lists, and the link to nonconformances |
 
 ## A new division
 

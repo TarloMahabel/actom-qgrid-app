@@ -180,7 +180,7 @@ async function loadData() {
     S.defects = df.data; S.equipment = eq.data;
 
     const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd, fbp, acts,
-           ncr, ncra, rcs, dash] = await Promise.all([
+           ncr, ncra, rcs, dash, cmp, cmpT, cmpS] = await Promise.all([
       supabase.from("inspection_templates").select("*").order("code"),
       supabase.from("template_revisions").select("*").order("rev", { ascending: false }),
       supabase.from("inspection_requirements").select("*"),
@@ -196,7 +196,10 @@ async function loadData() {
       supabase.from("v_ncr_list").select("*").order("raised_at", { ascending: false }),
       supabase.from("ncr_actions").select("*").order("seq"),
       supabase.from("root_causes").select("*").eq("active", true).order("sort_order"),
-      supabase.from("v_dashboard").select("*").maybeSingle()
+      supabase.from("v_dashboard").select("*").maybeSingle(),
+      supabase.from("v_complaints").select("*").order("called_at", { ascending: false }).limit(500),
+      supabase.from("complaint_types").select("*").eq("active", true).order("sort"),
+      supabase.from("complaint_sections").select("*").eq("active", true).order("sort")
     ]);
     for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd]) if (r.error) throw r.error;
     /* The dashboard views are not load-bearing: a division that has not run
@@ -211,6 +214,13 @@ async function loadData() {
     S.ncrReady = !ncr.error;
     S.ncrActions = ncra.error ? [] : (ncra.data || []);
     S.rootCauses = rcs.error ? [] : (rcs.data || []);
+    /* Same treatment as the NCR module: a division that has not run 019 yet
+       must still be able to capture inspections, and the module should say
+       it is not migrated rather than show an empty register. */
+    S.complaints = cmp.error ? [] : (cmp.data || []);
+    S.complaintReady = !cmp.error;
+    S.complaintTypes = cmpT.error ? [] : (cmpT.data || []);
+    S.complaintSections = cmpS.error ? [] : (cmpS.data || []);
     S.templates = tpl.data; S.revisions = rev.data; S.requirements = req.data;
     S.projects = prj.data; S.worksOrders = wo.data;
     S.inspections = ins.data; S.failedChecks = fc.data;
@@ -268,14 +278,17 @@ const NAV = [
   { g: "Nonconformance" },
   { id: "ncr",   n: 5, t: "NCR management",          col: "--m7",
     tabs: ["Register", "Repeat causes", "By department", "By supplier", "Reports"] },
+  { g: "Customer" },
+  { id: "cust",  n: 6, t: "Customer complaints",     col: "--m3",
+    tabs: ["Register", "Open", "Response times"] },
   { g: "Setup" },
-  { id: "dsn",   n: 6, t: "Form designer",           col: "--m4", tabs: [] },
-  { id: "req",   n: 7, t: "Inspection requirements", col: "--m5", tabs: ["Requirements matrix"] },
-  { id: "adm",   n: 8, t: "Administration",          col: "--m6",
+  { id: "dsn",   n: 7, t: "Form designer",           col: "--m4", tabs: [] },
+  { id: "req",   n: 8, t: "Inspection requirements", col: "--m5", tabs: ["Requirements matrix"] },
+  { id: "adm",   n: 9, t: "Administration",          col: "--m6",
     tabs: ["Users & roles", "Competency", "Reference lists", "Options", "Audit trail"] },
   { g: "Later phases" },
   ...["Calibration","Document control","Training & competency",
-      "Supplier quality","Customer quality","Audits & compliance","Performance analytics"]
+      "Supplier quality","Audits & compliance","Performance analytics"]
      .map(t => ({ off: 1, t }))
 ];
 const setupIds = ["dsn", "req", "adm"];
@@ -4428,7 +4441,11 @@ function openModal(title, body, buttons, ctx) {
   modalCtx = ctx || {};
   $("mTitle").textContent = title;
   $("mBody").innerHTML = body;
-  $("mFoot").innerHTML = buttons.map(b => `<button class="btn ${b[2] || ""}" data-act="${b[1]}">${b[0]}</button>`).join("");
+  /* [label, action, variant, id?] — the fourth is optional and becomes
+     data-id, so a footer button can act on a record without the handler
+     having to reach into modalCtx. */
+  $("mFoot").innerHTML = buttons.map(b =>
+    `<button class="btn ${b[2] || ""}" data-act="${b[1]}"${b[3] ? ` data-id="${esc(b[3])}"` : ""}>${b[0]}</button>`).join("");
   $("modal").classList.add("open");
 }
 function closeModal() { $("modal").classList.remove("open"); modalCtx = {}; }
@@ -4436,8 +4453,290 @@ function closeModal() { $("modal").classList.remove("open"); modalCtx = {}; }
 /* ------------------------------------------------------------
    6. Render and events
    ------------------------------------------------------------ */
+
+
+/* ---- Customer complaints: log, answer, close ---------------------- */
+
+/* The same .fld markup the other modals use, wrapped so the long ones
+   below stay readable. The hint is where a field explains why it exists. */
+function lab(label, control, hint) {
+  return `<div class="fld"><label>${esc(label)}</label>${control}` +
+         (hint ? `<div class="hint">${esc(hint)}</div>` : "") + `</div>`;
+}
+
+function newComplaintModal() {
+  const opts = (list, sel) => list.map(x =>
+    `<option value="${x.id}"${x.id === sel ? " selected" : ""}>${esc(x.name)}</option>`).join("");
+  openModal("Log a customer complaint", `
+    <div class="two">
+      <div>${lab("Customer", `<input id="kCust" placeholder="who complained">`)}</div>
+      <div>${lab("Site or project", `<input id="kSite" placeholder="where, if it matters">`)}</div>
+    </div>
+    ${lab("What the customer reported",
+      `<textarea id="kDetails" rows="3" placeholder="in their words where possible"
+        data-assist="spell" data-assist-context="complaint"></textarea>`)}
+    <div class="two">
+      <div>${lab("Section", `<select id="kSection"><option value="">— not stated —</option>${opts(S.complaintSections)}</select>`)}</div>
+      <div>${lab("Complaint type", `<select id="kType"><option value="">— not classified —</option>${opts(S.complaintTypes)}</select>`,
+        "A technical complaint is also a nonconformance, and closing one will ask for a linked NCR.")}</div>
+    </div>
+    <div class="two">
+      <div>${lab("Defect code", `<select id="kDefect"><option value="">— none —</option>${
+        (S.defects || []).map(d => `<option value="${d.id}">${esc(d.code)} — ${esc(d.description)}</option>`).join("")}</select>`,
+        "The same list the inspection module uses, so a fault is counted once however it was found.")}</div>
+      <div>${lab("Site engineer", `<input id="kEng" placeholder="who attends, if known">`)}</div>
+    </div>
+    ${lab("Contract number", `<input id="kContract" placeholder="optional">`)}
+  `, [["Log it", "save-complaint", "pri"], ["Cancel", "close-modal", ""]]);
+}
+
+async function saveComplaint() {
+  const customer = $("kCust").value.trim();
+  const details = $("kDetails").value.trim();
+  if (!customer) { toast("A complaint needs a customer.", "bad"); return; }
+  if (!details) { toast("Say what the customer reported.", "bad"); return; }
+  busy(true);
+  try {
+    const { data, error } = await supabase.rpc("raise_complaint", {
+      p_customer: customer,
+      p_details: details,
+      p_section: $("kSection").value ? Number($("kSection").value) : null,
+      p_type: $("kType").value ? Number($("kType").value) : null,
+      p_site: $("kSite").value.trim() || null,
+      p_defect_code: $("kDefect").value ? Number($("kDefect").value) : null,
+      p_owner: null,
+      p_site_engineer: $("kEng").value.trim() || null,
+      p_contract: $("kContract").value.trim() || null
+    });
+    if (error) throw error;
+    closeModal();
+    await reload();
+    toast(`${data.ref} logged. The clock on a first response starts now.`, "ok");
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function respondComplaint(id) {
+  busy(true);
+  try {
+    const { error } = await supabase.rpc("respond_complaint", { p_id: id, p_note: null });
+    if (error) throw error;
+    await reload();
+    toast("Recorded as answered. The response time is now fixed and cannot be edited.", "ok");
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+function closeComplaintModal(id) {
+  const c = (S.complaints || []).find(x => x.id === id);
+  if (!c) return;
+  modalCtx.id = id;
+  openModal(`Close ${c.ref}`, `
+    ${c.is_technical && !c.ncr_id ? `<div class="note q" style="margin-bottom:13px">
+      This is a technical complaint, which is also a nonconformance. It cannot be closed
+      until an NCR is linked — that is where the root cause and the corrective action are
+      recorded, and where somebody verifies the action actually worked.
+    </div>` : ""}
+    ${lab("What was done for the customer",
+      `<textarea id="kCorr" rows="3" placeholder="the correction — what was put right, and when"
+        data-assist="spell" data-assist-context="complaint_close"></textarea>`,
+      "Required. The register this replaces marked 957 complaints closed and recorded a closing date on 38, so nobody can say what was done or how long it took.")}
+    ${lab("Anything else worth recording", `<textarea id="kNote" rows="2" placeholder="optional"></textarea>`)}
+  `, [["Close it", "do-close-complaint", "pri"], ["Cancel", "close-modal", ""]]);
+}
+
+async function doCloseComplaint() {
+  const correction = $("kCorr").value.trim();
+  if (!correction) { toast("Say what was done for the customer.", "bad"); return; }
+  busy(true);
+  try {
+    const { error } = await supabase.rpc("close_complaint", {
+      p_id: modalCtx.id, p_correction: correction,
+      p_note: $("kNote").value.trim() || null
+    });
+    if (error) throw error;
+    closeModal();
+    await reload();
+    toast("Closed, with the date and what was done recorded against it.", "ok");
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+
+async function openComplaint(id) {
+  const c = (S.complaints || []).find(x => x.id === id);
+  if (!c) { toast("That complaint is not loaded.", "bad"); return; }
+  const when = d => d ? new Date(d).toLocaleString("en-ZA") : null;
+  const row = (k, v) => `<div class="fld"><label>${esc(k)}</label><div>${v}</div></div>`;
+
+  openModal(`${c.ref} — ${c.customer}`, `
+    <div class="filters" style="margin-bottom:12px">
+      ${pill(({ open: "Open", in_progress: "In progress", closed: "Closed" })[c.status] || c.status)}
+      ${c.complaint_type ? pill(c.complaint_type) : `<span class="cnt">not classified</span>`}
+      ${c.section ? `<span class="cnt">${esc(c.section)}</span>` : ""}
+      <span class="spacer"></span>
+      <span class="cnt">${c.age_days} day${c.age_days === 1 ? "" : "s"} old</span>
+    </div>
+    ${row("What the customer reported", esc(c.details))}
+    <div class="two">
+      ${row("Called", when(c.called_at))}
+      ${row("First response", c.responded_at
+        ? `${when(c.responded_at)} <span class="cnt">— ${c.response_hours} hours</span>`
+        : `<span class="tag ncr">not answered yet</span>`)}
+    </div>
+    <div class="two">
+      ${row("Owner", esc(c.owner || "—"))}
+      ${row("Site engineer", esc(c.site_engineer || "—"))}
+    </div>
+    ${c.closed_at ? `<div class="two">
+        ${row("Closed", `${when(c.closed_at)} <span class="cnt">— ${c.days_to_close} days</span>`)}
+        ${row("Nonconformance", c.ncr_ref ? esc(c.ncr_ref) : "none linked")}
+      </div>
+      ${row("What was done", esc(c.correction || "—"))}`
+      : `${row("Nonconformance", c.ncr_ref
+          ? esc(c.ncr_ref)
+          : c.is_technical
+            ? `<span class="tag ncr">none linked — required before this can be closed</span>`
+            : "none linked")}`}
+  `, c.status === "closed"
+      ? [["Close", "close-modal", ""]]
+      : [
+          ...(c.responded_at ? [] : [["Record a response", "respond-complaint", "", c.id]]),
+          ["Close the complaint", "close-complaint", "pri", c.id],
+          ["Cancel", "close-modal", ""]
+        ]);
+}
+
+function downloadComplaints() {
+  const rows = S.complaints || [];
+  if (!rows.length) { toast("There is nothing to download.", "bad"); return; }
+  const headers = ["Reference", "Was", "Called", "Customer", "Site", "What was reported",
+    "Type", "Section", "Defect code", "Owner", "Site engineer", "Responded",
+    "First response (hours)", "Closed", "Days to close", "What was done",
+    "NCR", "Progress", "Cost (R)"];
+  const data = rows.map(c => [
+    c.ref, c.legacy_ref, c.called_at ? String(c.called_at).slice(0, 10) : "",
+    c.customer, c.site, c.details, c.complaint_type, c.section, c.defect_code,
+    c.owner, c.site_engineer,
+    c.responded_at ? String(c.responded_at).slice(0, 10) : "",
+    c.response_hours, c.closed_at ? String(c.closed_at).slice(0, 10) : "",
+    c.days_to_close, c.correction, c.ncr_ref, c.status,
+    c.cost_total == null ? "" : Number(c.cost_total)
+  ]);
+  csvDownload(`Complaints-${DIVISION.code || "grid"}-${new Date().toISOString().slice(0, 10)}.csv`,
+    headers, data);
+  toast(`${rows.length} complaint${rows.length === 1 ? "" : "s"} downloaded.`, "ok");
+}
+
+/* =====================================================================
+   Module 5 — Customer complaints.
+
+   CUSTOMER-PLAN.md has the reasoning. The short version: the workbook
+   this replaces held 989 complaints, marked 957 of them Closed, and
+   recorded a closing date on 38. Closure was asserted and never
+   evidenced, so nobody could say how long this division takes to resolve
+   a customer complaint. Response time was measurable on 13%.
+
+   Everything below is arranged around making those two intervals true.
+   Status is derived from the timestamps rather than typed, closing is an
+   RPC that refuses without a correction, and the register leads with the
+   two numbers rather than burying them in a report nobody opens.
+   ===================================================================== */
+function vCust(m) {
+  if (!S.complaintReady) {
+    return head(m) + `<div class="card"><div class="bd">
+      <div class="note q">This division has not had migration 019 applied, so the complaint
+      register does not exist yet. Ask Group IT to run <b>db/migrations/019-customer-complaints.sql</b>
+      and then <b>notify pgrst, 'reload schema'</b>.</div></div></div>` + foot();
+  }
+
+  const all = S.complaints || [];
+  const open = all.filter(c => c.status !== "closed");
+  const answered = all.filter(c => c.response_hours != null);
+  const closed = all.filter(c => c.days_to_close != null);
+
+  const median = xs => {
+    if (!xs.length) return null;
+    const a = [...xs].sort((x, y) => x - y);
+    const h = Math.floor(a.length / 2);
+    return a.length % 2 ? a[h] : (a[h - 1] + a[h]) / 2;
+  };
+
+  let body;
+
+  if (S.tab === 0 || S.tab === 1) {
+    const rows = S.tab === 1 ? open : all;
+    body = `<div class="filters">
+        <button class="btn sm pri" data-act="new-complaint">Log a complaint</button>
+        <button class="btn sm" data-act="cust-csv">Download</button>
+        <span class="spacer"></span>
+        <span class="cnt">${rows.length} ${S.tab === 1 ? "open" : "complaint" + (rows.length === 1 ? "" : "s")}</span>
+      </div>`
+      + (rows.length ? T(["Reference", "Called", "Customer", "What", "Type", "Section",
+                          "Owner", "Response", "Progress", ""],
+        rows.slice(0, 200).map(c => [
+          `<span class="id">${esc(c.ref)}</span>${c.legacy_ref ? `<div class="sub">was ${esc(c.legacy_ref)}</div>` : ""}`,
+          `${fmtDate(c.called_at)}<div class="sub">${c.age_days} day${c.age_days === 1 ? "" : "s"} old</div>`,
+          `${esc((c.customer || "").slice(0, 34))}${c.site ? `<div class="sub">${esc(c.site.slice(0, 30))}</div>` : ""}`,
+          esc((c.details || "").slice(0, 60)),
+          c.complaint_type ? esc(c.complaint_type) : `<span class="cnt">not classified</span>`,
+          esc(c.section || "—"),
+          esc(c.owner || "—"),
+          /* Hours, not a status word. The question is how long the
+             customer waited, and "responded" does not answer it. */
+          c.response_hours == null
+            ? `<span class="tag ncr">no reply yet</span>`
+            : `${c.response_hours} h`,
+          pill(({ open: "Open", in_progress: "In progress", closed: "Closed" })[c.status] || c.status),
+          `<button class="btn sm" data-act="open-complaint" data-id="${c.id}">Open</button>`
+        ]))
+        : emptyBecause("Nothing here",
+            S.tab === 1 ? "Nothing is open. Every complaint has been closed."
+                        : "No complaints have been logged yet."));
+  }
+
+  else {
+    /* Response times. Median rather than mean, for the same reason the
+       NCR reports use it: one complaint forgotten for a year should not
+       move the number everyone quotes. */
+    const medResp = median(answered.map(c => Number(c.response_hours)));
+    const medClose = median(closed.map(c => Number(c.days_to_close)));
+    const noReply = open.filter(c => c.response_hours == null);
+    const bySection = {};
+    for (const c of answered) {
+      const k = c.section || "not stated";
+      (bySection[k] = bySection[k] || []).push(Number(c.response_hours));
+    }
+
+    body = `<div class="three">
+        <div class="card kpi"><div class="k">Median first response</div>
+          <div class="v">${medResp == null ? "—" : medResp + " h"}</div>
+          <div class="d">${answered.length} of ${all.length} have a response recorded</div></div>
+        <div class="card kpi"><div class="k">Median time to close</div>
+          <div class="v">${medClose == null ? "—" : medClose + " d"}</div>
+          <div class="d">${closed.length} closed with a date</div></div>
+        <div class="card kpi ${noReply.length ? "alert" : "good"}"><div class="k">Open, no reply yet</div>
+          <div class="v">${noReply.length}</div>
+          <div class="d">${noReply.length ? "the customer has not heard anything" : "every open complaint has been answered"}</div></div>
+      </div>`
+      + (Object.keys(bySection).length ? `<div class="card"><h3>First response by section</h3><div class="bd">
+        ${T(["Section", "Complaints", "Median hours", "Slowest"],
+          Object.entries(bySection).sort((a, b) => median(b[1]) - median(a[1]))
+            .map(([k, v]) => [esc(k), v.length, median(v) + " h", Math.max(...v) + " h"]))}
+        </div></div>` : "")
+      + `<div class="card"><div class="bd"><div class="note q">
+        These two numbers are the point of this module. The register it replaces held
+        989 complaints, marked 957 of them closed, and recorded a closing date on 38 —
+        so neither number could be produced at all. They will look thin until this
+        register has a year behind it, and thin but true beats absent.
+      </div></div></div>`;
+  }
+
+  return head(m) + body + foot();
+}
+
 const VIEWS = { main: vMain, dash: vDash, work: vWork, sched: vSched, dsn: vDsn,
-                req: vReq, ncr: vNcr, adm: vAdm };
+                req: vReq, ncr: vNcr, cust: vCust, adm: vAdm };
 function render() {
   /* The report is its own view, not a tab: it has to be able to fill the page
      and print without the surrounding chrome. */
@@ -4617,6 +4916,13 @@ document.addEventListener("click", async e => {
     case "print-report": return openReport(t.dataset.id);
     case "ncr-report": return openNcrReport(t.dataset.id);
     case "ncr-csv": return downloadNcrRegister();
+    case "new-complaint": return newComplaintModal();
+    case "save-complaint": return saveComplaint();
+    case "open-complaint": return openComplaint(t.dataset.id);
+    case "respond-complaint": return respondComplaint(t.dataset.id);
+    case "close-complaint": return closeComplaintModal(t.dataset.id);
+    case "do-close-complaint": return doCloseComplaint();
+    case "cust-csv": return downloadComplaints();
     case "reg-filter": S.regFilter = t.dataset.f; return render();
     case "do-print": return window.print();
     case "close-report": {

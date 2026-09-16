@@ -22,10 +22,23 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.22.0";
+window.APP_VERSION = "0.23.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.23.0", d: "2026-09-16", t: "Customer complaints",
+    items: [
+      "A new module for customer complaints, replacing the workbook. Log a complaint, record when the customer was answered, and close it with what was actually done.",
+      "The spreadsheet held 989 complaints, marked 957 of them closed, and recorded a closing date on 38. So nobody could say how long this division takes to resolve a complaint, and the interval a customer waits before hearing anything was measurable on one in eight. Those two numbers are what a complaints process exists to produce.",
+      "Closing now requires saying what was done for the customer, and the closing date is the system's rather than anyone's recollection. Progress is worked out from the dates instead of being typed, so the register cannot disagree with itself.",
+      "A technical complaint is also a nonconformance, and cannot be closed until an NCR is linked — that is where the root cause and the corrective action live, and where somebody verifies the action worked. One investigation, recorded once.",
+      "Complaint types and sections are now chosen from a list rather than typed. The old workbook held four spellings of \"Technical / Quality\", including a typo, and two of \"Minisub\", which is why none of them could be counted.",
+      "Defect codes are the same list the inspection module uses, so a fault is counted once however it was found.",
+      "A Response times tab showing median time to first answer and median time to close, by section, with whatever is open and still unanswered called out. The register can be downloaded as a spreadsheet.",
+      "Nothing has been imported from the old workbook yet. That is the next step and it will come with a report of everything that needed cleaning."
+    ]
+  },
   {
     v: "0.22.0", d: "2026-09-10", t: "What was done before, under this cause",
     items: [
