@@ -22,10 +22,22 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.23.1";
+window.APP_VERSION = "0.24.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.24.0", d: "2026-09-16", t: "Customer cares, and the QA-FM-005 form",
+    items: [
+      "The module is now called Customer cares, matching the form and how people refer to them.",
+      "Each customer care can be printed as QA-FM-005, laid out to follow the controlled form rather than the rest of the system — somebody will hold it next to the paper one. The document number and revision are printed on it, because a form without them is not a controlled record.",
+      "Every option the paper form lists is shown on the print, ticked or not. An option missing from a printed form is an option nobody can see was considered and set aside.",
+      "The fields the form asks for and the spreadsheet never had: company name separately from the person who called, contact number, contracts engineer, dates received, delivered and installed, minor or major, the five Why, the root cause with its completion date, whether the immediate action was scrap, rework, concession or other, preventive action, and the two approval signatures with their dates. A name without a date is not accepted — a signature block with no date is the commonest finding on a paper system.",
+      "Estimated cost now sits alongside the actual, broken into material, labour and other, with whether it was charged to the client, claimed on insurance, or carried by ACTOM.",
+      "Clearing a technical customer care now requires a root cause, rather than requiring a linked nonconformance as it briefly did. The form puts the investigation on the customer care itself, and the system should produce the form the division actually approved. A nonconformance can still be linked where one is warranted.",
+      "The response time target is now a division setting rather than a number buried in a report. It starts at three days, which is what the existing After Sales report draws its limit line at."
+    ]
+  },
   {
     v: "0.23.1", d: "2026-09-16", t: "Importing the complaint workbook",
     items: [

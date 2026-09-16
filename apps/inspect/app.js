@@ -279,7 +279,7 @@ const NAV = [
   { id: "ncr",   n: 5, t: "NCR management",          col: "--m7",
     tabs: ["Register", "Repeat causes", "By department", "By supplier", "Reports"] },
   { g: "Customer" },
-  { id: "cust",  n: 6, t: "Customer complaints",     col: "--m3",
+  { id: "cust",  n: 6, t: "Customer cares",          col: "--m3",
     tabs: ["Register", "Open", "Response times"] },
   { g: "Setup" },
   { id: "dsn",   n: 7, t: "Form designer",           col: "--m4", tabs: [] },
@@ -2216,9 +2216,172 @@ function vNcrPrint() {
   </div>`;
 }
 
+
+/* ---------------------------------------------------------------------
+   QA-FM-005 — the printable customer care.
+
+   Laid out to follow the controlled form rather than to look like the
+   rest of the application. Someone will hold this next to the paper one,
+   and a section in a different order reads as a different document.
+
+   The document number and revision are printed because a form without
+   them is not a controlled record, and the revision is the first thing
+   an auditor checks against the document register.
+   --------------------------------------------------------------------- */
+async function openCareReport(id) {
+  S.report = { kind: "care", id, loading: true };
+  S.view = "print";
+  buildNav(); render();
+  busy(true);
+  try {
+    const [full, docs] = await Promise.all([
+      supabase.from("v_complaints").select("*").eq("id", id).maybeSingle(),
+      supabase.from("complaint_documents").select("*").eq("complaint_id", id).order("uploaded_at")
+    ]);
+    if (full.error) throw full.error;
+    if (!full.data) throw new Error("That customer care could not be read.");
+    S.report = { kind: "care", id, loading: false, care: full.data,
+                 docs: docs.error ? [] : (docs.data || []) };
+  } catch (e) {
+    S.report = { kind: "care", id, loading: false, error: explain(e) };
+  } finally { busy(false); render(); }
+}
+
+function vCarePrint() {
+  const rep = S.report || {};
+  if (rep.loading) return `<div class="card"><div class="empty">Loading the form…</div></div>`;
+  if (rep.error) return `<div class="card"><div class="bd"><div class="note q">${esc(rep.error)}</div></div></div>`;
+  const c = rep.care;
+  if (!c) return `<div class="card"><div class="empty">Not loaded.</div></div>`;
+
+  const money = v => Number(v || 0) ? "R" + Number(v).toLocaleString("en-ZA") : "—";
+  const d = v => v ? new Date(v).toLocaleDateString("en-ZA") : "—";
+  /* A box that is not ticked is shown unticked rather than omitted. The
+     paper form lists every option, and an option missing from the print
+     is an option nobody can see was considered and rejected. */
+  const tick = on => on ? "&#9745;" : "&#9744;";
+  const TYPES = ["Lack of Response", "Delivery", "Damage in Transit", "EHS",
+    "Technical / Quality — Electrical", "Technical / Quality — Mechanical",
+    "Design", "Payment", "Shortage", "Install & Commissioning"];
+  const why = (c.why_chain || []).filter(x => x && x.trim());
+
+  const sec = (title, inner) => `<div class="rsec"><h4>${esc(title)}</h4>${inner}</div>`;
+  const pair = (k, v) => `<tr><th>${esc(k)}</th><td>${v == null || v === "" ? "—" : esc(String(v))}</td></tr>`;
+
+  return `<div class="report" id="report">
+    <div class="rhead">
+      <div class="rlogo">${window.ACTOM_LOGO ? window.ACTOM_LOGO.onLight(46) : ""}</div>
+      <div class="rtitle">
+        <h2>Customer care form</h2>
+        <div class="sub">${esc(DIVISION.name)} · MV SG Integrated Management System</div>
+      </div>
+      <div class="rref">
+        <div class="id">${esc(c.ref)}</div>
+        <div class="sub">QA-FM-005 rev 03</div>
+      </div>
+    </div>
+
+    <table class="rmeta"><tbody>
+      ${pair("Company name", c.company_name || c.customer)}${""}
+      <tr><th>Customer name</th><td>${esc(c.customer || "—")}</td>
+          <th>CC No.</th><td>${esc(c.legacy_ref || c.ref)}</td></tr>
+      <tr><th>Contact person</th><td>${esc(c.contact_person || "—")}</td>
+          <th>Contract No.</th><td>${esc(c.contract_number || "—")}</td></tr>
+      <tr><th>Contracts engineer</th><td>${esc(c.contracts_engineer || c.owner || "—")}</td>
+          <th>Date received</th><td>${d(c.date_received || c.called_at)}</td></tr>
+      <tr><th>Tel No.</th><td>${esc(c.contact_tel || "—")}</td>
+          <th>Date delivered</th><td>${d(c.date_delivered)}</td></tr>
+      <tr><th>Site</th><td>${esc(c.site || "—")}</td>
+          <th>Date installed</th><td>${d(c.date_installed)}</td></tr>
+    </tbody></table>
+
+    ${sec("Type of complaint", `<div class="rticks">${TYPES.map((t, i) =>
+      `<span>${tick(c.complaint_type === t)} ${i + 1}. ${esc(t)}</span>`).join("")}</div>
+      ${c.complaint_type && !TYPES.includes(c.complaint_type)
+        ? `<div class="note q" style="margin-top:8px">Recorded as <b>${esc(c.complaint_type)}</b>,
+           which is not one of the ten on the form. Imported from the previous register.</div>` : ""}`)}
+
+    ${sec("Cost", `<table class="rtab"><tbody>
+        <tr><td style="width:55%">Estimated cost</td><td><b>${money(c.cost_estimated)}</b></td></tr>
+        <tr><td>Material</td><td>${money(c.cost_material)}</td></tr>
+        <tr><td>Labour</td><td>${money(c.cost_labour)}</td></tr>
+        <tr><td>Other</td><td>${money(c.cost_other)}</td></tr>
+        <tr><td><b>Actual total</b></td><td><b>${money(c.cost_total)}</b></td></tr>
+      </tbody></table>
+      <div class="rticks" style="margin-top:8px">
+        <span>${tick(c.cost_charged_to === "client")} Charged to client</span>
+        <span>${tick(c.cost_charged_to === "insurance")} Insurance claim</span>
+        <span>${tick(c.cost_charged_to === "actom")} Charged to ACTOM</span>
+      </div>`)}
+
+    ${sec("Details of the complaint", `<div class="rticks">
+        <span>${tick(c.severity === "minor")} Minor</span>
+        <span>${tick(c.severity === "major")} Major</span>
+      </div>
+      <p style="margin:8px 0 0;white-space:pre-wrap">${esc(c.details || "—")}</p>`)}
+
+    ${sec("Complaint approval", `<table class="rtab"><thead><tr><th></th><th>Name</th><th>Date</th></tr></thead>
+      <tbody>
+        <tr><td>Field Service Project Coordinator</td><td>${esc(c.coordinator_name || "—")}</td><td>${d(c.coordinator_at)}</td></tr>
+        <tr><td>Divisional CEO</td><td>${esc(c.ceo_name || "—")}</td><td>${d(c.ceo_at)}</td></tr>
+      </tbody></table>`)}
+
+    ${sec("Root cause — 5 Why", why.length
+      ? `<table class="rtab"><tbody>${why.map((w, i) =>
+          `<tr><td style="width:36px">${i + 1}.</td><td>${esc(w)}</td></tr>`).join("")}</tbody></table>
+         <table class="rmeta" style="margin-top:8px"><tbody>
+           <tr><th>Root cause</th><td>${esc(c.root_cause_text || "—")}</td>
+               <th>Date completed</th><td>${d(c.cause_completed)}</td></tr>
+         </tbody></table>`
+      : `<div class="note q">No root cause analysis is recorded.${c.is_technical
+          ? " This is a technical complaint, so the form asks for one." : ""}</div>`)}
+
+    ${sec("Containment / correction (immediate)", `<div class="rticks">
+        <span>${tick(c.containment_kind === "scrap")} Scrap</span>
+        <span>${tick(c.containment_kind === "rework")} Rework</span>
+        <span>${tick(c.containment_kind === "concession")} Concession</span>
+        <span>${tick(c.containment_kind === "other")} Other</span>
+      </div>
+      <p style="margin:8px 0 0;white-space:pre-wrap">${esc(c.containment_note || c.correction || "—")}</p>`)}
+
+    ${sec("Preventive action", c.preventive_action
+      ? `<p style="margin:0;white-space:pre-wrap">${esc(c.preventive_action)}</p>`
+      : `<div class="note q">No preventive action is recorded. Nothing is stated as
+         having changed to stop this recurring.</div>`)}
+
+    ${rep.docs && rep.docs.length ? sec("Documents attached",
+      `<table class="rtab"><tbody>${rep.docs.map(x =>
+        `<tr><td>${esc(x.filename)}</td><td>${d(x.uploaded_at)}</td></tr>`).join("")}</tbody></table>
+       <div class="sub" style="margin-top:6px">Held in the system against this record;
+       not reproduced in this print.</div>`) : ""}
+
+    <div class="rsec rsign">
+      <h4>Clearing of complaint</h4>
+      <div class="rsignrow">
+        <div>
+          <div class="rsigbox">${c.closed_at ? "cleared" : "not cleared"}</div>
+          <div class="rsigline">${esc(c.cleared_name || c.raised_by_name || "—")}</div>
+          <div class="sub">${d(c.cleared_at || c.closed_at)}</div>
+        </div>
+        <div class="rfacts">
+          <div><span>Called</span> ${d(c.called_at)}</div>
+          <div><span>First response</span> ${c.responded_at
+            ? `${d(c.responded_at)} — ${c.response_days} days` : "not recorded"}</div>
+          <div><span>Cleared</span> ${c.closed_at
+            ? `${d(c.closed_at)} — ${c.days_to_close} days`
+            : c.legacy_closed ? "closed in the previous register, date not recorded" : "not yet"}</div>
+          ${c.ncr_ref ? `<div><span>NCR</span> ${esc(c.ncr_ref)}</div>` : ""}
+          <div><span>Printed</span> ${new Date().toLocaleString("en-ZA")} by ${esc(S.profile.full_name)}</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
 function vPrint() {
-  /* One print view, two kinds of record. */
+  /* One print view, three kinds of record. */
   if ((S.report || {}).kind === "ncr") return vNcrPrint();
+  if ((S.report || {}).kind === "care") return vCarePrint();
 
   const rep = S.report || {};
   const insp = byId(S.inspections, rep.id);
@@ -4467,7 +4630,7 @@ function lab(label, control, hint) {
 function newComplaintModal() {
   const opts = (list, sel) => list.map(x =>
     `<option value="${x.id}"${x.id === sel ? " selected" : ""}>${esc(x.name)}</option>`).join("");
-  openModal("Log a customer complaint", `
+  openModal("Log a customer care — QA-FM-005", `
     <div class="two">
       <div>${lab("Customer", `<input id="kCust" placeholder="who complained">`)}</div>
       <div>${lab("Site or project", `<input id="kSite" placeholder="where, if it matters">`)}</div>
@@ -4531,7 +4694,7 @@ function closeComplaintModal(id) {
   const c = (S.complaints || []).find(x => x.id === id);
   if (!c) return;
   modalCtx.id = id;
-  openModal(`Close ${c.ref}`, `
+  openModal(`Clear ${c.ref}`, `
     ${c.is_technical && !c.ncr_id ? `<div class="note q" style="margin-bottom:13px">
       This is a technical complaint, which is also a nonconformance. It cannot be closed
       until an NCR is linked — that is where the root cause and the corrective action are
@@ -4542,7 +4705,7 @@ function closeComplaintModal(id) {
         data-assist="spell" data-assist-context="complaint_close"></textarea>`,
       "Required. The register this replaces marked 957 complaints closed and recorded a closing date on 38, so nobody can say what was done or how long it took.")}
     ${lab("Anything else worth recording", `<textarea id="kNote" rows="2" placeholder="optional"></textarea>`)}
-  `, [["Close it", "do-close-complaint", "pri"], ["Cancel", "close-modal", ""]]);
+  `, [["Clear it", "do-close-complaint", "pri"], ["Cancel", "close-modal", ""]]);
 }
 
 async function doCloseComplaint() {
@@ -4598,11 +4761,12 @@ async function openComplaint(id) {
           : c.is_technical
             ? `<span class="tag ncr">none linked — required before this can be closed</span>`
             : "none linked")}`}
-  `, c.status === "closed"
-      ? [["Close", "close-modal", ""]]
+  `, c.status === "closed" || c.legacy_closed
+      ? [["Print the form", "care-report", "", c.id], ["Close", "close-modal", ""]]
       : [
           ...(c.responded_at ? [] : [["Record a response", "respond-complaint", "", c.id]]),
-          ["Close the complaint", "close-complaint", "pri", c.id],
+          ["Clear this customer care", "close-complaint", "pri", c.id],
+          ["Print the form", "care-report", "", c.id],
           ["Cancel", "close-modal", ""]
         ]);
 }
@@ -4625,7 +4789,7 @@ function downloadComplaints() {
   ]);
   csvDownload(`Complaints-${DIVISION.code || "grid"}-${new Date().toISOString().slice(0, 10)}.csv`,
     headers, data);
-  toast(`${rows.length} complaint${rows.length === 1 ? "" : "s"} downloaded.`, "ok");
+  toast(`${rows.length} customer care${rows.length === 1 ? "" : "s"} downloaded.`, "ok");
 }
 
 /* =====================================================================
@@ -4667,10 +4831,10 @@ function vCust(m) {
   if (S.tab === 0 || S.tab === 1) {
     const rows = S.tab === 1 ? open : all;
     body = `<div class="filters">
-        <button class="btn sm pri" data-act="new-complaint">Log a complaint</button>
+        <button class="btn sm pri" data-act="new-complaint">Log a customer care</button>
         <button class="btn sm" data-act="cust-csv">Download</button>
         <span class="spacer"></span>
-        <span class="cnt">${rows.length} ${S.tab === 1 ? "open" : "complaint" + (rows.length === 1 ? "" : "s")}</span>
+        <span class="cnt">${rows.length} ${S.tab === 1 ? "open" : "customer care" + (rows.length === 1 ? "" : "s")}</span>
       </div>`
       + (rows.length ? T(["Reference", "Called", "Customer", "What", "Type", "Section",
                           "Owner", "Response", "Progress", ""],
@@ -4688,11 +4852,13 @@ function vCust(m) {
             ? `<span class="tag ncr">no reply yet</span>`
             : `${c.response_hours} h`,
           pill(({ open: "Open", in_progress: "In progress", closed: "Closed" })[c.status] || c.status),
-          `<button class="btn sm" data-act="open-complaint" data-id="${c.id}">Open</button>`
+          `<button class="btn sm" data-act="open-complaint" data-id="${c.id}">Open</button>
+           <button class="btn sm" data-act="care-report" data-id="${c.id}"
+             title="Open the printable QA-FM-005">Form</button>`
         ]))
         : emptyBecause("Nothing here",
             S.tab === 1 ? "Nothing is open. Every complaint has been closed."
-                        : "No complaints have been logged yet."));
+                        : "No customer cares have been logged yet."));
   }
 
   else {
@@ -4915,6 +5081,7 @@ document.addEventListener("click", async e => {
     case "raise-ncr": return raiseNcrFromFault(t.dataset.id);
     case "print-report": return openReport(t.dataset.id);
     case "ncr-report": return openNcrReport(t.dataset.id);
+    case "care-report": return openCareReport(t.dataset.id);
     case "ncr-csv": return downloadNcrRegister();
     case "new-complaint": return newComplaintModal();
     case "save-complaint": return saveComplaint();
@@ -4929,9 +5096,10 @@ document.addEventListener("click", async e => {
       /* Back to where the report was opened from. Returning an NCR report
          to the inspection workbench is the kind of small wrongness that
          makes people stop trusting the navigation. */
-      const wasNcr = (S.report || {}).kind === "ncr";
+      const kind = (S.report || {}).kind;
       S.report = null;
-      if (wasNcr) { S.view = "ncr"; S.tab = 0; }
+      if (kind === "ncr") { S.view = "ncr"; S.tab = 0; }
+      else if (kind === "care") { S.view = "cust"; S.tab = 0; }
       else { S.view = "work"; S.tab = 2; }
       buildNav(); return render();
     }

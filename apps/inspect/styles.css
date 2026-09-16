@@ -479,3 +479,10 @@ body.printing .page{max-width:none;padding:18px 20px}
 @media(prefers-reduced-motion:reduce){
   .aibot .scan,.aibot .eye,.aidots i{animation:none;opacity:.7}
 }
+
+/* Tick boxes on the printed customer care form. The paper QA-FM-005
+   lists every option with a box; showing only the ticked one would hide
+   that the others were considered and not chosen, which on a controlled
+   form is part of the record. */
+.rticks{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12px;color:var(--ink)}
+.rticks span{white-space:nowrap}

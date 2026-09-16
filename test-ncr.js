@@ -218,8 +218,7 @@ s.check('costs are in Rands', /money = v => Number\(v \|\| 0\) \? "R" \+/.test(a
 /* Returning an NCR report to the inspection workbench is the kind of
    small wrongness that makes people distrust the navigation. */
 s.check('closing an NCR report returns to the register',
-  /wasNcr \) \{ S\.view = "ncr"/.test(appSrc.replace(/\s+/g, ' ')) ||
-  /if \(wasNcr\) \{ S\.view = "ncr"/.test(appSrc));
+  /kind === "ncr"\) \{ S\.view = "ncr"/.test(appSrc));
 
 s.group('downloading the register');
 /* A register you cannot get out of the system is a register somebody

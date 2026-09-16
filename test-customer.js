@@ -160,4 +160,70 @@ s.check('the workbook people are kept as names', /owner_name/.test(mig020));
 s.check('generated import SQL is not committed',
   /db\/import\//.test(read('.gitignore')));
 
+s.group('QA-FM-005, the controlled form');
+
+const mig021 = read('db/migrations/021-customer-care-form.sql');
+
+s.check('the module is named as the division names it', /t: "Customer cares"/.test(app));
+s.check('a customer care can be printed', /function vCarePrint/.test(app) && /case "care-report"/.test(app));
+s.check('the print carries the document number and revision', /QA-FM-005 rev 03/.test(app));
+s.check('the print follows the form, not the app', /Clearing of complaint/.test(app));
+/* Every option, ticked or not. An option missing from a printed
+   controlled form is one nobody can see was considered and set aside. */
+s.check('unticked options are printed too', /const tick = on => on \? "&#9745;" : "&#9744;"/.test(app));
+s.check('all ten complaint types appear on the form', /Install & Commissioning"\]/.test(app));
+s.check('the three cost allocations appear', /Charged to client/.test(app) && /Insurance claim/.test(app));
+s.check('the four containment options appear', /Concession<\/span>/.test(app));
+s.check('a type the form does not list is flagged rather than hidden',
+  /not one of the ten on the form/.test(app));
+s.check('closing an NCR, a care and an inspection report each return to their own register',
+  /kind === "care"\) \{ S\.view = "cust"/.test(app));
+
+s.group('the fields the form asks for');
+for (const [what, col] of [
+  ['company separately from the caller', 'company_name'],
+  ['contact person and number', 'contact_person'],
+  ['contracts engineer', 'contracts_engineer'],
+  ['received, delivered and installed dates', 'date_installed'],
+  ['minor or major', 'complaint_severity'],
+  ['the five Why', 'why_chain'],
+  ['the root cause and when it was completed', 'cause_completed'],
+  ['scrap, rework, concession or other', 'containment_kind'],
+  ['preventive action', 'preventive_action'],
+  ['estimated cost', 'cost_estimated'],
+  ['who carries the cost', 'cost_charged_to']
+]) s.check(`the form has ${what}`, new RegExp(col).test(mig021));
+
+/* A signature block with no date is the commonest finding on a paper QMS. */
+s.check('a signature without a date is refused',
+  /\(coordinator_name is null\) = \(coordinator_at is null\)/.test(mig021) &&
+  /\(ceo_name is null\) = \(ceo_at is null\)/.test(mig021));
+
+s.group('closing requires the investigation, not a linked NCR');
+/* 019 required an NCR. QA-FM-005 puts the investigation on the customer
+   care, and the system should produce the form the division approved. */
+s.check('a technical care needs a root cause to clear', /COMPLAINT_NEEDS_CAUSE/.test(mig021));
+s.check('it no longer demands a linked NCR', !/COMPLAINT_NEEDS_NCR/.test(mig021));
+s.check('and the reversal is explained rather than silent',
+  /A DECISION FROM 019 THAT THIS REVERSES/.test(mig021));
+s.check('an NCR can still be linked', /optional link/.test(mig021));
+
+s.group('documents');
+s.check('documents have their own table', /create table if not exists complaint_documents/.test(mig021));
+/* The inspection bucket is images only by design; widening it for PDFs
+   would widen it for every photo field in the inspection module. */
+s.check('they use their own bucket', /'customer-care-docs'/.test(mig021));
+/* Checked against statements rather than the whole file: the comment
+   explaining why a separate bucket exists names the other one. */
+s.check('the inspection photo bucket is left alone',
+  !mig021.split('\n').some(l => !l.trim().startsWith('--') && l.includes('inspection-photos')));
+s.check('PDFs are allowed', /application\/pdf/.test(mig021));
+s.check('nothing can be attached to a cleared care', /c\.closed_at is null/.test(mig021));
+s.check('a document cannot be removed once attached',
+  !/grant[^;]*delete[^;]*complaint_documents/i.test(mig021));
+
+s.group('the response target is a setting, not a constant');
+s.check('it lives on the division', /response_target_days/.test(mig021));
+s.check('it starts at what the existing report uses', /default 3/.test(mig021));
+
 s.done();
