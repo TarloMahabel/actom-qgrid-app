@@ -22,10 +22,21 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.25.1";
+window.APP_VERSION = "0.26.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.26.0", d: "2026-09-17", t: "One dashboard across the modules",
+    items: [
+      "The Dashboard now opens on an executive view drawing from every module that exists: first pass yield against the target, nonconformances open with how many are major and how many have run past thirty days, customer cares open and how many the customer has not heard back on, and the cost of quality for the financial year.",
+      "Pass rate by manufacturing stage in the same bands the shop floor report uses, and nonconformances by department.",
+      "A short list of what actually needs somebody to act — inspections overdue, faults awaiting a disposition, nonconformances with no root cause, customers waiting for a reply. Records rather than statistics.",
+      "Cost of quality is shown in Rands, with how many records carry a cost out of how many exist. It is not shown as a share of turnover: this system inspects panels, it does not invoice them, so it does not know what production was worth. A percentage against a figure nobody holds would be quoted in a board pack and could not be defended.",
+      "There is no tile for Calibration, Supplier quality, Document control, Training or Audits, and that is deliberate. A zero against Calibration would read as nothing overdue, when what is true is that nobody is tracking it here. They are listed at the foot as not built.",
+      "The first pass yield target is now a division setting, starting at 97%. The financial year comes from the division rather than the calendar, so the figures agree with finance."
+    ]
+  },
   {
     v: "0.25.1", d: "2026-09-17", t: "Attach documents while logging a customer care",
     items: [

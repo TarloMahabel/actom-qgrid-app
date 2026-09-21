@@ -180,7 +180,7 @@ async function loadData() {
     S.defects = df.data; S.equipment = eq.data;
 
     const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd, fbp, acts,
-           ncr, ncra, rcs, dash, cmp, cmpT, cmpS, cbm, cbd] = await Promise.all([
+           ncr, ncra, rcs, dash, cmp, cmpT, cmpS, cbm, cbd, sc, coq, sy, nbd] = await Promise.all([
       supabase.from("inspection_templates").select("*").order("code"),
       supabase.from("template_revisions").select("*").order("rev", { ascending: false }),
       supabase.from("inspection_requirements").select("*"),
@@ -201,7 +201,11 @@ async function loadData() {
       supabase.from("complaint_types").select("*").eq("active", true).order("sort"),
       supabase.from("complaint_sections").select("*").eq("active", true).order("sort"),
       supabase.from("v_care_by_month").select("*").order("period"),
-      supabase.from("v_care_by_defect").select("*").order("period")
+      supabase.from("v_care_by_defect").select("*").order("period"),
+      supabase.from("v_scorecard").select("*").maybeSingle(),
+      supabase.from("v_cost_of_quality").select("*"),
+      supabase.from("v_stage_yield").select("*"),
+      supabase.from("v_ncr_by_department").select("*")
     ]);
     for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd]) if (r.error) throw r.error;
     /* The dashboard views are not load-bearing: a division that has not run
@@ -228,6 +232,12 @@ async function loadData() {
        quietly stops counting. */
     S.careByMonth = cbm.error ? [] : (cbm.data || []);
     S.careByDefect = cbd.error ? [] : (cbd.data || []);
+    /* Counted in the database: the registers are capped on load, and a
+       headline figure built from a capped list quietly stops counting. */
+    S.scorecard = sc.error ? null : sc.data;
+    S.costOfQuality = coq.error ? [] : (coq.data || []);
+    S.stageYield = sy.error ? [] : (sy.data || []);
+    S.ncrByDept = nbd.error ? [] : (nbd.data || []);
     S.templates = tpl.data; S.revisions = rev.data; S.requirements = req.data;
     S.projects = prj.data; S.worksOrders = wo.data;
     S.inspections = ins.data; S.failedChecks = fc.data;
@@ -275,7 +285,8 @@ function subscribe() {
    ------------------------------------------------------------ */
 const NAV = [
   { g: "Main" },
-  { id: "main",  n: 1, t: "Dashboard",               col: "--m1", tabs: [] },
+  { id: "main",  n: 1, t: "Dashboard",               col: "--m1",
+    tabs: ["Executive", "Across the modules"] },
   { g: "Inspections" },
   { id: "work",  n: 2, t: "Inspection workbench",    col: "--m2", tabs: ["My queue", "Capture", "Register", "Failed checks"] },
   { id: "sched", n: 3, t: "Scheduling",              col: "--m3",
@@ -346,7 +357,126 @@ const unassigned = () => S.inspections.filter(i => !i.assigned_to && i.status ==
 /* The main dashboard spans both modules and is deliberately thin: it answers
    "what needs attention today" and links into the work. Analysis belongs in the
    two report surfaces, which is what the management review reads from. */
+
+/* =====================================================================
+   The executive dashboard.
+
+   One page answering "how is quality doing", drawn only from modules
+   that exist.
+
+   WHAT IS DELIBERATELY ABSENT. There is no tile for Calibration,
+   Supplier quality, Document control, Training or Audits. A tile reading
+   0 against Calibration says nothing is overdue; the truth is that
+   nobody is tracking it, and those are opposite claims. They are listed
+   at the foot as not built, which is the honest version and also the
+   more useful one — it is a roadmap rather than a false all-clear.
+
+   AND NO PERCENTAGE OF PRODUCTION VALUE. Cost of quality is normally
+   quoted as a share of turnover. This system inspects panels; it does
+   not invoice them, so it does not know the denominator. A percentage
+   against a number nobody has would be quoted in a board pack and could
+   not be defended. Rands, and how many records carry one.
+   ===================================================================== */
+function vExec() {
+  const d = S.scorecard;
+  if (!d) {
+    return `<div class="card"><div class="bd"><div class="note q">
+      The scorecard view is not in this division's database yet. Ask Group IT to run
+      <b>db/migrations/023-executive-dashboard.sql</b>.</div></div></div>`;
+  }
+  const target = S.division?.fpy_target ?? 97;
+  const money = v => "R" + Number(v || 0).toLocaleString("en-ZA", { maximumFractionDigits: 0 });
+  const fy = d.fy_from ? new Date(d.fy_from).toLocaleDateString("en-ZA",
+    { month: "short", year: "numeric" }) : "";
+
+  const kpi = (k, v, note, tone) =>
+    `<div class="card kpi ${tone || ""}"><div class="k">${esc(k)}</div>
+      <div class="v">${v}</div><div class="d">${note}</div></div>`;
+
+  /* The bands the existing report uses: below 90 is a problem, 90 to 95
+     is watch, above 95 is fine. */
+  const band = r => r == null ? "" : r < 90 ? "bad" : r < 95 ? "warn" : "ok";
+  const stages = S.stageYield || [];
+  const maxDept = Math.max(1, ...(S.ncrByDept || []).map(x => Number(x.ncrs) || 0));
+
+  return `<div class="four">
+      ${kpi("First pass yield", (d.fpy_30d ?? "—") + (d.fpy_30d == null ? "" : "%"),
+        `target ${target}% · ${d.inspections_30d} inspections in 30 days`,
+        d.fpy_30d == null ? "" : d.fpy_30d >= target ? "good" : "alert")}
+      ${kpi("Nonconformances open", d.ncrs_open,
+        `${d.ncrs_major} major · ${d.ncrs_critical} critical · ${d.ncrs_over_30d} over 30 days`,
+        d.ncrs_over_30d ? "alert" : "")}
+      ${kpi("Customer cares open", d.cares_open,
+        d.cares_no_reply ? `${d.cares_no_reply} with no reply yet` : "all have been answered",
+        d.cares_no_reply ? "alert" : "good")}
+      ${kpi(`Cost of quality · FY from ${esc(fy)}`, money(d.cost_of_quality),
+        `from ${d.cost_records} of ${d.cost_population} records that carry a cost`)}
+    </div>
+
+    <div class="two">
+      <div class="card"><h3>Pass rate by stage <span class="cnt" style="margin-left:auto">rolling 30 days</span></h3>
+        <div class="bd">${stages.length
+          ? T(["Stage", "Inspections", "Pass rate"], stages.map(x => [
+              esc(x.stage), x.inspections,
+              `<span class="tag ${band(Number(x.pass_rate))}">${x.pass_rate ?? "—"}%</span>`]))
+          : `<div class="empty">Nothing completed in the last 30 days.</div>`}
+          <div class="note" style="margin-top:10px">Below 90%, 90 to 95%, and above 95% —
+            the same bands the shop floor report uses.</div>
+        </div></div>
+
+      <div class="card"><h3>Nonconformances by department <span class="cnt" style="margin-left:auto">this year</span></h3>
+        <div class="bd">${(S.ncrByDept || []).length
+          ? (S.ncrByDept || []).slice(0, 10).map(x => `
+            <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px">
+              <div style="width:34%;font-size:12.5px">${esc(x.department || "not allocated")}</div>
+              <div style="flex:1;background:var(--line-2);border-radius:3px;height:13px">
+                <div style="width:${Math.round(100 * Number(x.ncrs) / maxDept)}%;
+                  background:var(--brand,#1f4e79);height:13px;border-radius:3px"></div></div>
+              <b style="width:34px;text-align:right;font-size:12.5px">${x.ncrs}</b>
+            </div>`).join("")
+          : `<div class="empty">No nonconformances recorded against a department yet.</div>`}
+        </div></div>
+    </div>
+
+    <div class="two">
+      <div class="card"><h3>What needs attention</h3><div class="bd">
+        ${T(["", ""], [
+          ["Inspections overdue", d.inspections_overdue],
+          ["Faults awaiting a disposition", d.faults_awaiting],
+          ["Nonconformances with no root cause", d.ncrs_no_cause],
+          ["Customer cares with no reply", d.cares_no_reply],
+          ["Average days to answer a customer", d.care_response_days ?? "—"]
+        ])}
+        <div class="note q" style="margin-top:10px">Every one of these is a record somebody
+          has to act on, not a statistic. They are here rather than on a monthly report
+          because a month is a long time to leave a customer unanswered.</div>
+      </div></div>
+
+      <div class="card"><h3>Cost of quality <span class="cnt" style="margin-left:auto">FY from ${esc(fy)}</span></h3>
+        <div class="bd">
+        ${T(["Source", "Cost", "Records with a cost"],
+          (S.costOfQuality || []).map(x => [
+            esc(x.source), money(x.cost), `${x.records_with_cost} of ${x.records}`]))}
+        <div class="note" style="margin-top:10px">Rands rather than a share of turnover.
+          This system inspects panels; it does not invoice them, so it does not know what
+          production was worth — and a percentage against a figure nobody has is one that
+          gets quoted and cannot be defended.</div>
+      </div></div>
+    </div>
+
+    <div class="card"><h3>Not built yet</h3><div class="bd">
+      <div class="note q">Calibration, Supplier quality, Document control, Training and
+        competency, and Audits and compliance are not in this system. There is no tile for
+        them above, deliberately: a zero against Calibration would read as nothing overdue,
+        when what is true is that nobody is tracking it here. Those are opposite claims and
+        only one of them is honest.</div>
+    </div></div>`;
+}
+
 function vMain(m) {
+  /* Tab 0 is the executive view across every module that exists; tab 1
+     is the operational one this page has always been. */
+  if (S.tab === 0) return head(m) + vExec() + foot();
   const open = (S.ncrs || []).filter(n => n.status !== "closed");
   const kpi = (l, v, act) => `<div class="fld"><label>${l}</label>
     <div class="ro">${v}</div>${act || ""}</div>`;

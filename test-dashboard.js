@@ -1,5 +1,5 @@
 /* The monthly quality review: faults per project, and the actions arising. */
-const { loadApp, suite } = require('./test/harness');
+const { loadApp, suite, REPO } = require('./test/harness');
 
 (async () => {
   const s = suite('test-dashboard — faults per project and actions');
@@ -89,5 +89,35 @@ const { loadApp, suite } = require('./test/harness');
   s.check('and says there is nothing to show rather than breaking',
     old.$('page').textContent.includes('No faults recorded'));
 
-  s.done();
+  s.group('the executive view across modules');
+const exSrc = require('fs').readFileSync(require('path').join(REPO, 'apps/inspect/app.js'), 'utf8');
+const ex023 = require('fs').readFileSync(require('path').join(REPO, 'db/migrations/023-executive-dashboard.sql'), 'utf8');
+
+s.check('the dashboard opens on it', /if \(S\.tab === 0\) return head\(m\) \+ vExec\(\)/.test(exSrc));
+s.check('figures are counted in the database, not from the capped registers',
+  /v_scorecard/.test(exSrc) && /quietly stops counting/.test(exSrc));
+s.check('a division without the migration is told so rather than shown zeroes',
+  /023-executive-dashboard\.sql/.test(exSrc));
+
+/* A tile reading 0 against Calibration says nothing is overdue. The truth
+   is that nobody is tracking it. Opposite claims. */
+s.check('their absence is stated rather than shown as zero', /Not built yet/.test(exSrc));
+s.check('with the reason, not just the list', /would read as nothing overdue/.test(exSrc));
+
+/* Cost of quality is normally a share of turnover. This system does not
+   know turnover, and a percentage against a denominator nobody holds gets
+   quoted and cannot be defended. */
+s.check('cost of quality is money, not a percentage of turnover',
+  !/of production value/.test(exSrc));
+s.check('and says how many records carry a cost',
+  /records that carry a cost/.test(exSrc) && /records_with_cost/.test(ex023));
+s.check('the financial year comes from the division',
+  /fy_start\(\)/.test(ex023) && /fy_start_month/.test(ex023));
+s.check('the yield target is a setting, not a constant', /fpy_target/.test(ex023));
+
+/* `open` on an NCR is the first rung of the ladder, not "not closed" --
+   the mistake that reported nought open NCRs in v0.21.3. */
+s.check('open nonconformances means not closed', /from ncrs where closed_at is null/.test(ex023));
+
+s.done();
 })();
