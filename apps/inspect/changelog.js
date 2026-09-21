@@ -22,10 +22,18 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.25.0";
+window.APP_VERSION = "0.25.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.25.1", d: "2026-09-17", t: "Attach documents while logging a customer care",
+    items: [
+      "Documents can now be attached on the form where a customer care is logged, rather than only after it exists. They are held until it is saved and attached the moment it has a reference — nobody should have to log it, find it again and come back.",
+      "If an attachment fails to upload the customer care is still logged and the failure is named. Losing the record because a file would not attach would be the wrong way round.",
+      "Two places still described the old rule, which said a technical customer care needed a linked nonconformance before it could be closed. That changed when the module was built to follow QA-FM-005: what it needs is a root cause. The form and the detail both say so now, and the detail shows whether one has been recorded."
+    ]
+  },
   {
     v: "0.25.0", d: "2026-09-16", t: "The After Sales report, and documents on a customer care",
     items: [

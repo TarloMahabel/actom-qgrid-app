@@ -81,7 +81,10 @@ s.check('types know whether they are technical', /is_technical boolean/.test(mig
 s.check('a technical complaint cannot be closed without one', /COMPLAINT_NEEDS_NCR/.test(mig));
 s.check('and the reason is given to the person, not just refused',
   /so the cause and the corrective action are recorded where they can be verified/.test(mig));
-s.check('the detail view says so before they try', /required before this can be closed/.test(app));
+/* Pinned the NCR wording until 021 changed the rule. What the detail
+   must warn about now is a missing root cause. */
+s.check('the detail view says so before they try',
+  /not recorded — needed before this can be cleared/.test(app));
 
 /* ------------------------------------------------------------------ */
 s.group('lists that cannot drift');
@@ -267,5 +270,29 @@ s.check('the three states are reused rather than duplicated',
 s.check('and the reasoning is written down',
   /how an enum reaches nine values\s*\n?--\s*meaning three things|nine values meaning three things/.test(mig022) ||
   /Same three facts, different words/.test(mig022));
+
+s.group('documents can be attached while logging');
+/* A document is stored under the care's id, so there is nothing to store
+   it against until the care exists. Staging beats making somebody log
+   it, find it again and come back. */
+s.check('the log form offers it', /data-act="stage-care-doc"/.test(app));
+s.check('staged files are listed', /function renderStaged/.test(app));
+s.check('and can be removed before saving', /case "unstage-care-doc"/.test(app));
+s.check('they upload after the insert returns an id', /\$\{data\.id\}\/\$\{Date\.now\(\)\}/.test(app));
+/* Losing the record because a file would not upload is the wrong way
+   round. */
+s.check('a failed attachment does not lose the customer care',
+  /did not attach\. Open it and try again/.test(app));
+s.check('the size limit applies to staged files too', /over 15 MB/.test(app));
+
+s.group('the closing rule is described correctly');
+/* 021 replaced "needs a linked NCR" with "needs a root cause". Two
+   places went on describing the old rule. */
+s.check('the log form no longer promises an NCR requirement',
+  !/closing one will ask for a linked NCR/.test(app));
+s.check('it asks for the five Why instead', /QA-FM-005 asks for the five Why/.test(app));
+s.check('the detail shows whether a root cause is recorded',
+  /needed before this can be cleared/.test(app));
+s.check('and an NCR is shown as optional', /none linked\$\{c\.is_technical \? " — optional"/.test(app));
 
 s.done();

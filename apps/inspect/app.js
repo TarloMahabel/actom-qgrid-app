@@ -4648,7 +4648,7 @@ function newComplaintModal() {
     <div class="two">
       <div>${lab("Section", `<select id="kSection"><option value="">— not stated —</option>${opts(S.complaintSections)}</select>`)}</div>
       <div>${lab("Complaint type", `<select id="kType"><option value="">— not classified —</option>${opts(S.complaintTypes)}</select>`,
-        "A technical complaint is also a nonconformance, and closing one will ask for a linked NCR.")}</div>
+        "A technical customer care needs a root cause before it can be cleared — QA-FM-005 asks for the five Why. A nonconformance can be linked as well where one is warranted.")}</div>
     </div>
     <div class="two">
       <div>${lab("Defect code", `<select id="kDefect"><option value="">— none —</option>${
@@ -4657,7 +4657,28 @@ function newComplaintModal() {
       <div>${lab("Site engineer", `<input id="kEng" placeholder="who attends, if known">`)}</div>
     </div>
     ${lab("Contract number", `<input id="kContract" placeholder="optional">`)}
+    ${lab("Documents", `<div id="careStage"><div class="cnt">Nothing attached.</div></div>
+      <button class="btn sm" type="button" data-act="stage-care-doc" style="margin-top:8px">Attach a document</button>`,
+      "Quotes, printed emails, delivery notes. They are held here and attached once the customer care has a reference to attach them to.")}
   `, [["Log it", "save-complaint", "pri"], ["Cancel", "close-modal", ""]]);
+  S.careStaged = [];
+}
+
+/* Files chosen before the record exists.
+   A document is stored under the customer care's id, so there is nothing
+   to store it against until the care is logged. Rather than making
+   somebody log it, find it and come back, the files are held here and
+   uploaded the moment the insert returns a reference. */
+function renderStaged() {
+  const host = $("careStage");
+  if (!host) return;
+  const f = S.careStaged || [];
+  host.innerHTML = f.length
+    ? f.map((x, i) => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span class="cnt">${esc(x.name)} · ${Math.round(x.size / 1024)} kB</span>
+        <button class="btn sm" type="button" data-act="unstage-care-doc" data-id="${i}">Remove</button>
+      </div>`).join("")
+    : `<div class="cnt">Nothing attached.</div>`;
 }
 
 async function saveComplaint() {
@@ -4679,9 +4700,33 @@ async function saveComplaint() {
       p_contract: $("kContract").value.trim() || null
     });
     if (error) throw error;
+
+    /* Uploaded after the insert, because the path needs the id. If one
+       fails the customer care still exists and the failure is named —
+       losing the record because an attachment would not upload would be
+       the wrong way round. */
+    let failed = 0;
+    for (const file of (S.careStaged || [])) {
+      try {
+        const safe = file.name.replace(/[^\w.\- ]+/g, "_").slice(-90);
+        const path = `${data.id}/${Date.now()}-${safe}`;
+        const up = await supabase.storage.from("customer-care-docs").upload(path, file);
+        if (up.error) throw up.error;
+        const r = await supabase.from("complaint_documents").insert({
+          complaint_id: data.id, storage_path: path, filename: file.name,
+          bytes: file.size, uploaded_by: S.profile.id
+        });
+        if (r.error) throw r.error;
+      } catch (e) { failed++; }
+    }
+    const staged = (S.careStaged || []).length;
+    S.careStaged = [];
     closeModal();
     await reload();
-    toast(`${data.ref} logged. The clock on a first response starts now.`, "ok");
+    toast(failed
+      ? `${data.ref} logged, but ${failed} of ${staged} documents did not attach. Open it and try again.`
+      : `${data.ref} logged${staged ? ` with ${staged} document${staged === 1 ? "" : "s"}` : ""}. The clock on a first response starts now.`,
+      failed ? "bad" : "ok");
   } catch (e) { toast(explain(e), "bad"); }
   finally { busy(false); }
 }
@@ -4763,11 +4808,13 @@ async function openComplaint(id) {
         ${row("Nonconformance", c.ncr_ref ? esc(c.ncr_ref) : "none linked")}
       </div>
       ${row("What was done", esc(c.correction || "—"))}`
-      : `${row("Nonconformance", c.ncr_ref
-          ? esc(c.ncr_ref)
+      : `${row("Root cause", c.root_cause_text
+          ? esc(c.root_cause_text)
           : c.is_technical
-            ? `<span class="tag ncr">none linked — required before this can be closed</span>`
-            : "none linked")}`}
+            ? `<span class="tag ncr">not recorded — needed before this can be cleared</span>`
+            : `<span class="cnt">not recorded</span>`)}
+         ${row("Nonconformance", c.ncr_ref ? esc(c.ncr_ref)
+           : `<span class="cnt">none linked${c.is_technical ? " — optional" : ""}</span>`)}`}
     ${row("Documents", `<div id="careDocs"><div class="cnt">Loading…</div></div>`)}
   `, c.status === "closed" || c.legacy_closed
       ? [["Print the form", "care-report", "", c.id], ["Close", "close-modal", ""]]
@@ -5272,6 +5319,9 @@ document.addEventListener("click", async e => {
     case "ncr-report": return openNcrReport(t.dataset.id);
     case "care-report": return openCareReport(t.dataset.id);
     case "add-care-doc": return addCareDoc(t.dataset.id);
+    case "stage-care-doc": return addCareDoc("new");
+    case "unstage-care-doc":
+      S.careStaged.splice(Number(t.dataset.id), 1); return renderStaged();
     case "open-care-doc": return openCareDoc(t.dataset.id);
     case "ncr-csv": return downloadNcrRegister();
     case "new-complaint": return newComplaintModal();
@@ -5419,6 +5469,16 @@ $("photoPicker").addEventListener("change", onPicked);
 $("docPicker")?.addEventListener("change", e => {
   const files = Array.from(e.target.files || []);
   e.target.value = "";
+  if (S.careUploadFor === "new") {
+    S.careStaged = (S.careStaged || []).concat(
+      files.filter(f => {
+        if (f.size > 15 * 1024 * 1024) { toast(`${f.name} is over 15 MB.`, "bad"); return false; }
+        return true;
+      }));
+    S.careUploadFor = null;
+    renderStaged();
+    return;
+  }
   uploadCareDocs(files).catch(() => { });
 });
 $("cameraPicker").addEventListener("change", onPicked);
