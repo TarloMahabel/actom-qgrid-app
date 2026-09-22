@@ -198,7 +198,7 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
   s.check('a missing logo.js is warned about, not silently ignored',
     read('app.js').includes('logo.js did not load'));
   s.check('app.js announces itself in the console',
-    read('app.js').includes('Grid app.js loaded'));
+    read('app.js').includes('app.js loaded — build'));
 
   s.done();
 })();

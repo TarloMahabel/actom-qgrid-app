@@ -22,10 +22,18 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.26.0";
+window.APP_VERSION = "0.26.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.26.1", d: "2026-09-21", t: "Renamed to ACTOM QMS 360",
+    items: [
+      "The system is now called ACTOM QMS 360. It was named Grid when it only did inspections; it now covers inspections, nonconformance and customer cares, and the name should say so.",
+      "The change is to the name on screen, the browser tab, the sign-in page and the app icon. Nothing about how it works has changed, and no data is affected.",
+      "The division shown underneath — MV Switchgear — comes from that site's own settings, so each division shows its own name without a separate release."
+    ]
+  },
   {
     v: "0.26.0", d: "2026-09-17", t: "One dashboard across the modules",
     items: [

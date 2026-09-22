@@ -1,7 +1,7 @@
 {
-  "name": "ACTOM Grid \u2014 Inspections",
-  "short_name": "Grid",
-  "description": "Quality inspections for ACTOM. Capture, schedule and configure inspections on the shop floor.",
+  "name": "ACTOM QMS 360",
+  "short_name": "QMS 360",
+  "description": "Quality management for ACTOM. Inspections, nonconformance, customer cares on the shop floor.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

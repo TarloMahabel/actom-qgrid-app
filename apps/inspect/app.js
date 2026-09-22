@@ -1,5 +1,5 @@
 /* ============================================================
-   ACTOM Grid — Inspections (Phase 1)
+   ACTOM QMS 360 — quality management
    Wired application. Plain script, no build step.
 
    WRAPPED IN A FUNCTION, DELIBERATELY.
@@ -42,7 +42,7 @@ if (!window.GRID) {
   document.body.insertAdjacentHTML("afterbegin",
     `<div style="font:15px system-ui;padding:40px;max-width:620px;margin:0 auto">
        <h2>Grid could not start</h2><p>${why}</p></div>`);
-  throw new Error("ACTOM Grid: " + why);
+  throw new Error("ACTOM QMS 360: " + why);
 }
 const { supabase, DIVISION, BUILD, signIn, signOutNow, signInWithPassword,
         currentProfile, explain } = window.GRID;
@@ -332,7 +332,7 @@ function tabbar(m) {
 function head(m, desc, act) {
   return `<div class="phead"><div>
     <h1>${m.t}</h1><div class="accent"></div>
-    <div class="eyebrow">Module ${m.n} · ACTOM Grid</div>
+    <div class="eyebrow">Module ${m.n} · ACTOM QMS 360</div>
     <p>${desc}</p></div><div class="pact">${act || ""}</div></div>`;
 }
 const foot = () => `<div class="foot">
@@ -340,7 +340,7 @@ const foot = () => `<div class="foot">
        <span class="b">${S.failedChecks.filter(f => f.disposition === "awaiting").length} awaiting disposition</span> ·
        <span class="b">${publishedRevs().length} of ${S.templates.length} templates published</span></div>
   <div>${esc(S.division?.name || DIVISION.name)} · hold points ${HP() ? "enabled" : "disabled"}</div>
-  <div>ACTOM Grid · a division of ACTOM (Pty) Ltd · Since 1903</div></div>`;
+  <div>ACTOM QMS 360 · ACTOM (Pty) Ltd · Since 1903</div></div>`;
 
 const publishedRevs = () => S.revisions.filter(r => r.status === "published");
 const revFor = tplId => publishedRevs().find(r => r.template_id === tplId);
@@ -5650,7 +5650,7 @@ function paintLogos() {
    message, which gave nobody anything to act on: the cause was a script that
    had not executed, and a stuck loader looks identical whatever the reason. */
 function bootFailed(err) {
-  console.error("Grid failed to start", err);
+  console.error("ACTOM QMS 360 failed to start", err);
   const l = $("loader");
   if (l) l.remove();
   document.body.insertAdjacentHTML("afterbegin", `
@@ -5746,7 +5746,7 @@ supabase.auth.onAuthStateChange((event, session) => {
   start().catch(bootFailed);
 });
 
-console.info("Grid app.js loaded — build",
+console.info("ACTOM QMS 360 app.js loaded — build",
   (window.GRID_CONFIG && window.GRID_CONFIG.build && window.GRID_CONFIG.build.commit) || "?");
 
 start().catch(bootFailed);
