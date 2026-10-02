@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.26.1";
+window.APP_VERSION = "0.27.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.27.0", d: "2026-10-02", t: "A quieter, lighter look",
+    items: [
+      "The whole system has been restyled: a near-white page, white panels with hairline borders, almost no shadow, and a single clear blue for whatever is active or primary.",
+      "Colour now only appears where it means something — a figure under target, a customer who has not been answered, a date gone by. On a tablet under factory lighting, a page that shouts everywhere tells an inspector nothing about where to look.",
+      "Headline figures are larger and set in a heavier face, so the number is the thing you read first. Where a figure is in trouble the card carries a coloured left edge rather than being tinted all over, which reads as an alarm when it is a number slightly under target.",
+      "Anything reachable by keyboard now shows a clear focus ring, and if your device is set to reduce motion, nothing animates.",
+      "Nothing about how the system works has changed. No figures, screens, permissions or workflows have been touched."
+    ]
+  },
   {
     v: "0.26.1", d: "2026-09-21", t: "Renamed to ACTOM QMS 360",
     items: [

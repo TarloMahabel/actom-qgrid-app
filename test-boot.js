@@ -200,5 +200,34 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
   s.check('app.js announces itself in the console',
     read('app.js').includes('app.js loaded — build'));
 
+  s.group('the visual system holds together');
+  const tok = read('tokens.css'), sheet = read('styles.css');
+
+  /* The brief's palette. Checked as values rather than as names, because
+     a token renamed to something sensible while keeping the old colour
+     is not the failure worth catching. */
+  s.check('the canvas is near-white', /--bg:#FAFBFC/i.test(tok));
+  s.check('the sidebar sits a shade off it', /--side:#F4F6F9/i.test(tok));
+  s.check('one primary blue', /--brand:#3B82F6/i.test(tok));
+  s.check('ink is charcoal-blue, not black', /--ink:#1E293B/i.test(tok));
+  s.check('hairline cool-grey borders', /--line:#E2E8F0/i.test(tok));
+  s.check('radii stay restrained', /--r:8px/.test(tok));
+
+  /* A whole card tinted red reads as an alarm when it is a number
+     slightly under target. */
+  s.check('status colour is an edge, not a fill', /\.kpi\.alert\{border-left:3px solid/.test(sheet));
+  s.check('figures are tabular so columns of them line up', /font-variant-numeric:tabular-nums/.test(sheet));
+
+  /* :focus-visible rather than :focus, so a mouse click leaves no ring —
+     the reason rings get removed altogether, which is the wrong fix. */
+  s.check('keyboard focus is visible', /button:focus-visible/.test(sheet) && /outline:2px solid var\(--brand\)/.test(sheet));
+  s.check('reduced motion is honoured', /prefers-reduced-motion:reduce/.test(sheet));
+
+  /* font-src is 'self', so a Google webfont is refused and the page
+     falls back silently. Better to choose the fallback deliberately. */
+  s.check('no webfont is requested that the CSP would refuse',
+    !/@import\s+url\(|fonts\.googleapis\.com|fonts\.gstatic\.com/.test(sheet + tok));
+  s.check('and the reason is recorded next to the stacks', /font-src 'self'/.test(tok));
+
   s.done();
 })();
