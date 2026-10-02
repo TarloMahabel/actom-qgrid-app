@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.27.0";
+window.APP_VERSION = "0.27.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.27.1", d: "2026-10-02", t: "The dashboard reads as a dashboard",
+    items: [
+      "Pass rate by stage is now a chart rather than a table, with a line at the target and anything below it in red. A column of percentages makes you read every row to find the one that matters; a chart shows you.",
+      "A summary panel saying what the numbers mean — how many things on the page need somebody to act, and where first pass yield stands against target. It is the one filled panel on the page and it earns that by saying something, rather than restating the figures above it.",
+      "Fixed: the word \"undefined\" appeared under the heading on the Dashboard.",
+      "Fixed: two lists had an empty grey header band above them, which looked like a column heading nobody had filled in."
+    ]
+  },
   {
     v: "0.27.0", d: "2026-10-02", t: "A quieter, lighter look",
     items: [

@@ -333,7 +333,7 @@ function head(m, desc, act) {
   return `<div class="phead"><div>
     <h1>${m.t}</h1><div class="accent"></div>
     <div class="eyebrow">Module ${m.n} · ACTOM QMS 360</div>
-    <p>${desc}</p></div><div class="pact">${act || ""}</div></div>`;
+    ${desc ? `<p>${desc}</p>` : ""}</div><div class="pact">${act || ""}</div></div>`;
 }
 const foot = () => `<div class="foot">
   <div><span class="b">${S.inspections.filter(i => i.status !== "completed").length} open</span> ·
@@ -393,11 +393,25 @@ function vExec() {
     `<div class="card kpi ${tone || ""}"><div class="k">${esc(k)}</div>
       <div class="v">${v}</div><div class="d">${note}</div></div>`;
 
-  /* The bands the existing report uses: below 90 is a problem, 90 to 95
-     is watch, above 95 is fine. */
-  const band = r => r == null ? "" : r < 90 ? "bad" : r < 95 ? "warn" : "ok";
-  const stages = S.stageYield || [];
+  /* A plain row of label and figure. T() draws a header band, and a
+     header reading nothing above two unlabelled columns is furniture. */
+  const lines = rows => rows.map(([k, v, tone]) => `
+    <div class="statline"><span>${esc(k)}</span>
+      <b class="${tone || ""}">${esc(String(v))}</b></div>`).join("");
+
+  const stages = (S.stageYield || []).filter(x => x.pass_rate != null);
   const maxDept = Math.max(1, ...(S.ncrByDept || []).map(x => Number(x.ncrs) || 0));
+
+  /* The attention list drives the summary panel's sentence. A panel that
+     says "everything is in order" when four things are overdue is worse
+     than no panel. */
+  const attention = [
+    ["Inspections overdue", d.inspections_overdue],
+    ["Faults awaiting a disposition", d.faults_awaiting],
+    ["Nonconformances with no root cause", d.ncrs_no_cause],
+    ["Customer cares with no reply", d.cares_no_reply]
+  ];
+  const outstanding = attention.filter(([, n]) => Number(n) > 0);
 
   return `<div class="four">
       ${kpi("First pass yield", (d.fpy_30d ?? "—") + (d.fpy_30d == null ? "" : "%"),
@@ -413,70 +427,83 @@ function vExec() {
         `from ${d.cost_records} of ${d.cost_population} records that carry a cost`)}
     </div>
 
-    <div class="two">
-      <div class="card"><h3>Pass rate by stage <span class="cnt" style="margin-left:auto">rolling 30 days</span></h3>
+    <div class="split">
+      <div class="card"><h3>Pass rate by manufacturing stage
+          <span class="cnt" style="margin-left:auto">rolling 30 days</span></h3>
         <div class="bd">${stages.length
-          ? T(["Stage", "Inspections", "Pass rate"], stages.map(x => [
-              esc(x.stage), x.inspections,
-              `<span class="tag ${band(Number(x.pass_rate))}">${x.pass_rate ?? "—"}%</span>`]))
-          : `<div class="empty">Nothing completed in the last 30 days.</div>`}
-          <div class="note" style="margin-top:10px">Below 90%, 90 to 95%, and above 95% —
-            the same bands the shop floor report uses.</div>
+          ? lineBarChart(stages.map(x => ({ k: x.stage, v: Number(x.pass_rate) })),
+              { limit: target, unit: "%", empty: "Nothing completed in the last 30 days." })
+          : `<div class="empty">Nothing has been completed in the last 30 days.</div>`}
+          <div class="legend">
+            <span><i style="background:var(--bad)"></i> below target</span>
+            <span><i style="background:var(--brand)"></i> at or above</span>
+            <span><i class="dash"></i> target ${target}%</span>
+          </div>
         </div></div>
 
-      <div class="card"><h3>Nonconformances by department <span class="cnt" style="margin-left:auto">this year</span></h3>
+      <div class="card"><h3>By department <span class="cnt" style="margin-left:auto">this year</span></h3>
         <div class="bd">${(S.ncrByDept || []).length
-          ? (S.ncrByDept || []).slice(0, 10).map(x => `
-            <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px">
-              <div style="width:34%;font-size:12.5px">${esc(x.department || "not allocated")}</div>
-              <div style="flex:1;background:var(--line-2);border-radius:3px;height:13px">
-                <div style="width:${Math.round(100 * Number(x.ncrs) / maxDept)}%;
-                  background:var(--brand,#1f4e79);height:13px;border-radius:3px"></div></div>
-              <b style="width:34px;text-align:right;font-size:12.5px">${x.ncrs}</b>
+          ? (S.ncrByDept || []).slice(0, 8).map(x => `
+            <div class="deptrow">
+              <div class="nm">${esc(x.department || "not allocated")}</div>
+              <div class="bar"><i style="width:${Math.round(100 * Number(x.ncrs) / maxDept)}%"></i></div>
+              <b>${x.ncrs}</b>
             </div>`).join("")
-          : `<div class="empty">No nonconformances recorded against a department yet.</div>`}
+          : `<div class="empty">Nothing recorded against a department yet.</div>`}
         </div></div>
     </div>
 
-    <div class="two">
+    <div class="split">
       <div class="card"><h3>What needs attention</h3><div class="bd">
-        ${T(["", ""], [
-          ["Inspections overdue", d.inspections_overdue],
-          ["Faults awaiting a disposition", d.faults_awaiting],
-          ["Nonconformances with no root cause", d.ncrs_no_cause],
-          ["Customer cares with no reply", d.cares_no_reply],
-          ["Average days to answer a customer", d.care_response_days ?? "—"]
-        ])}
-        <div class="note q" style="margin-top:10px">Every one of these is a record somebody
-          has to act on, not a statistic. They are here rather than on a monthly report
-          because a month is a long time to leave a customer unanswered.</div>
+        ${lines(attention.map(([k, v]) => [k, v, Number(v) > 0 ? "bad" : ""]))}
+        ${lines([["Average days to answer a customer", d.care_response_days ?? "—"]])}
       </div></div>
 
+      <div class="summary">
+        <div class="k">Where this stands</div>
+        <p>${outstanding.length
+          ? `${outstanding.length} thing${outstanding.length === 1 ? "" : "s"} on this page
+             need${outstanding.length === 1 ? "s" : ""} somebody to act:
+             ${outstanding.map(([k, n]) => `${n} ${k.toLowerCase()}`).join(", ")}.`
+          : `Nothing on this page is outstanding. Every fault has a disposition, every
+             nonconformance has a cause, and no customer is waiting on a reply.`}</p>
+        <p class="sub">${d.fpy_30d == null
+          ? "No inspections have been completed in the last thirty days, so there is no yield to report."
+          : d.fpy_30d >= target
+            ? `First pass yield is ${d.fpy_30d}% against a ${target}% target.`
+            : `First pass yield is ${d.fpy_30d}% against a ${target}% target — ${(target - d.fpy_30d).toFixed(1)} points short.`}</p>
+      </div>
+    </div>
+
+    <div class="split">
       <div class="card"><h3>Cost of quality <span class="cnt" style="margin-left:auto">FY from ${esc(fy)}</span></h3>
         <div class="bd">
         ${T(["Source", "Cost", "Records with a cost"],
           (S.costOfQuality || []).map(x => [
             esc(x.source), money(x.cost), `${x.records_with_cost} of ${x.records}`]))}
-        <div class="note" style="margin-top:10px">Rands rather than a share of turnover.
+        <div class="note" style="margin-top:11px">Rands rather than a share of turnover.
           This system inspects panels; it does not invoice them, so it does not know what
           production was worth — and a percentage against a figure nobody has is one that
           gets quoted and cannot be defended.</div>
       </div></div>
-    </div>
 
-    <div class="card"><h3>Not built yet</h3><div class="bd">
-      <div class="note q">Calibration, Supplier quality, Document control, Training and
-        competency, and Audits and compliance are not in this system. There is no tile for
-        them above, deliberately: a zero against Calibration would read as nothing overdue,
-        when what is true is that nobody is tracking it here. Those are opposite claims and
-        only one of them is honest.</div>
-    </div></div>`;
+      <div class="card"><h3>Not built yet</h3><div class="bd">
+        ${lines([["Calibration", "—"], ["Supplier quality", "—"], ["Document control", "—"],
+                 ["Training & competency", "—"], ["Audits & compliance", "—"]])}
+        <div class="note q" style="margin-top:11px">There is no tile for these above,
+          deliberately: a zero against Calibration would read as nothing overdue, when what
+          is true is that nobody is tracking it here. Those are opposite claims and only one
+          of them is honest.</div>
+      </div></div>
+    </div>`;
 }
 
 function vMain(m) {
   /* Tab 0 is the executive view across every module that exists; tab 1
      is the operational one this page has always been. */
-  if (S.tab === 0) return head(m) + vExec() + foot();
+  if (S.tab === 0) return head(m,
+    "Quality across every module that holds records. Figures are counted in the database, not estimated.")
+    + vExec() + foot();
   const open = (S.ncrs || []).filter(n => n.status !== "closed");
   const kpi = (l, v, act) => `<div class="fld"><label>${l}</label>
     <div class="ro">${v}</div>${act || ""}</div>`;

@@ -525,3 +525,45 @@ input:focus, select:focus, textarea:focus{
     animation-duration:.001ms !important; animation-iteration-count:1 !important;
     transition-duration:.001ms !important; scroll-behavior:auto !important}
 }
+
+/* =====================================================================
+   The executive dashboard.
+
+   Two thirds to one third. The reference puts a wide chart beside a
+   narrower panel, and the asymmetry is most of what makes it read as a
+   dashboard rather than a stack of tables.
+   ===================================================================== */
+.split{display:grid;grid-template-columns:2fr 1fr;gap:13px;margin-bottom:13px;align-items:start}
+
+/* Label and figure, no header band. T() draws one, and a header reading
+   nothing above two unlabelled columns is furniture. */
+.statline{display:flex;align-items:baseline;gap:12px;padding:9px 0;border-bottom:1px solid var(--line-2)}
+.statline:last-child{border-bottom:0}
+.statline span{font-size:13px;color:var(--ink-2)}
+.statline b{margin-left:auto;font-family:var(--display);font-size:16px;
+  font-variant-numeric:tabular-nums;color:var(--ink)}
+.statline b.bad{color:var(--bad)}
+
+/* The one filled panel on the page. It earns the colour by saying what
+   the numbers above it mean — a panel that only restated them would be
+   decoration spending the attention a status colour is for. */
+.summary{background:var(--brand);color:#fff;border-radius:var(--r);padding:17px 19px;
+  box-shadow:var(--sh)}
+.summary .k{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;opacity:.82;
+  font-weight:650;margin-bottom:9px}
+.summary p{margin:0 0 9px;font-size:13.2px;line-height:1.5}
+.summary p:last-child{margin-bottom:0}
+.summary .sub{opacity:.85;font-size:12.2px}
+
+.deptrow{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.deptrow .nm{width:42%;font-size:12.5px;color:var(--ink-2)}
+.deptrow .bar{flex:1;background:var(--line-2);border-radius:3px;height:12px;overflow:hidden}
+.deptrow .bar i{display:block;background:var(--brand);height:12px;border-radius:3px}
+.deptrow b{width:28px;text-align:right;font-size:12.5px;font-variant-numeric:tabular-nums}
+
+.legend{display:flex;gap:16px;margin-top:11px;font-size:11.5px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;
+  vertical-align:-1px}
+.legend i.dash{width:14px;height:0;border-top:2px dashed var(--bad);border-radius:0}
+
+@media(max-width:1000px){.split{grid-template-columns:1fr}}

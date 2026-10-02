@@ -93,7 +93,7 @@ const { loadApp, suite, REPO } = require('./test/harness');
 const exSrc = require('fs').readFileSync(require('path').join(REPO, 'apps/inspect/app.js'), 'utf8');
 const ex023 = require('fs').readFileSync(require('path').join(REPO, 'db/migrations/023-executive-dashboard.sql'), 'utf8');
 
-s.check('the dashboard opens on it', /if \(S\.tab === 0\) return head\(m\) \+ vExec\(\)/.test(exSrc));
+s.check('the dashboard opens on it', /if \(S\.tab === 0\) return head\(m,[\s\S]{0,160}vExec\(\)/.test(exSrc));
 s.check('figures are counted in the database, not from the capped registers',
   /v_scorecard/.test(exSrc) && /quietly stops counting/.test(exSrc));
 s.check('a division without the migration is told so rather than shown zeroes',
@@ -118,6 +118,27 @@ s.check('the yield target is a setting, not a constant', /fpy_target/.test(ex023
 /* `open` on an NCR is the first rung of the ladder, not "not closed" --
    the mistake that reported nought open NCRs in v0.21.3. */
 s.check('open nonconformances means not closed', /from ncrs where closed_at is null/.test(ex023));
+
+s.group('it reads as a dashboard, not a stack of tables');
+/* A column of percentages makes you read every row to find the one that
+   matters. A chart against a target line shows you. */
+s.check('pass rate by stage is drawn, not tabulated',
+  /lineBarChart\(stages\.map/.test(exSrc));
+s.check('with the target drawn on it', /limit: target, unit: "%"/.test(exSrc));
+s.check('and a legend saying what the colours mean', /below target/.test(exSrc));
+
+/* The one filled panel. It earns the colour by saying what the numbers
+   mean; restating them would be decoration spending the attention a
+   status colour is for. */
+s.check('there is a summary panel', /class="summary"/.test(exSrc));
+s.check('it counts what actually needs acting on', /const outstanding = attention\.filter/.test(exSrc));
+s.check('and says so when nothing does', /Nothing on this page is outstanding/.test(exSrc));
+
+/* A header reading nothing above two unlabelled columns is furniture. */
+s.check('label-and-figure lists have no empty header band',
+  /const lines = rows =>/.test(exSrc) && /\.statline/.test(require('fs').readFileSync(require('path').join(REPO, 'apps/inspect/styles.css'), 'utf8')));
+s.check('the page heading no longer prints undefined',
+  /\$\{desc \? `<p>\$\{desc\}<\/p>` : ""\}/.test(exSrc));
 
 s.done();
 })();
