@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.27.1";
+window.APP_VERSION = "0.27.2";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.27.2", d: "2026-10-02", t: "The new look applied throughout",
+    items: [
+      "The lighter treatment now reaches every screen rather than only the dashboard: buttons, tabs, tables, chips, fields, dialogs and messages.",
+      "The seven coloured squares down the side are gone. A number already identifies a module, and seven saturated colours in the sidebar competed with the two or three on a page that actually mean something. The colour is kept for whichever module you are in.",
+      "Tabs are an underline rather than a filled blue block, so the primary button on a page is the only solid blue thing on it.",
+      "Tables lost their grey header band in favour of a thin rule. The band made every table look like a spreadsheet, which is what this system replaces. Rows now highlight as you pass over them.",
+      "Corners are smaller throughout, fields show a clear blue ring when you are typing in them, and modules that are not built yet show a dashed outline instead of a solid grey block."
+    ]
+  },
   {
     v: "0.27.1", d: "2026-10-02", t: "The dashboard reads as a dashboard",
     items: [

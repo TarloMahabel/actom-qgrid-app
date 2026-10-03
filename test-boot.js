@@ -229,5 +229,34 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
     !/@import\s+url\(|fonts\.googleapis\.com|fonts\.gstatic\.com/.test(sheet + tok));
   s.check('and the reason is recorded next to the stacks', /font-src 'self'/.test(tok));
 
+  s.group('the treatment reaches every component, not just the dashboard');
+  const sh = read('styles.css');
+
+  /* Seven saturated squares down the sidebar competed with the two or
+     three colours on a page that mean something. The number already
+     identifies the module. */
+  s.check('nav numbers are neutral until active',
+    /\.nav \.num\{[^}]*background:transparent/.test(sh));
+  s.check('and take the primary colour when they are', /\.nav button\.on \.num\{background:var\(--brand\)/.test(sh));
+
+  /* A solid blue pill on every module's tab bar competes with the
+     primary action, which should be the only solid blue on a page. */
+  s.check('tabs are an underline, not a filled block',
+    /\.tabs button\.on\{background:transparent/.test(sh));
+
+  /* The filled header band made every table look like a spreadsheet,
+     which is the thing this system replaces. */
+  s.check('tables have a rule, not a grey header band',
+    /th\{[^}]*background:transparent/.test(sh));
+  s.check('rows respond to the pointer', /tbody tr:hover td/.test(sh));
+
+  /* Panels stay in the brief's 4-8px range. Capsules -- the nav badge,
+     the toggle, the mock flag -- keep their fully-rounded form; a capsule
+     at 8px reads as a mistake rather than as restraint. */
+  s.check('panel radii stay in range',
+    !/border-radius:1[1-9]px/.test(sh) && !/border-radius:[2-9]\d px/.test(sh));
+  s.check('deferred modules read as not yet, not as absent',
+    /\.nav button\.off \.num\{border-style:dashed/.test(sh));
+
   s.done();
 })();
