@@ -22,10 +22,21 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.27.3";
+window.APP_VERSION = "0.27.4";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.27.4", d: "2026-10-02", t: "The dashboard, tightened",
+    items: [
+      "The right-hand column on the Dashboard now fills the height of the chart beside it, rather than stopping a third of the way down and leaving a block of empty space.",
+      "Stage names under the chart lie flat instead of running diagonally through the bars, and the chart is no taller than it needs to be.",
+      "Headline figures are in the same heavier face as the headings rather than a typewriter font.",
+      "The not-yet-built modules are a single line at the foot of the page rather than a whole panel listing five dashes.",
+      "Fixed: the footer appeared twice on the Dashboard and on Customer cares.",
+      "On a tablet the chart takes the full width with the two smaller panels side by side beneath it. On a phone the search box takes its own row, nothing runs off the edge of the screen, and the chart scrolls sideways inside its card rather than shrinking its labels until they cannot be read."
+    ]
+  },
   {
     v: "0.27.3", d: "2026-10-02", t: "The pass rate chart had its colours backwards",
     items: [

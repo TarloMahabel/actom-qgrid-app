@@ -57,7 +57,22 @@
                {id:"u2",full_name:"T. Nkosi",email:"t.nkosi@actom.co.za",role:"quality_engineer",department_id:1,active:true},
                {id:"u3",full_name:"New Starter",email:"new@actom.co.za",role:"inspector",department_id:null,active:false}],
     v_dashboard: { open_inspections:2, overdue:1, unassigned:1, awaiting_disposition:1, completed_30d:1, pass_rate_30d:0 },
-    v_stage_yield: [{stage:"Assembly",inspections:1,passed:0,pass_rate:0}],
+    v_stage_yield: [{stage:"Assembly",inspections:1,passed:0,pass_rate:0},{stage:"Final QA Inspection",inspections:11,passed:11,pass_rate:100}],
+    /* The executive dashboard's views. Without these the dashboard's
+       first tab returned early with a "not migrated" note and the chart
+       never ran under test — which is how v0.27.4 nearly shipped a
+       ReferenceError that stopped the app booting, past every suite. */
+    v_scorecard: { fpy_30d:75, inspections_30d:32, inspections_open:21, inspections_overdue:15,
+      faults_awaiting:67, ncrs_open:0, ncrs_major:0, ncrs_critical:0, ncrs_over_30d:0, ncrs_no_cause:0,
+      cares_open:5, cares_no_reply:0, care_response_days:0.1, cost_of_quality:485000,
+      cost_records:3, cost_population:15, fy_from:"2026-07-01" },
+    v_cost_of_quality: [
+      { source:"Nonconformance", records:10, records_with_cost:3, cost:485000 },
+      { source:"Customer cares", records:5, records_with_cost:0, cost:0 }],
+    v_ncr_by_department: [
+      {department:"Wiring",ncrs:5},{department:"Drawing Office",ncrs:2},
+      {department:"Incoming Inspection",ncrs:1}],
+
     competencies: [
     { id:1, profile_id:"u1", skill:"Routine testing sign-off", level:3, valid_to:null },
     { id:2, profile_id:"u2", skill:"Visual and dimensional inspection", level:2, valid_to:null }

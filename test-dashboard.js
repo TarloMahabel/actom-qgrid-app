@@ -7,6 +7,28 @@ const { loadApp, suite, REPO } = require('./test/harness');
   const d = w.document;
   const CALLS = w.GRID_CALLS;
 
+  /* The executive view, rendered for real. Before the fixture carried
+     v_scorecard this tab returned early with a "not migrated" note, so
+     the chart below never ran under test -- and a ReferenceError inside
+     it, which stopped the app booting, passed every suite. A rendered
+     screenshot caught it. This makes the suite catch it instead. */
+  s.group('the executive dashboard renders');
+  d.querySelector('#nav button[data-go="main"]').click(); await sleep(80);
+  const pg = d.getElementById('page');
+  s.check('the dashboard tab renders without throwing', !!pg && pg.innerHTML.length > 500);
+  s.check('it draws the stage chart', !!pg.querySelector('.chartbox svg'));
+  s.check('a bar below target is drawn in the bad colour',
+    /fill="var\(--bad/.test(pg.querySelector('.chartbox svg').outerHTML));
+  s.check('a bar at target is drawn in the primary colour',
+    /fill="var\(--brand/.test(pg.querySelector('.chartbox svg').outerHTML));
+  s.check('the summary panel renders', !!pg.querySelector('.summary'));
+  /* render() adds the footer; three views added it as well, so two
+     printed -- on the dashboard since 0.26.0, on Customer cares since
+     0.23.0. */
+  s.check('the footer appears exactly once', pg.querySelectorAll('.foot').length === 1,
+    pg.querySelectorAll('.foot').length + ' found');
+  s.check('the heading does not print undefined', !/\bundefined\b/.test(pg.textContent));
+
   d.querySelector('#nav button[data-go="dash"]').click(); await sleep(80);
 
   s.group('tabs');
@@ -102,7 +124,7 @@ s.check('a division without the migration is told so rather than shown zeroes',
 /* A tile reading 0 against Calibration says nothing is overdue. The truth
    is that nobody is tracking it. Opposite claims. */
 s.check('their absence is stated rather than shown as zero', /Not built yet/.test(exSrc));
-s.check('with the reason, not just the list', /would read as nothing overdue/.test(exSrc));
+s.check('with the reason, not just the list', /would read\s+as nothing overdue/.test(exSrc));
 
 /* Cost of quality is normally a share of turnover. This system does not
    know turnover, and a percentage against a denominator nobody holds gets

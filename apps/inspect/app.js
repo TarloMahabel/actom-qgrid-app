@@ -431,13 +431,16 @@ function vExec() {
         `from ${d.cost_records} of ${d.cost_population} records that carry a cost`)}
     </div>
 
+    <!-- The right column stacks two panels so it fills the chart's height.
+         Laid out as separate rows, the department list ended a third of
+         the way down the chart and left a block of nothing beside it. -->
     <div class="split">
       <div class="card"><h3>Pass rate by manufacturing stage
           <span class="cnt" style="margin-left:auto">rolling 30 days</span></h3>
         <div class="bd">${stages.length
-          ? lineBarChart(stages.map(x => ({ k: x.stage, v: Number(x.pass_rate) })),
+          ? `<div class="chartbox">${lineBarChart(stages.map(x => ({ k: x.stage, v: Number(x.pass_rate) })),
               { limit: target, unit: "%", better: "higher",
-                empty: "Nothing completed in the last 30 days." })
+                empty: "Nothing completed in the last 30 days." })}</div>`
           : `<div class="empty">Nothing has been completed in the last 30 days.</div>`}
           <div class="legend">
             <span><i style="background:var(--bad)"></i> below target</span>
@@ -446,60 +449,59 @@ function vExec() {
           </div>
         </div></div>
 
-      <div class="card"><h3>By department <span class="cnt" style="margin-left:auto">this year</span></h3>
-        <div class="bd">${(S.ncrByDept || []).length
-          ? (S.ncrByDept || []).slice(0, 8).map(x => `
-            <div class="deptrow">
-              <div class="nm">${esc(x.department || "not allocated")}</div>
-              <div class="bar"><i style="width:${Math.round(100 * Number(x.ncrs) / maxDept)}%"></i></div>
-              <b>${x.ncrs}</b>
-            </div>`).join("")
-          : `<div class="empty">Nothing recorded against a department yet.</div>`}
-        </div></div>
+      <div class="stack">
+        <div class="summary">
+          <div class="k">Where this stands</div>
+          <p>${outstanding.length
+            ? `${outstanding.length} thing${outstanding.length === 1 ? "" : "s"} on this page
+               need${outstanding.length === 1 ? "s" : ""} somebody to act:
+               ${outstanding.map(([k, n]) => `${n} ${k.toLowerCase()}`).join(", ")}.`
+            : `Nothing on this page is outstanding. Every fault has a disposition, every
+               nonconformance has a cause, and no customer is waiting on a reply.`}</p>
+          <p class="sub">${d.fpy_30d == null
+            ? "No inspections have been completed in the last thirty days, so there is no yield to report."
+            : d.fpy_30d >= target
+              ? `First pass yield is ${d.fpy_30d}% against a ${target}% target.`
+              : `First pass yield is ${d.fpy_30d}% against a ${target}% target — ${(target - d.fpy_30d).toFixed(1)} points short.`}</p>
+        </div>
+
+        <div class="card"><h3>By department <span class="cnt" style="margin-left:auto">this year</span></h3>
+          <div class="bd">${(S.ncrByDept || []).length
+            ? (S.ncrByDept || []).slice(0, 8).map(x => `
+              <div class="deptrow">
+                <div class="nm">${esc(x.department || "not allocated")}</div>
+                <div class="bar"><i style="width:${Math.round(100 * Number(x.ncrs) / maxDept)}%"></i></div>
+                <b>${x.ncrs}</b>
+              </div>`).join("")
+            : `<div class="empty">Nothing recorded against a department yet.</div>`}
+          </div></div>
+      </div>
     </div>
 
-    <div class="split">
+    <div class="pair">
       <div class="card"><h3>What needs attention</h3><div class="bd">
         ${lines(attention.map(([k, v]) => [k, v, Number(v) > 0 ? "bad" : ""]))}
         ${lines([["Average days to answer a customer", d.care_response_days ?? "—"]])}
       </div></div>
 
-      <div class="summary">
-        <div class="k">Where this stands</div>
-        <p>${outstanding.length
-          ? `${outstanding.length} thing${outstanding.length === 1 ? "" : "s"} on this page
-             need${outstanding.length === 1 ? "s" : ""} somebody to act:
-             ${outstanding.map(([k, n]) => `${n} ${k.toLowerCase()}`).join(", ")}.`
-          : `Nothing on this page is outstanding. Every fault has a disposition, every
-             nonconformance has a cause, and no customer is waiting on a reply.`}</p>
-        <p class="sub">${d.fpy_30d == null
-          ? "No inspections have been completed in the last thirty days, so there is no yield to report."
-          : d.fpy_30d >= target
-            ? `First pass yield is ${d.fpy_30d}% against a ${target}% target.`
-            : `First pass yield is ${d.fpy_30d}% against a ${target}% target — ${(target - d.fpy_30d).toFixed(1)} points short.`}</p>
-      </div>
-    </div>
-
-    <div class="split">
       <div class="card"><h3>Cost of quality <span class="cnt" style="margin-left:auto">FY from ${esc(fy)}</span></h3>
         <div class="bd">
-        ${T(["Source", "Cost", "Records with a cost"],
-          (S.costOfQuality || []).map(x => [
-            esc(x.source), money(x.cost), `${x.records_with_cost} of ${x.records}`]))}
-        <div class="note" style="margin-top:11px">Rands rather than a share of turnover.
-          This system inspects panels; it does not invoice them, so it does not know what
-          production was worth — and a percentage against a figure nobody has is one that
-          gets quoted and cannot be defended.</div>
+        ${lines((S.costOfQuality || []).map(x => [
+          `${x.source} · ${x.records_with_cost} of ${x.records} carry a cost`, money(x.cost)]))}
+        <div class="note" style="margin-top:11px">Rands rather than a share of turnover. This
+          system inspects panels; it does not invoice them, so it does not know what production
+          was worth, and a percentage against a figure nobody has gets quoted and cannot be
+          defended.</div>
       </div></div>
+    </div>
 
-      <div class="card"><h3>Not built yet</h3><div class="bd">
-        ${lines([["Calibration", "—"], ["Supplier quality", "—"], ["Document control", "—"],
-                 ["Training & competency", "—"], ["Audits & compliance", "—"]])}
-        <div class="note q" style="margin-top:11px">There is no tile for these above,
-          deliberately: a zero against Calibration would read as nothing overdue, when what
-          is true is that nobody is tracking it here. Those are opposite claims and only one
-          of them is honest.</div>
-      </div></div>
+    <!-- A strip, not a card. A full panel listing five em-dashes spent a
+         quarter of the screen saying "nothing here". -->
+    <div class="notbuilt">
+      <b>Not built yet</b>
+      <span>Calibration · Supplier quality · Document control · Training &amp; competency · Audits &amp; compliance</span>
+      <em>No tile above for any of these, deliberately: a zero against Calibration would read
+        as nothing overdue, when what is true is that nobody is tracking it here.</em>
     </div>`;
 }
 
@@ -508,7 +510,7 @@ function vMain(m) {
      is the operational one this page has always been. */
   if (S.tab === 0) return head(m,
     "Quality across every module that holds records. Figures are counted in the database, not estimated.")
-    + vExec() + foot();
+    + vExec();
   const open = (S.ncrs || []).filter(n => n.status !== "closed");
   const kpi = (l, v, act) => `<div class="fld"><label>${l}</label>
     <div class="ro">${v}</div>${act || ""}</div>`;
@@ -5129,14 +5131,28 @@ async function openCareDoc(path) {
    in October" is sometimes "nobody recorded".
    --------------------------------------------------------------------- */
 function lineBarChart(rows, opts) {
-  const W = 760, H = 260, padL = 44, padR = 16, padT = 26, padB = 46;
+  /* Labels lie flat unless the axis is crowded. Rotating them is a
+     remedy for too many categories, and applied to three bars it ran
+     "Final QA Inspection" diagonally through its own column. Flat labels
+     also need less room underneath, which is most of why the chart was
+     taller than three bars warranted. */
+  const flat = rows.length <= 7;
+  const W = 760, H = flat ? 214 : 250, padL = 40, padR = 16, padT = 24, padB = flat ? 30 : 48;
   if (!rows.length) return `<div class="empty">${esc(opts.empty || "No data yet.")}</div>`;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const vals = rows.map(r => Number(r.v) || 0);
   const max = Math.max(opts.limit || 0, ...vals, 1) * 1.18;
   const step = plotW / rows.length;
-  const barW = Math.min(46, step * 0.55);
+  const barW = Math.min(flat ? 38 : 46, step * 0.42);
   const y = v => padT + plotH - (v / max) * plotH;
+  /* Flat labels are cut to what fits the column, with the full text kept
+     in a <title> so nothing is lost on hover. */
+  const fit = Math.max(4, Math.floor(step / 6.2));
+  const axisLabel = (k, cx) => flat
+    ? `<text x="${cx}" y="${H - padB + 17}" text-anchor="middle" font-size="10.5"
+        fill="var(--ink-2)"><title>${esc(k)}</title>${esc(k.length > fit ? k.slice(0, fit - 1) + "…" : k)}</text>`
+    : `<text x="${cx}" y="${H - padB + 16}" text-anchor="middle" font-size="9.5"
+        fill="var(--ink-2)" transform="rotate(-42 ${cx} ${H - padB + 16})">${esc(k)}</text>`;
   const tick = Math.max(1, Math.round(max / 4));
   const ticks = []; for (let v = 0; v <= max; v += tick) ticks.push(v);
 
@@ -5151,8 +5167,7 @@ function lineBarChart(rows, opts) {
         /* No bar, and said so. See the note above. */
         return `<text x="${cx}" y="${y(0) - 6}" text-anchor="middle" font-size="9"
                   fill="var(--muted)">none</text>
-          <text x="${cx}" y="${H - padB + 16}" text-anchor="middle" font-size="9.5"
-            fill="var(--ink-2)" transform="rotate(-42 ${cx} ${H - padB + 16})">${esc(r.k)}</text>`;
+          ${axisLabel(r.k, cx)}`;
       }
       /* Which side of the line is a problem depends on what is being
          measured. More customer cares, or a slower first response, is
@@ -5171,8 +5186,7 @@ function lineBarChart(rows, opts) {
           ><title>${esc(r.k)}: ${r.v}${esc(opts.unit || "")}</title></rect>
         <text x="${cx}" y="${y(r.v) - 6}" text-anchor="middle" font-size="12"
           font-weight="700" fill="${over ? "var(--bad, #c0392b)" : "var(--brand-dk, #16304f)"}">${r.v}</text>
-        <text x="${cx}" y="${H - padB + 16}" text-anchor="middle" font-size="9.5"
-          fill="var(--ink-2)" transform="rotate(-42 ${cx} ${H - padB + 16})">${esc(r.k)}</text>`;
+        ${axisLabel(r.k, cx)}`;
     }).join("")}
     ${opts.limit != null ? `<line x1="${padL}" x2="${W - padR}" y1="${y(opts.limit)}" y2="${y(opts.limit)}"
         stroke="var(--bad, #c0392b)" stroke-width="2" stroke-dasharray="6 4"/>
@@ -5255,7 +5269,7 @@ function vCust(m) {
     return head(m) + `<div class="card"><div class="bd">
       <div class="note q">This division has not had migration 019 applied, so the complaint
       register does not exist yet. Ask Group IT to run <b>db/migrations/019-customer-complaints.sql</b>
-      and then <b>notify pgrst, 'reload schema'</b>.</div></div></div>` + foot();
+      and then <b>notify pgrst, 'reload schema'</b>.</div></div></div>`;
   }
 
   const all = S.complaints || [];
@@ -5307,7 +5321,7 @@ function vCust(m) {
 
   else body = vAfterSales();
 
-  return head(m) + body + foot();
+  return head(m) + body;
 }
 
 const VIEWS = { main: vMain, dash: vDash, work: vWork, sched: vSched, dsn: vDsn,
@@ -5328,6 +5342,11 @@ function render() {
   document.body.classList.remove("printing");
   const m = NAV.find(x => x.id === S.view);
   if (!m || (setupIds.includes(m.id) && !canConfigure())) { S.view = "main"; S.tab = 0; return render(); }
+  /* The ONLY place the footer is added. Views return their body and
+     nothing else; three of them also appended it themselves, so the
+     dashboard and both paths through Customer cares printed it twice —
+     since v0.23.0 in one case. A rendered screenshot found it; no test
+     had, because no test looked at the page as a whole. */
   $("page").innerHTML = VIEWS[S.view](m) + foot();
 
   $("whoName").textContent = S.profile.full_name;
