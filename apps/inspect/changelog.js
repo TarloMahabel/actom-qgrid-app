@@ -22,10 +22,18 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.27.2";
+window.APP_VERSION = "0.27.3";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.27.3", d: "2026-10-02", t: "The pass rate chart had its colours backwards",
+    items: [
+      "The pass rate chart on the Dashboard showed stages at 100% in red and a stage at 27% in blue — the opposite of the truth. The chart was first written for customer cares, where going over the line is bad, and reused for pass rate, where going over it is good. It now knows which is which, and every chart that draws a target says so explicitly.",
+      "The numbers down the left-hand side were invisible: grey on top of a coloured square. The previous release took the colour out of the stylesheet but the squares were still being painted from somewhere else. They are now plain numbered outlines, with only the module you are in filled blue.",
+      "The text in the blue summary panel on the Dashboard was hard to read. The panel is a deeper blue now and the text meets the recognised contrast standard for its size."
+    ]
+  },
   {
     v: "0.27.2", d: "2026-10-02", t: "The new look applied throughout",
     items: [

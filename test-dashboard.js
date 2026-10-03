@@ -140,5 +140,20 @@ s.check('label-and-figure lists have no empty header band',
 s.check('the page heading no longer prints undefined',
   /\$\{desc \? `<p>\$\{desc\}<\/p>` : ""\}/.test(exSrc));
 
+s.group('a chart never states the opposite of the truth');
+/* For one release a 27% stage drew blue and two 100% stages drew red,
+   because the helper assumed "over the line is bad" -- true for
+   complaints and response time, false for pass rate. */
+s.check('the helper takes the direction explicitly', /opts\.better === "higher"/.test(exSrc));
+s.check('pass rate says higher is better', /unit: "%", better: "higher"/.test(exSrc));
+s.check('every chart call states a direction',
+  (exSrc.match(/lineBarChart\(/g) || []).length - 1 === (exSrc.match(/better: "(higher|lower)"/g) || []).length);
+
+/* An inline style beats the stylesheet. A colour set inline on the nav
+   number cannot be overridden by the palette, which is how 0.27.2
+   shipped grey numbers on coloured squares. */
+s.check('the nav number carries no inline colour',
+  !/class="num" style="background/.test(exSrc));
+
 s.done();
 })();

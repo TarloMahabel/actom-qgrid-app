@@ -315,10 +315,14 @@ function buildNav() {
   $("nav").innerHTML = NAV.filter(n => !(setupIds.includes(n.id) && !canConfigure()))
     .map(n => {
       if (n.g) return `<div class="grp">${n.g}</div>`;
-      if (n.off) return `<button class="off" title="Deferred to a later phase"><span class="num" style="background:#8593a9">·</span><span>${n.t}</span><span class="later">Phase 2+</span></button>`;
+      /* No inline colour on the number. An inline style beats the
+         stylesheet, so a colour set here cannot be overridden by the
+         palette — which is exactly how 0.27.2 shipped grey numbers on
+         coloured squares that nobody could read. */
+      if (n.off) return `<button class="off" title="Deferred to a later phase"><span class="num">·</span><span>${n.t}</span><span class="later">Phase 2+</span></button>`;
       const badge = n.id === "work" ? myQueue().length : n.id === "sched" ? unassigned().length : 0;
       return `<button class="${n.id === S.view ? "on" : ""}" data-go="${n.id}">
-        <span class="num" style="background:var(${n.col})">${n.n}</span><span>${n.t}</span>
+        <span class="num">${n.n}</span><span>${n.t}</span>
         ${badge ? `<span class="badge">${badge}</span>` : ""}</button>`;
     }).join("");
 }
@@ -432,7 +436,8 @@ function vExec() {
           <span class="cnt" style="margin-left:auto">rolling 30 days</span></h3>
         <div class="bd">${stages.length
           ? lineBarChart(stages.map(x => ({ k: x.stage, v: Number(x.pass_rate) })),
-              { limit: target, unit: "%", empty: "Nothing completed in the last 30 days." })
+              { limit: target, unit: "%", better: "higher",
+                empty: "Nothing completed in the last 30 days." })
           : `<div class="empty">Nothing has been completed in the last 30 days.</div>`}
           <div class="legend">
             <span><i style="background:var(--bad)"></i> below target</span>
@@ -5149,7 +5154,18 @@ function lineBarChart(rows, opts) {
           <text x="${cx}" y="${H - padB + 16}" text-anchor="middle" font-size="9.5"
             fill="var(--ink-2)" transform="rotate(-42 ${cx} ${H - padB + 16})">${esc(r.k)}</text>`;
       }
-      const over = opts.limit != null && Number(r.v) > opts.limit;
+      /* Which side of the line is a problem depends on what is being
+         measured. More customer cares, or a slower first response, is
+         worse; a higher pass rate is better. This helper was written for
+         the first kind and then reused for the second, and for one
+         release it drew a 27% stage in blue and two 100% stages in red —
+         a chart stating the opposite of the truth, with complete
+         confidence. `better` makes the direction explicit at every call
+         site rather than assumed in here. */
+      const bad = opts.limit != null && (opts.better === "higher"
+        ? Number(r.v) < opts.limit
+        : Number(r.v) > opts.limit);
+      const over = bad;
       return `<rect x="${cx - barW / 2}" y="${y(r.v)}" width="${barW}" height="${y(0) - y(r.v)}"
           rx="2" fill="${over ? "var(--bad, #c0392b)" : "var(--brand, #1f4e79)"}"
           ><title>${esc(r.k)}: ${r.v}${esc(opts.unit || "")}</title></rect>
@@ -5187,14 +5203,14 @@ function vAfterSales() {
       <span class="cnt" style="margin-left:auto">limit ${limit} a month</span></h3>
       <div class="bd">${lineBarChart(
         months.map(m => ({ k: mLabel(m.period), v: Number(m.cares) })),
-        { limit, empty: "No customer cares recorded yet." })}</div></div>
+        { limit, better: "lower", empty: "No customer cares recorded yet." })}</div></div>
 
     <div class="card"><h3>First response, average days
       <span class="cnt" style="margin-left:auto">target ${target} days</span></h3>
       <div class="bd">${lineBarChart(
         months.map(m => ({ k: mLabel(m.period),
                            v: m.avg_response_days == null ? null : Number(m.avg_response_days) })),
-        { limit: target, unit: " d", empty: "Nothing has a response time recorded yet." })}
+        { limit: target, unit: " d", better: "lower", empty: "Nothing has a response time recorded yet." })}
       <div class="note${breaches.length ? " q" : ""}" style="margin-top:11px">${breaches.length
         ? `${breaches.length} month${breaches.length === 1 ? "" : "s"} averaged over ${target} days
            to a first response. A month with no bar had nothing answered at all, which is not the

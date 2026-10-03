@@ -258,7 +258,7 @@ s.check('the view returns null rather than zero for such a month',
   /avg_response_days is null for a month where nothing was answered/.test(mig022));
 s.check('both limit lines are division settings',
   /response_target_days/.test(app) && /care_target_per_month/.test(mig022));
-s.check('months over the target are drawn against the limit', /const over = opts\.limit != null/.test(app));
+s.check('months over the target are drawn against the limit', /better: "lower"/.test(app));
 
 s.group('one actions register, not two');
 s.check('actions carry which review raised them', /module text not null default 'inspection'/.test(mig022));
