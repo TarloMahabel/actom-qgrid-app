@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.28.0";
+window.APP_VERSION = "0.28.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.28.1", d: "2026-10-04", t: "Wide screens use their width",
+    items: [
+      "Pages now use the full width of the screen. They used to stop part-way across, which on a wide monitor left a large empty area down the right-hand side.",
+      "The summary line at the foot of every page has gone. It repeated figures the dashboard already shows and the division name the menu already shows, and added more empty space below each page.",
+      "Charts stay the same size on any screen. On a very wide monitor they had been scaling up with the page, so their labels came out twice the size of everything else; extra width now gives the bars more room instead.",
+      "Help spreads its topics across more columns on a wide screen rather than making each line longer, so it stays easy to read."
+    ]
+  },
   {
     v: "0.28.0", d: "2026-10-04", t: "Help, a user guide, and a tour for new users",
     items: [

@@ -126,7 +126,11 @@ input,select,textarea{font-family:inherit;font-size:inherit}
 .who .n{font-weight:600;font-size:12.6px;color:var(--ink)}
 .who .e{font-size:11.2px;color:var(--muted);font-family:var(--mono)}
 
-.page{padding:19px 20px 60px;max-width:1620px}
+/* No width cap. At 1620px the content stopped and a wide monitor showed
+   a third of its width as empty canvas. Registers and dashboards are
+   grids and use the room; reading-heavy pages (Help) widen their
+   column count rather than their line length -- see .helpbody. */
+.page{padding:19px 22px 28px}
 .phead{display:flex;align-items:flex-start;gap:13px;margin-bottom:15px;flex-wrap:wrap}
 .phead h1{margin:0;font-size:31px;font-weight:750;letter-spacing:-.026em;color:var(--ink);line-height:1.12}
 .accent{width:40px;height:2px;border-radius:1px;background:var(--brand);margin:11px 0 9px}
@@ -354,8 +358,6 @@ tbody tr:last-child td{border-bottom:0}
 .flow .fstep .t{font-weight:600;font-size:12.6px}
 .flow .fstep .m{font-size:11.3px;color:var(--muted);margin-top:2px}
 .farrow{height:15px;display:grid;place-items:center;color:#b6c4d2;font-size:12px}
-.foot{margin-top:34px;text-align:center;color:var(--muted);font-size:12px;line-height:1.75}
-.foot .b{color:var(--ink-2)}
 .mockflag{position:fixed;right:13px;bottom:13px;background:var(--ink);color:#fff;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;padding:7px 12px;border-radius:20px;z-index:150;box-shadow:0 6px 20px rgba(0,0,0,.2)}
 .bars{display:flex;align-items:flex-end;gap:8px;height:130px;padding-top:6px}
 .bars .b{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%}
@@ -378,7 +380,9 @@ tbody tr:last-child td{border-bottom:0}
 .gatebox h1{margin:0 0 6px;font-size:22px;letter-spacing:-.02em}
 .gatebox p{margin:0 0 20px;color:var(--ink-2);font-size:13.2px}
 .gatebox .btn{width:100%;justify-content:center;padding:11px}
-.gatebox .foot{margin-top:18px;font-size:11.5px;color:var(--muted)}
+/* Carries what it used to inherit from the page footer rule, removed in
+   0.28.1, so the sign-in screen looks exactly as it did. */
+.gatebox .foot{margin-top:18px;font-size:11.5px;color:var(--muted);text-align:center;line-height:1.75}
 .err{background:var(--bad-bg);border:1px solid #f2c8c3;color:#8a2f24;border-radius:8px;
   padding:10px 12px;font-size:12.5px;text-align:left;margin-bottom:14px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;z-index:400;
@@ -684,7 +688,11 @@ input:focus, select:focus, textarea:focus{
 .helpbar{display:flex;gap:9px;align-items:center;margin:14px 0 14px;flex-wrap:wrap}
 .helpbar input{flex:1;min-width:200px;max-width:440px;box-sizing:border-box;padding:8px 12px;
   border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card)}
-.helpbody{display:grid;grid-template-columns:1fr 1fr;gap:13px;align-items:start}
+/* Columns, not line length. Two columns on a 2560px screen would give
+   lines of 180 characters, which nobody reads to the end of. auto-fit,
+   not auto-fill: with four topics and room for five columns, auto-fill
+   kept an empty fifth track and left a column of white on the right. */
+.helpbody{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:13px;align-items:start}
 .helpcard p{margin:0 0 9px;line-height:1.55;color:var(--ink-2)}
 .helpcard p:last-of-type{margin-bottom:12px}
 .helptabs{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:11px}

@@ -187,7 +187,7 @@ const q = d.getElementById('helpQ');
 q.value = 'verified'; q.dispatchEvent(new w.Event('input', { bubbles: true })); await sleep(60);
 s.check('search finds matching topics', d.getElementById('page').querySelectorAll('.helpcard').length >= 1);
 s.check('and keeps the cursor in the box', d.activeElement && d.activeElement.id === 'helpQ');
-s.check('the footer appears once on Help', d.getElementById('page').querySelectorAll('.foot').length === 1);
+s.check('there is no footer on Help', d.getElementById('page').querySelectorAll('.foot').length === 0);
 
 s.done();
 })();

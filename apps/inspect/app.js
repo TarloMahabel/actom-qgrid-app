@@ -355,12 +355,7 @@ function head(m, desc, act) {
     <div class="eyebrow">Module ${m.n} · ACTOM QMS 360</div>
     ${desc ? `<p>${desc}</p>` : ""}</div><div class="pact">${act || ""}</div></div>`;
 }
-const foot = () => `<div class="foot">
-  <div><span class="b">${S.inspections.filter(i => i.status !== "completed").length} open</span> ·
-       <span class="b">${S.failedChecks.filter(f => f.disposition === "awaiting").length} awaiting disposition</span> ·
-       <span class="b">${publishedRevs().length} of ${S.templates.length} templates published</span></div>
-  <div>${esc(S.division?.name || DIVISION.name)} · hold points ${HP() ? "enabled" : "disabled"}</div>
-  <div>ACTOM QMS 360 · ACTOM (Pty) Ltd · Since 1903</div></div>`;
+
 
 const publishedRevs = () => S.revisions.filter(r => r.status === "published");
 const revFor = tplId => publishedRevs().find(r => r.template_id === tplId);
@@ -455,7 +450,7 @@ function vExec() {
           <span class="cnt" style="margin-left:auto">rolling 30 days</span></h3>
         <div class="bd">${stages.length
           ? `<div class="chartbox">${lineBarChart(stages.map(x => ({ k: x.stage, v: Number(x.pass_rate) })),
-              { limit: target, unit: "%", better: "higher",
+              { limit: target, unit: "%", better: "higher", width: chartWidth(2 / 3),
                 empty: "Nothing completed in the last 30 days." })}</div>`
           : `<div class="empty">Nothing has been completed in the last 30 days.</div>`}
           <div class="legend">
@@ -5147,6 +5142,25 @@ async function openCareDoc(path) {
    and is labelled, because the honest answer to "how fast did we respond
    in October" is sometimes "nobody recorded".
    --------------------------------------------------------------------- */
+/* How wide a chart will actually be drawn, in pixels, from the layout it
+   sits in. The chart used a fixed 760-unit canvas stretched to fit its
+   card, which was fine while the page stopped at 1620px. With the width
+   cap gone, a 2560px monitor scaled every label up to about 24px -- the
+   chart's text twice the size of everything around it. Drawing at the
+   real width keeps text at its proper size; extra width becomes room
+   between bars instead of larger letters.
+
+   `share` is the fraction of the content width the chart's card takes:
+   two-thirds beside the dashboard's side column, all of it elsewhere. */
+function chartWidth(share) {
+  const vw = window.innerWidth || 1280;
+  const side = vw > 900 ? 252 : 0;
+  const content = vw - side - 44;                        // .page padding
+  const wide = vw > 1100;                                // .split stays two-up
+  const card = (wide ? (content - 13) * share : content) - 34;  // card padding
+  return Math.round(Math.max(460, Math.min(card, 2200)));
+}
+
 function lineBarChart(rows, opts) {
   /* Labels lie flat unless the axis is crowded. Rotating them is a
      remedy for too many categories, and applied to three bars it ran
@@ -5154,13 +5168,13 @@ function lineBarChart(rows, opts) {
      also need less room underneath, which is most of why the chart was
      taller than three bars warranted. */
   const flat = rows.length <= 7;
-  const W = 760, H = flat ? 214 : 250, padL = 40, padR = 16, padT = 24, padB = flat ? 30 : 48;
+  const W = opts.width || 760, H = flat ? 214 : 250, padL = 40, padR = 16, padT = 24, padB = flat ? 30 : 48;
   if (!rows.length) return `<div class="empty">${esc(opts.empty || "No data yet.")}</div>`;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const vals = rows.map(r => Number(r.v) || 0);
   const max = Math.max(opts.limit || 0, ...vals, 1) * 1.18;
   const step = plotW / rows.length;
-  const barW = Math.min(flat ? 38 : 46, step * 0.42);
+  const barW = Math.min(flat ? 56 : 46, step * 0.42);
   const y = v => padT + plotH - (v / max) * plotH;
   /* Flat labels are cut to what fits the column, with the full text kept
      in a <title> so nothing is lost on hover. */
@@ -5234,14 +5248,14 @@ function vAfterSales() {
       <span class="cnt" style="margin-left:auto">limit ${limit} a month</span></h3>
       <div class="bd">${lineBarChart(
         months.map(m => ({ k: mLabel(m.period), v: Number(m.cares) })),
-        { limit, better: "lower", empty: "No customer cares recorded yet." })}</div></div>
+        { limit, better: "lower", width: chartWidth(1), empty: "No customer cares recorded yet." })}</div></div>
 
     <div class="card"><h3>First response, average days
       <span class="cnt" style="margin-left:auto">target ${target} days</span></h3>
       <div class="bd">${lineBarChart(
         months.map(m => ({ k: mLabel(m.period),
                            v: m.avg_response_days == null ? null : Number(m.avg_response_days) })),
-        { limit: target, unit: " d", better: "lower", empty: "Nothing has a response time recorded yet." })}
+        { limit: target, unit: " d", better: "lower", width: chartWidth(1), empty: "Nothing has a response time recorded yet." })}
       <div class="note${breaches.length ? " q" : ""}" style="margin-top:11px">${breaches.length
         ? `${breaches.length} month${breaches.length === 1 ? "" : "s"} averaged over ${target} days
            to a first response. A month with no bar had nothing answered at all, which is not the
@@ -5763,12 +5777,11 @@ function render() {
   document.body.classList.remove("printing");
   const m = S.view === "help" ? HELP_MOD : NAV.find(x => x.id === S.view);
   if (!m || (setupIds.includes(m.id) && !canConfigure())) { S.view = "main"; S.tab = 0; return render(); }
-  /* The ONLY place the footer is added. Views return their body and
-     nothing else; three of them also appended it themselves, so the
-     dashboard and both paths through Customer cares printed it twice —
-     since v0.23.0 in one case. A rendered screenshot found it; no test
-     had, because no test looked at the page as a whole. */
-  $("page").innerHTML = VIEWS[S.view](m) + foot();
+  /* No footer. It repeated figures the dashboard already shows, the
+     division name the sidebar already shows, and a hold-point setting
+     that belongs in Administration -- and on a wide monitor it added a
+     band of empty space below every page. */
+  $("page").innerHTML = VIEWS[S.view](m);
 
   $("whoName").textContent = S.profile.full_name;
   $("whoEmail").textContent = S.profile.email;
@@ -6099,6 +6112,17 @@ document.addEventListener("keydown", e => {
 /* A resize or a scroll moves the target; the step is redrawn against
    where it now is rather than left pointing at where it was. */
 window.addEventListener("resize", () => { if (S.tour) drawTour(); });
+let chartResizeT = 0;
+window.addEventListener("resize", () => {
+  clearTimeout(chartResizeT);
+  chartResizeT = setTimeout(() => {
+    const charted = (S.view === "main" && S.tab === 0) || (S.view === "cust" && S.tab === 2);
+    /* Not while a dialog is open: render() would leave it, but there is
+       no reason to redraw underneath somebody mid-entry. The dialog is
+       shown with the "open" class, not by removing "hidden". */
+    if (charted && !$("modal")?.classList.contains("open")) render();
+  }, 180);
+});
 
 /* Both pickers are wired once, to elements that outlive every render. The
    field they belong to is remembered on S.capture rather than read from the

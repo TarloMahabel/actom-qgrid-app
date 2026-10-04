@@ -258,5 +258,24 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
   s.check('deferred modules read as not yet, not as absent',
     /\.nav button\.off \.num\{border-style:dashed/.test(sh));
 
+  s.group('wide screens use their width');
+  const sheet2 = read('styles.css'), appjs = read('app.js');
+  /* At 1620px the content stopped and a wide monitor showed a third of
+     itself as empty canvas. */
+  /* A numeric cap; the print rule's max-width:none is the opposite. */
+  s.check('the page has no width cap', !/(^|[^.\w])\.page\{[^}]*max-width:\s*\d/m.test(sheet2));
+  s.check('there is no page footer', !/foot\(\)/.test(appjs) && !/^\.foot\{/m.test(sheet2));
+  s.check('the sign-in screen keeps its own footer style',
+    /\.gatebox \.foot\{[^}]*text-align:center/.test(sheet2));
+  /* With the cap gone a fixed 760-unit chart stretched to 2560px drew its
+     labels at about 24px. It is drawn at its real width instead. */
+  s.check('charts are drawn at the width they are shown', /width: chartWidth\(/.test(appjs));
+  s.check('every chart call passes its width',
+    (appjs.match(/lineBarChart\(/g) || []).length - 1 === (appjs.match(/width: chartWidth\(/g) || []).length);
+  s.check('and are redrawn when the window changes size', /chartResizeT = setTimeout/.test(appjs));
+  /* auto-fill kept an empty fifth track for four cards and left a column
+     of white on a 2560px screen. */
+  s.check('help fills the row rather than leaving empty columns', /repeat\(auto-fit,minmax\(440px/.test(sheet2));
+
   s.done();
 })();

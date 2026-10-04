@@ -25,7 +25,9 @@ const { loadApp, suite, REPO } = require('./test/harness');
   /* render() adds the footer; three views added it as well, so two
      printed -- on the dashboard since 0.26.0, on Customer cares since
      0.23.0. */
-  s.check('the footer appears exactly once', pg.querySelectorAll('.foot').length === 1,
+  /* The footer was removed in 0.28.1: it repeated what the dashboard and
+     sidebar already show and added empty space on wide monitors. */
+  s.check('there is no footer', pg.querySelectorAll('.foot').length === 0,
     pg.querySelectorAll('.foot').length + ' found');
   s.check('the heading does not print undefined', !/\bundefined\b/.test(pg.textContent));
 

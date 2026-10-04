@@ -44,8 +44,16 @@ const { loadApp, suite , REPO } = require('./test/harness');
     for (let t = 0; t < tabs; t++) {
       const tb = d.querySelector(`.tabs button[data-tab="${t}"]`);
       if (tb) { tb.click(); await sleep(60); }
-      const len = $('page').innerHTML.length;
-      s.check(`${id} tab ${t}`, len > 900, len + ' chars');
+      /* Content beyond the page header, not the whole page. This used to
+         be innerHTML.length > 900, which the page footer quietly
+         satisfied: about 300 characters of it on every tab. With the
+         footer gone (0.28.1) three sparse but correct tabs fell under the
+         line -- so it now measures what it was meant to, that the tab drew
+         something of its own, and that nothing in it says "undefined". */
+      const pg = $('page'), hd = pg.querySelector('.phead');
+      const body = pg.innerHTML.length - (hd ? hd.outerHTML.length : 0);
+      s.check(`${id} tab ${t}`, body > 250 && !/>\s*undefined\s*</.test(pg.innerHTML),
+        body + ' chars after the header');
     }
   }
   s.group('the register shows what failed');
