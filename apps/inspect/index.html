@@ -6,6 +6,12 @@
 <meta name="theme-color" content="#0063AF">
 <title>ACTOM QMS 360</title>
 <link rel="manifest" href="manifest.webmanifest">
+<!-- The two font files every page uses, fetched in parallel with the
+     stylesheet rather than after it has been parsed. crossorigin is
+     required on a font preload even from the same origin, or the browser
+     fetches it twice. -->
+<link rel="preload" href="fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/sora-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="tokens.css?v=1">
 <link rel="stylesheet" href="styles.css?v=1">
 </head>
@@ -61,17 +67,25 @@
 <!-- ---------------- application ---------------- -->
 <div class="shell hidden" id="app">
   <aside class="side" id="sideNav">
+    <!-- Compact brand block, menu, and the division at the foot -- the
+         three parts of the sidebar in the design brief. -->
     <div class="brandbox">
       <div class="tile" id="sideTile"></div>
       <div>
-        <div class="nm">QMS 360</div>
-        <div class="sub" id="sideDivision">Inspections</div>
+        <div class="nm">ACTOM QMS 360</div>
+        <div class="sub">Quality management</div>
       </div>
     </div>
     <nav class="nav" id="nav"></nav>
     <div class="sidefoot">
-      <div id="whatsNew" style="cursor:pointer;font-weight:600;color:var(--brand-dk)">What's new</div>
-      <div class="buildtag" id="buildTag"></div>
+      <div class="divbox">
+        <div class="divnm" id="sideDivision">ACTOM</div>
+        <div class="divsub" id="sideHold"></div>
+      </div>
+      <div class="sidelinks">
+        <span id="whatsNew" style="cursor:pointer;font-weight:600;color:var(--brand-dk)">What's new</span>
+        <span class="buildtag" id="buildTag"></span>
+      </div>
     </div>
   </aside>
 

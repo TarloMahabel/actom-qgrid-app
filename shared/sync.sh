@@ -28,6 +28,9 @@ copy "$HERE/changelog.js"        "$ROOT/apps/inspect/changelog.js"
 copy "$HERE/assist.js"           "$ROOT/apps/inspect/assist.js"
 copy "$HERE/chat.js"             "$ROOT/apps/inspect/chat.js"
 copy "$HERE/vendor-supabase.js"  "$ROOT/apps/inspect/vendor/supabase.js"
+for f in "$HERE"/fonts/*; do
+  copy "$f" "$ROOT/apps/inspect/fonts/$(basename "$f")"
+done
 
 echo
 echo "Done. The tests load these same files from apps/, substituting only"

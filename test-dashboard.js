@@ -16,11 +16,14 @@ const { loadApp, suite, REPO } = require('./test/harness');
   d.querySelector('#nav button[data-go="main"]').click(); await sleep(80);
   const pg = d.getElementById('page');
   s.check('the dashboard tab renders without throwing', !!pg && pg.innerHTML.length > 500);
-  s.check('it draws the stage chart', !!pg.querySelector('.chartbox svg'));
+  s.check('it draws the stage chart', !!pg.querySelector('.stagechart svg'));
   s.check('a bar below target is drawn in the bad colour',
-    /fill="var\(--bad/.test(pg.querySelector('.chartbox svg').outerHTML));
+    /fill="var\(--bad/.test(pg.querySelector('.stagechart svg').outerHTML));
   s.check('a bar at target is drawn in the primary colour',
-    /fill="var\(--brand/.test(pg.querySelector('.chartbox svg').outerHTML));
+    /fill="var\(--brand/.test(pg.querySelector('.stagechart svg').outerHTML));
+  /* The brief's monthly comparison, from v_inspections_by_month. */
+  s.check('it draws the monthly comparison', !!pg.querySelector('#monthChart svg'));
+  s.check('with both series', (pg.querySelector('#monthChart svg').outerHTML.match(/<path /g) || []).length >= 2);
   s.check('the summary panel renders', !!pg.querySelector('.summary'));
   /* render() adds the footer; three views added it as well, so two
      printed -- on the dashboard since 0.26.0, on Customer cares since
@@ -149,7 +152,7 @@ s.group('it reads as a dashboard, not a stack of tables');
 s.check('pass rate by stage is drawn, not tabulated',
   /lineBarChart\(stages\.map/.test(exSrc));
 s.check('with the target drawn on it', /limit: target, unit: "%"/.test(exSrc));
-s.check('and a legend saying what the colours mean', /below target/.test(exSrc));
+s.check('and a legend saying what the colours mean', /below target/i.test(exSrc));
 
 /* The one filled panel. It earns the colour by saying what the numbers
    mean; restating them would be decoration spending the attention a

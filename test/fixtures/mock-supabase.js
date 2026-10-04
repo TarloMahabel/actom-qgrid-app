@@ -69,6 +69,10 @@
     v_cost_of_quality: [
       { source:"Nonconformance", records:10, records_with_cost:3, cost:485000 },
       { source:"Customer cares", records:5, records_with_cost:0, cost:0 }],
+    v_inspections_by_month: [
+      {period:"2026-04-01",completed:18,passed:16,fpy:88.9},{period:"2026-05-01",completed:22,passed:19,fpy:86.4},
+      {period:"2026-06-01",completed:25,passed:20,fpy:80.0},{period:"2026-07-01",completed:29,passed:23,fpy:79.3},
+      {period:"2026-08-01",completed:31,passed:24,fpy:77.4},{period:"2026-09-01",completed:32,passed:24,fpy:75.0}],
     v_ncr_by_department: [
       {department:"Wiring",ncrs:5},{department:"Drawing Office",ncrs:2},
       {department:"Incoming Inspection",ncrs:1}],

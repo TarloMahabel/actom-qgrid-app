@@ -180,7 +180,7 @@ async function loadData() {
     S.defects = df.data; S.equipment = eq.data;
 
     const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd, fbp, acts,
-           ncr, ncra, rcs, dash, cmp, cmpT, cmpS, cbm, cbd, sc, coq, sy, nbd] = await Promise.all([
+           ncr, ncra, rcs, dash, cmp, cmpT, cmpS, cbm, cbd, sc, coq, sy, nbd, ibm] = await Promise.all([
       supabase.from("inspection_templates").select("*").order("code"),
       supabase.from("template_revisions").select("*").order("rev", { ascending: false }),
       supabase.from("inspection_requirements").select("*"),
@@ -205,7 +205,8 @@ async function loadData() {
       supabase.from("v_scorecard").select("*").maybeSingle(),
       supabase.from("v_cost_of_quality").select("*"),
       supabase.from("v_stage_yield").select("*"),
-      supabase.from("v_ncr_by_department").select("*")
+      supabase.from("v_ncr_by_department").select("*"),
+      supabase.from("v_inspections_by_month").select("*").order("period")
     ]);
     for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd]) if (r.error) throw r.error;
     /* The dashboard views are not load-bearing: a division that has not run
@@ -238,6 +239,10 @@ async function loadData() {
     S.costOfQuality = coq.error ? [] : (coq.data || []);
     S.stageYield = sy.error ? [] : (sy.data || []);
     S.ncrByDept = nbd.error ? [] : (nbd.data || []);
+    /* null, not [], when the view is missing: a division that has not run
+       024 gets the stage chart in that slot instead of an empty one that
+       would read as "no inspections this year". */
+    S.inspByMonth = ibm.error ? null : (ibm.data || []);
     S.templates = tpl.data; S.revisions = rev.data; S.requirements = req.data;
     S.projects = prj.data; S.worksOrders = wo.data;
     S.inspections = ins.data; S.failedChecks = fc.data;
@@ -311,6 +316,31 @@ const NAV = [
 ];
 const setupIds = ["dsn", "req", "adm"];
 
+
+/* Line icons for the menu, drawn inline: no icon font to load, nothing
+   for the Content-Security-Policy to refuse, and they take the text
+   colour so the active item's icon turns blue with it.
+
+   They are the main reason the section headings now read as headings. An
+   icon indents every item's text, so the headings sit flush left above
+   indented items -- the same cue the brief's reference uses, and a
+   stronger one than size or colour alone. */
+const ICON_PATHS = {
+  main:  '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  work:  '<path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 14 2 2 4-4"/>',
+  sched: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  dash:  '<path d="M3 3v18h18"/><path d="M8 17v-6M13 17V7M18 17v-4"/>',
+  ncr:   '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  cust:  '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  dsn:   '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  req:   '<path d="m3 7 2 2 4-4M3 17l2 2 4-4M13 6h8M13 12h8M13 18h8"/>',
+  adm:   '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+  later: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
+};
+const navIcon = id => `<svg class="ni" width="17" height="17" viewBox="0 0 24 24" fill="none"
+  stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+  aria-hidden="true">${ICON_PATHS[id] || ICON_PATHS.later}</svg>`;
+
 function buildNav() {
   $("nav").innerHTML = NAV.filter(n => !(setupIds.includes(n.id) && !canConfigure()))
     .map(n => {
@@ -318,10 +348,12 @@ function buildNav() {
       /* No module numbers (0.28.2). They identified nothing a name did not
          already, cost 29px of a 252px menu, and took the attention the
          active marker should have. */
-      if (n.off) return `<button class="off" title="Deferred to a later phase"><span>${n.t}</span><span class="later">Phase 2+</span></button>`;
+      /* No "Phase 2+" label: the section heading and the lock already say
+         it, and the label wrapped half the names onto two lines. */
+      if (n.off) return `<button class="off" title="Not built yet -- a later phase" aria-disabled="true">${navIcon("later")}<span>${n.t}</span></button>`;
       const badge = n.id === "work" ? myQueue().length : n.id === "sched" ? unassigned().length : 0;
       return `<button class="${n.id === S.view ? "on" : ""}" data-go="${n.id}">
-        <span>${n.t}</span>
+        ${navIcon(n.id)}<span>${n.t}</span>
         ${badge ? `<span class="badge">${badge}</span>` : ""}</button>`;
     }).join("");
 }
@@ -357,9 +389,12 @@ function navGroup(id) {
   return "";
 }
 function head(m, desc, act) {
+  /* The brief's order: a small eyebrow naming the section, then the
+     title, then a line saying what the page is for. No underline accent;
+     the reference has none, and the eyebrow already does its job. */
   return `<div class="phead"><div>
-    <h1>${m.t}</h1><div class="accent"></div>
     <div class="eyebrow">${esc(navGroup(m.id))}</div>
+    <h1>${m.t}</h1>
     ${desc ? `<p>${desc}</p>` : ""}</div><div class="pact">${act || ""}</div></div>`;
 }
 
@@ -410,16 +445,25 @@ function vExec() {
   const money = v => "R" + Number(v || 0).toLocaleString("en-ZA", { maximumFractionDigits: 0 });
   const fy = d.fy_from ? new Date(d.fy_from).toLocaleDateString("en-ZA",
     { month: "short", year: "numeric" }) : "";
+  const fpy = d.fpy_30d == null ? null : Number(d.fpy_30d);
 
-  const kpi = (k, v, note, tone) =>
+  /* A metric card as the brief draws it: label, figure, and a line whose
+     colour carries the status. `extra` is anything between figure and
+     line -- the yield's progress bar. */
+  const kpi = (k, v, note, tone, extra) =>
     `<div class="card kpi ${tone || ""}"><div class="k">${esc(k)}</div>
-      <div class="v">${v}</div><div class="d">${note}</div></div>`;
+      <div class="v">${v}</div>${extra || ""}<div class="d">${note}</div></div>`;
 
   /* A plain row of label and figure. T() draws a header band, and a
      header reading nothing above two unlabelled columns is furniture. */
   const lines = rows => rows.map(([k, v, tone]) => `
     <div class="statline"><span>${esc(k)}</span>
       <b class="${tone || ""}">${esc(String(v))}</b></div>`).join("");
+
+  /* A card header in the brief's form: title, a quiet line saying what it
+     covers, and anything that belongs on the right -- a legend, a link. */
+  const ch = (title, sub, right) => `<div class="ch"><div><h3>${esc(title)}</h3>
+      ${sub ? `<div class="cs">${esc(sub)}</div>` : ""}</div>${right ? `<div class="cr">${right}</div>` : ""}</div>`;
 
   const stages = (S.stageYield || []).filter(x => x.pass_rate != null);
   const maxDept = Math.max(1, ...(S.ncrByDept || []).map(x => Number(x.ncrs) || 0));
@@ -428,46 +472,69 @@ function vExec() {
      says "everything is in order" when four things are overdue is worse
      than no panel. */
   const attention = [
-    ["Inspections overdue", d.inspections_overdue],
-    ["Faults awaiting a disposition", d.faults_awaiting],
-    ["Nonconformances with no root cause", d.ncrs_no_cause],
-    ["Customer cares with no reply", d.cares_no_reply]
+    ["Inspections overdue", d.inspections_overdue, "past their planned date"],
+    ["Faults awaiting a disposition", d.faults_awaiting, "nobody has decided what happens to them"],
+    ["Nonconformances with no root cause", d.ncrs_no_cause, "cannot be closed until there is one"],
+    ["Customer cares with no reply", d.cares_no_reply, "the customer has not heard back"]
   ];
   const outstanding = attention.filter(([, n]) => Number(n) > 0);
 
+  /* The yield against its target, drawn as the reference draws its rate:
+     a bar, with a marker at the target so the gap is visible. */
+  const yieldBar = fpy == null ? "" : `<div class="kbar ${fpy < target ? "under" : ""}"
+      role="img" aria-label="First pass yield ${fpy}% against a ${target}% target">
+      <i style="width:${Math.max(0, Math.min(100, fpy))}%"></i><b style="left:${target}%"></b></div>`;
+
+  /* The monthly chart, from v_inspections_by_month. Where a division has
+     not run 024 the slot shows pass rate by stage instead -- never an
+     empty chart, which would read as "no inspections this year". */
+  const months = S.inspByMonth;
+  const mLabel = p => new Date(p).toLocaleDateString("en-ZA", { month: "short" });
+  const stageChart = stages.length
+    ? `<div class="chartbox stagechart">${lineBarChart(stages.map(x => ({ k: x.stage, v: Number(x.pass_rate) })),
+        { limit: target, unit: "%", better: "higher", width: chartWidth(1 / 2),
+          empty: "Nothing completed in the last 30 days." })}</div>`
+    : `<div class="empty">Nothing has been completed in the last 30 days.</div>`;
+  const monthly = months && months.length
+    ? `<div class="card">${ch("Inspections by month",
+          "Completed, and passed first time · last 12 months",
+          `<span class="lg"><i class="dot dim"></i>Completed</span><span class="lg"><i class="dot"></i>Passed first time</span>`)}
+        <div class="bd"><div class="chartbox" id="monthChart">${groupedBarChart(
+          (S.monthChart = { rows: months.map(m => ({ k: mLabel(m.period), a: Number(m.completed), b: Number(m.passed) })),
+            opts: { width: chartWidth(2 / 3), names: ["Completed", "Passed first time"] } }).rows,
+          { ...S.monthChart.opts, height: narrow() ? 250 : (S.monthFitH || 352) })}</div></div></div>`
+    : `<div class="card">${ch("Pass rate by manufacturing stage", "Rolling 30 days")}
+        <div class="bd">${stageChart}</div></div>`;
+
   return `<div class="four">
-      ${kpi("First pass yield", (d.fpy_30d ?? "—") + (d.fpy_30d == null ? "" : "%"),
-        `target ${target}% · ${d.inspections_30d} inspections in 30 days`,
-        d.fpy_30d == null ? "" : d.fpy_30d >= target ? "good" : "alert")}
+      ${kpi("First pass yield", fpy == null ? "—" : fpy + "%",
+        fpy == null ? "no inspections completed in 30 days"
+          : fpy >= target ? `at or above the ${target}% target`
+          : `${(target - fpy).toFixed(1)} points under the ${target}% target`,
+        fpy == null ? "" : fpy >= target ? "good" : "alert", yieldBar)}
       ${kpi("Nonconformances open", d.ncrs_open,
         `${d.ncrs_major} major · ${d.ncrs_critical} critical · ${d.ncrs_over_30d} over 30 days`,
-        d.ncrs_over_30d ? "alert" : "")}
+        d.ncrs_over_30d ? "alert" : d.ncrs_open ? "" : "good")}
       ${kpi("Customer cares open", d.cares_open,
-        d.cares_no_reply ? `${d.cares_no_reply} with no reply yet` : "all have been answered",
+        (d.cares_no_reply ? `${d.cares_no_reply} with no reply yet` : "all have been answered")
+          + (d.care_response_days != null ? ` · ${d.care_response_days} days to answer on average` : ""),
         d.cares_no_reply ? "alert" : "good")}
       ${kpi("Cost of quality", money(d.cost_of_quality),
         `financial year from ${esc(fy)} · ${d.cost_records} of ${d.cost_population} records carry a cost`)}
     </div>
 
-    <!-- The right column stacks two panels so it fills the chart's height.
-         Laid out as separate rows, the department list ended a third of
-         the way down the chart and left a block of nothing beside it. -->
     <div class="split">
-      <div class="card"><h3>Pass rate by manufacturing stage
-          <span class="cnt" style="margin-left:auto">rolling 30 days</span></h3>
-        <div class="bd">${stages.length
-          ? `<div class="chartbox">${lineBarChart(stages.map(x => ({ k: x.stage, v: Number(x.pass_rate) })),
-              { limit: target, unit: "%", better: "higher", width: chartWidth(2 / 3),
-                empty: "Nothing completed in the last 30 days." })}</div>`
-          : `<div class="empty">Nothing has been completed in the last 30 days.</div>`}
-          <div class="legend">
-            <span><i style="background:var(--bad)"></i> below target</span>
-            <span><i style="background:var(--brand)"></i> at or above</span>
-            <span><i class="dash"></i> target ${target}%</span>
-          </div>
-        </div></div>
-
+      ${monthly}
       <div class="stack">
+        <!-- The brief's readiness panel, holding what this system has to
+             say about readiness: the records waiting on somebody. -->
+        <div class="card">${ch("What needs attention", "", `<span class="tagq">live</span>`)}
+          <div class="bd">${attention.map(([k, n, why]) => `
+            <div class="ready"><div><b>${esc(k)}</b><span>${esc(why)}</span></div>
+              <em class="rb ${Number(n) > 0 ? "bad" : "ok"}">${Number(n) > 0 ? esc(String(n)) : "None"}</em></div>`).join("")}
+            <button class="btn sm wide" data-go="work">Open the inspection workbench →</button>
+          </div></div>
+
         <div class="summary">
           <div class="k">Where this stands</div>
           <p>${outstanding.length
@@ -476,33 +543,34 @@ function vExec() {
                ${outstanding.map(([k, n]) => `${n} ${k.toLowerCase()}`).join(", ")}.`
             : `Nothing on this page is outstanding. Every fault has a disposition, every
                nonconformance has a cause, and no customer is waiting on a reply.`}</p>
-          <p class="sub">${d.fpy_30d == null
-            ? "No inspections have been completed in the last thirty days, so there is no yield to report."
-            : d.fpy_30d >= target
-              ? `First pass yield is ${d.fpy_30d}% against a ${target}% target.`
-              : `First pass yield is ${d.fpy_30d}% against a ${target}% target — ${(target - d.fpy_30d).toFixed(1)} points short.`}</p>
+          ${fpy == null
+            ? `<p class="sub">No inspections have been completed in the last thirty days, so there is no yield to report.</p>`
+            : `<div class="sbar" role="img" aria-label="First pass yield ${fpy}% against a ${target}% target">
+                <i style="width:${Math.max(0, Math.min(100, fpy))}%"></i><b style="left:${target}%"></b></div>
+               <p class="sub">First pass yield ${fpy}% against a ${target}% target${fpy < target
+                 ? ` — ${(target - fpy).toFixed(1)} points short` : ""}.</p>`}
         </div>
-
-        <div class="card"><h3>By department <span class="cnt" style="margin-left:auto">this year</span></h3>
-          <div class="bd">${(S.ncrByDept || []).length
-            ? (S.ncrByDept || []).slice(0, 8).map(x => `
-              <div class="deptrow">
-                <div class="nm">${esc(x.department || "not allocated")}</div>
-                <div class="bar"><i style="width:${Math.round(100 * Number(x.ncrs) / maxDept)}%"></i></div>
-                <b>${x.ncrs}</b>
-              </div>`).join("")
-            : `<div class="empty">Nothing recorded against a department yet.</div>`}
-          </div></div>
       </div>
     </div>
 
-    <div class="pair">
-      <div class="card"><h3>What needs attention</h3><div class="bd">
-        ${lines(attention.map(([k, v]) => [k, v, Number(v) > 0 ? "bad" : ""]))}
-        ${lines([["Average days to answer a customer", d.care_response_days ?? "—"]])}
+    <!-- The brief's department-context section, full width. -->
+    <div class="card" style="margin-bottom:13px">${ch("Nonconformances by department", "This year",
+        `<button class="link" data-go="ncr">Open NCR management →</button>`)}
+      <div class="bd">${(S.ncrByDept || []).length
+        ? `<div class="deptgrid">${(S.ncrByDept || []).slice(0, 12).map(x => `
+            <div class="deptrow">
+              <div class="nm">${esc(x.department || "not allocated")}</div>
+              <div class="bar"><i style="width:${Math.round(100 * Number(x.ncrs) / maxDept)}%"></i></div>
+              <b>${x.ncrs}</b>
+            </div>`).join("")}</div>`
+        : `<div class="empty">Nothing recorded against a department yet.</div>`}
       </div></div>
 
-      <div class="card"><h3>Cost of quality <span class="cnt" style="margin-left:auto">FY from ${esc(fy)}</span></h3>
+    <div class="pair">
+      ${months && months.length ? `<div class="card">${ch("Pass rate by manufacturing stage", "Rolling 30 days",
+          `<span class="lg"><i class="dot bad"></i>Below target</span><span class="lg"><i class="dot"></i>At or above</span>`)}
+        <div class="bd">${stageChart}</div></div>` : ""}
+      <div class="card">${ch("Cost of quality", `Financial year from ${fy}`)}
         <div class="bd">
         ${lines((S.costOfQuality || []).map(x => [
           `${x.source} · ${x.records_with_cost} of ${x.records} carry a cost`, money(x.cost)]))}
@@ -521,6 +589,77 @@ function vExec() {
       <em>No tile above for any of these, deliberately: a zero against Calibration would read
         as nothing overdue, when what is true is that nobody is tracking it here.</em>
     </div>`;
+}
+
+/* Two series side by side per category -- the brief's monthly comparison.
+   Drawn at its real width like lineBarChart, so text stays the same size
+   on any screen. The quieter series is the total, the primary blue the
+   part of it that matters, as in the reference. */
+
+/* Size the monthly chart to the column beside it.
+
+   The right-hand column -- the attention panel and the summary -- is a
+   different height at every screen width, because its text wraps
+   differently. A chart of fixed height left between 90 and 190px of empty
+   card beneath it depending on the screen. So after the page is drawn,
+   the chart is redrawn at the height that brings the two sides level.
+   Only when they sit side by side; stacked on a narrow screen there is
+   nothing to match. Remembered, so the next draw starts at the right
+   height rather than jumping. */
+function fitMonthlyChart() {
+  const box = $("monthChart");
+  if (!box || !S.monthChart) return;
+  const card = box.closest(".card"), split = card && card.parentElement;
+  const stack = split && split.querySelector(".stack");
+  const svg = box.querySelector("svg");
+  if (!stack || !svg) return;
+  if (getComputedStyle(split).gridTemplateColumns.split(" ").length < 2) return;
+  const c = card.getBoundingClientRect(), stackH = stack.getBoundingClientRect().height;
+  const g = svg.getBoundingClientRect();
+  if (!c.height || !stackH || !g.height) return;                // not laid out (tests)
+  /* What the card needs besides the chart: everything above it, and the
+     padding below it. Not card height minus chart height -- the card is
+     stretched to the column, so that difference IS the empty space, and
+     the first version of this function measured it as padding and so
+     never changed anything. */
+  const below = parseFloat(getComputedStyle(box.parentElement).paddingBottom) || 0;
+  const chrome = (g.top - c.top) + below;
+  const want = Math.round(Math.max(236, Math.min(560, stackH - chrome)));
+  if (Math.abs(want - g.height) < 6) return;
+  S.monthFitH = want;
+  box.innerHTML = groupedBarChart(S.monthChart.rows, { ...S.monthChart.opts, height: want });
+}
+
+function groupedBarChart(rows, opts) {
+  const W = opts.width || 760, H = opts.height || 236, padL = 44, padR = 12, padT = 18, padB = 34;
+  if (!rows.length) return `<div class="empty">Nothing to show yet.</div>`;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const max = Math.max(1, ...rows.map(r => Math.max(r.a || 0, r.b || 0))) * 1.15;
+  const step = plotW / rows.length;
+  const bw = Math.min(30, step * 0.3), gap = Math.min(6, step * 0.06);
+  const y = v => padT + plotH - (v / max) * plotH;
+  const tick = Math.max(1, Math.ceil(max / 4 / 5) * 5);
+  const ticks = []; for (let v = 0; v <= max; v += tick) ticks.push(v);
+  /* The quieter series keeps a light fill, so it stays clearly apart from
+     the blue beside it, and takes a darker outline so its edge meets the
+     3:1 that data graphics need against the card. A grey dark enough to
+     meet 3:1 by fill alone came out the same lightness as the blue
+     (1.19:1), leaving the two series told apart by hue only -- which is
+     no help to anyone colour-blind. */
+  const bar = (x, v, fill, name, k, stroke) => v > 0 ? `<path d="M${x},${y(0)} V${y(v) + 3}
+      q0,-3 3,-3 h${bw - 6} q3,0 3,3 V${y(0)} z" fill="${fill}"${stroke ? ` stroke="${stroke}" stroke-width="1"` : ""}><title>${esc(k)} · ${esc(name)}: ${v}</title></path>` : "";
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block" role="img"
+      aria-label="${esc(opts.names[0])} and ${esc(opts.names[1])} by month">
+    ${ticks.map(v => `<line x1="${padL}" x2="${W - padR}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line-2)"/>
+      <text x="${padL - 8}" y="${y(v) + 4}" text-anchor="end" font-size="12" fill="var(--muted)">${v}</text>`).join("")}
+    ${rows.map((r, i) => {
+      const cx = padL + step * i + step / 2;
+      return bar(cx - bw - gap / 2, r.a, "#E2E8F0", opts.names[0], r.k, "#7D8DA3")
+        + bar(cx + gap / 2, r.b, "var(--brand)", opts.names[1], r.k)
+        + `<text x="${cx}" y="${H - padB + 19}" text-anchor="middle" font-size="12" fill="var(--muted)">${esc(r.k)}</text>`;
+    }).join("")}
+    <line x1="${padL}" x2="${W - padR}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)"/>
+  </svg>`;
 }
 
 function vMain(m) {
@@ -5414,7 +5553,8 @@ const HELP = [
   { sec: "modules", id: "m-main", view: "main", title: "Dashboard",
     tabs: ["Executive", "Across the modules"],
     body: [
-      "The Executive tab is one page answering how quality is doing: first pass yield against the target, nonconformances and customer cares still open, and the cost of quality for the financial year.",
+      "The Executive tab is one page answering how quality is doing: first pass yield against the target, nonconformances and customer cares still open, and the cost of quality for the financial year. When a figure needs attention, the line beneath it turns red.",
+      "Inspections by month compares, for each of the last twelve months, how many inspections were completed and how many of those passed first time.",
       "What needs attention lists records somebody has to act on, not statistics. The blue panel says in a sentence how many of them there are.",
       "There is no figure for a module that has not been built. A zero against Calibration would read as nothing overdue, when what is true is that nobody is tracking it here."
     ] },
@@ -5568,8 +5708,7 @@ function vHelp(m) {
   } else {
     body = helpTopicsFor(S.tab).map(helpCard).join("");
   }
-  return `<div class="phead"><div><h1>Help</h1><div class="accent"></div>
-      <div class="eyebrow">ACTOM QMS 360 · user guide</div>
+  return `<div class="phead"><div><div class="eyebrow">ACTOM QMS 360 · user guide</div><h1>Help</h1>
       <p>How the system works, what each part is for, and why it sometimes says no.</p></div></div>`
     + (q ? "" : tabbar(m)) + search + `<div class="helpbody">${body}</div>`;
 }
@@ -5628,7 +5767,7 @@ const TOUR = [
   { sel: "#search", title: "Search",
     body: "Finds inspections, works orders and panel serials from anywhere in the system." },
   { sel: ".four", view: "main", title: "How quality is doing",
-    body: "The dashboard opens on these four figures. A coloured edge on the left means one needs attention." },
+    body: "The dashboard opens on these four figures. When one needs attention, the line beneath it turns red." },
   { sel: '#nav button[data-go="work"]', title: "Your inspections",
     body: "The inspection workbench holds your queue and the capture form. Most people spend most of their time here." },
   { sel: '#nav button[data-go="ncr"]', title: "Nonconformances",
@@ -5789,11 +5928,13 @@ function render() {
      that belongs in Administration -- and on a wide monitor it added a
      band of empty space below every page. */
   $("page").innerHTML = VIEWS[S.view](m);
+  if (S.view === "main" && S.tab === 0) requestAnimationFrame(fitMonthlyChart);
 
   $("whoName").textContent = S.profile.full_name;
   $("whoEmail").textContent = S.profile.email;
   $("whoInitials").textContent = S.profile.full_name.split(/\s+/).map(w => w[0]).slice(0, 2).join("").toUpperCase();
   $("sideDivision").textContent = S.division?.name || DIVISION.name;
+  const hp = $("sideHold"); if (hp) hp.textContent = `Hold points ${HP() ? "on" : "off"}`;
   $("buildTag").textContent =
     `v${window.APP_VERSION || "?"} · ${BUILD.context} · ${BUILD.commit}`;
   /* A dot on "What's new" until this version's notes have been opened. The

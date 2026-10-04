@@ -215,7 +215,11 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
 
   /* A whole card tinted red reads as an alarm when it is a number
      slightly under target. */
-  s.check('status colour is an edge, not a fill', /\.kpi\.alert\{border-left:3px solid/.test(sheet));
+  /* The brief's reference carries status in the colour of the line under
+     the figure. 0.27 used a left stripe -- and a duplicated rule gave
+     every card one, so cards with nothing wrong carried a coloured edge. */
+  s.check('status is the line under the figure, not a stripe or a fill',
+    /\.kpi\.alert \.d\{color:var\(--bad\)/.test(sheet) && !/\.kpi[^{]*\{[^}]*border-left/.test(sheet));
   s.check('figures are tabular so columns of them line up', /font-variant-numeric:tabular-nums/.test(sheet));
 
   /* :focus-visible rather than :focus, so a mouse click leaves no ring —
@@ -227,7 +231,15 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
      falls back silently. Better to choose the fallback deliberately. */
   s.check('no webfont is requested that the CSP would refuse',
     !/@import\s+url\(|fonts\.googleapis\.com|fonts\.gstatic\.com/.test(sheet + tok));
-  s.check('and the reason is recorded next to the stacks', /font-src 'self'/.test(tok));
+  /* Sora and Manrope, self-hosted: font-src 'self' refuses Google Fonts,
+     and same-origin files need no change to it. */
+  s.check('the brief\'s fonts are self-hosted', /src:url\("fonts\/sora-latin\.woff2"\)/.test(tok)
+    && /src:url\("fonts\/manrope-latin\.woff2"\)/.test(tok)
+    && fs.existsSync(app('fonts/sora-latin.woff2')) && fs.existsSync(app('fonts/manrope-latin.woff2')));
+  s.check('with their licences alongside', fs.existsSync(app('fonts/OFL-Sora.txt')) && fs.existsSync(app('fonts/OFL-Manrope.txt')));
+  s.check('and preloaded so text does not change face on first load',
+    /rel="preload" href="fonts\/manrope-latin\.woff2" as="font" type="font\/woff2" crossorigin/.test(read('index.html')));
+  s.check('accented-name subsets load only when needed', (tok.match(/unicode-range:/g) || []).length === 4);
 
   s.group('the treatment reaches every component, not just the dashboard');
   const sh = read('styles.css');
@@ -235,8 +247,16 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
   /* The module numbers are gone (0.28.2): they identified nothing a name
      did not, and took the attention the active marker should have. */
   s.check('the menu carries no module numbers', !/class="num"/.test(read('app.js')));
-  s.check('the active module has its own marker',
-    /\.nav button\.on\{[^}]*box-shadow:inset 3px 0 0 var\(--brand\)/.test(sh));
+  s.check('the active module is a card lifted off the menu, as in the brief',
+    /\.nav button\.on\{background:var\(--card\)/.test(sh) && /\.nav button\.on \.ni\{color:var\(--brand\)\}/.test(sh));
+  /* The headings were hard to make out: too close to the items in size,
+     colour and spacing. Icons indent every item so headings sit flush
+     left; a rule and space separate the sections. */
+  s.check('every menu item carries an icon', /\$\{navIcon\(n\.id\)\}<span>/.test(read('app.js')));
+  s.check('section headings are separated by space and a rule',
+    /\.nav \.grp\{[^}]*padding:20px[^}]*border-top:1px solid var\(--line\)/.test(sh));
+  s.check('the division sits at the foot of the menu', /class="divnm" id="sideDivision"/.test(read('index.html')));
+  s.check('the eyebrow comes before the title', /<div class="eyebrow">\$\{esc\(navGroup\(m\.id\)\)\}<\/div>\s*<h1>/.test(read('app.js')));
   s.check('the page eyebrow names the section, not a number',
     /<div class="eyebrow">\$\{esc\(navGroup\(m\.id\)\)\}<\/div>/.test(read('app.js')));
 
@@ -270,8 +290,20 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
   /* With the cap gone a fixed 760-unit chart stretched to 2560px drew its
      labels at about 24px. It is drawn at its real width instead. */
   s.check('charts are drawn at the width they are shown', /width: chartWidth\(/.test(appjs));
+  /* The refit redraws with the options stored at first draw, width
+     included, so it is counted by what it reuses rather than repeated. */
   s.check('every chart call passes its width',
-    (appjs.match(/lineBarChart\(/g) || []).length - 1 === (appjs.match(/width: chartWidth\(/g) || []).length);
+    (appjs.match(/(lineBarChart|groupedBarChart)\((?!S\.monthChart)/g) || []).length - 2
+      === (appjs.match(/width: chartWidth\(/g) || []).length);
+  s.check('the refit reuses the stored width', /groupedBarChart\(S\.monthChart\.rows, \{ \.\.\.S\.monthChart\.opts/.test(appjs)
+    && /opts: \{ width: chartWidth\(2 \/ 3\)/.test(appjs));
+  /* Sized to the column beside it. The first version measured card minus
+     chart, which -- with the card stretched -- is the empty space itself,
+     and so never changed anything. */
+  s.check('the monthly chart is fitted to the column beside it',
+    /const chrome = \(g\.top - c\.top\) \+ below/.test(appjs) && /requestAnimationFrame\(fitMonthlyChart\)/.test(appjs));
+  s.check('the quieter chart series is outlined to meet 3:1', /"#E2E8F0", opts\.names\[0\], r\.k, "#7D8DA3"/.test(appjs));
+  s.check('a division without 024 gets the stage chart, not an empty one', /S\.inspByMonth = ibm\.error \? null/.test(appjs));
   s.check('and are redrawn when the window changes size', /chartResizeT = setTimeout/.test(appjs));
   /* auto-fill kept an empty fifth track for four cards and left a column
      of white on a 2560px screen. */
@@ -288,7 +320,9 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
   const chartSizes = [...lb.matchAll(/font-size="([0-9.]+)"/g)].map(m => +m[1]);
   s.check('nor is any text inside a chart', Math.min(...chartSizes) >= 12, Math.min(...chartSizes) + 'px');
   const tracking = [...sh.matchAll(/letter-spacing:(\.[0-9]+)em/g)].map(m => +m[1]);
-  s.check('small capitals are not tracked out', Math.max(...tracking) < .08, Math.max(...tracking) + 'em');
+  /* Small capitals need a little spacing to stay legible; it was .16em at
+     9.5px that made the old labels hard to read, not spacing itself. */
+  s.check('small capitals are not tracked out', Math.max(...tracking) <= .1, Math.max(...tracking) + 'em');
   s.check('card titles are in the case they are written in',
     /\.card h3\{[^}]*text-transform:none/.test(sh));
   s.check('body text is 15px', /body\{[^}]*font-size:15px/.test(sh));

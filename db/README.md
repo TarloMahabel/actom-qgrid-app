@@ -84,6 +84,7 @@ select
 | 021 | QA-FM-005: the controlled form’s fields, estimated cost, documents, response target |
 | 022 | The After Sales report: monthly views, and one actions register for both reviews |
 | 023 | The executive dashboard: scorecard, cost of quality, and the targets it draws against |
+| 024 | Inspections by month, for the dashboard’s monthly comparison chart |
 
 ## A new division
 

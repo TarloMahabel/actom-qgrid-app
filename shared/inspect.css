@@ -83,28 +83,57 @@ input,select,textarea{font-family:inherit;font-size:inherit}
 
 .shell{display:flex;min-height:100vh}
 .side{width:252px;flex:0 0 252px;background:var(--side);border-right:1px solid var(--line);color:var(--ink-2);display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
-.brandbox{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:11px}
+.brandbox{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:11px}
 /* HC Analytics uses a flat dark navy tile, not a gradient. */
-.tile{width:38px;height:38px;flex:0 0 38px;border-radius:var(--r-sm);background:var(--tile-b);
-  display:grid;place-items:center;padding:6px}
+/* The ACTOM mark on its own navy, kept rather than the reference's
+   placeholder initials: it is the company's logo. Compact, per the brief. */
+.tile{width:34px;height:34px;flex:0 0 34px;border-radius:var(--r-sm);background:var(--tile-b);
+  display:grid;place-items:center;padding:5px}
 .tile img{max-width:100%;height:auto}
-.brandbox .nm{font-weight:700;color:var(--ink);font-size:15px;letter-spacing:-.02em;line-height:1.2}
-.brandbox .sub{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-top:2px;font-weight:600}
-.nav{flex:1;overflow-y:auto;padding:8px 8px 18px}
-.nav .grp{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:14px 11px 5px;font-weight:600}
-.nav button{display:flex;align-items:center;gap:9px;width:100%;background:none;border:0;color:var(--ink-2);padding:8px 10px;border-radius:8px;text-align:left;font-size:14.5px;line-height:1.25;position:relative}
-.nav button:hover{background:var(--brand-tint);color:var(--ink)}
+.brandbox .nm{font-family:var(--display);font-weight:700;color:var(--ink);font-size:14.5px;letter-spacing:-.015em;line-height:1.2}
+.brandbox .sub{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:3px;font-weight:600}
+.nav{flex:1;overflow-y:auto;padding:6px 10px 18px}
+/* Section headings. They were hard to make out because they differed
+   from the items beneath them in almost nothing: the same grey family,
+   similar size, 14px of space above. Now they differ in four ways at
+   once -- flush left while every item is indented by its icon, a clear
+   band of space above, a hairline rule between sections, and bold spaced
+   capitals in a colour still 6:1 against the sidebar. Spacing of .1em is
+   deliberate here: small capitals need some to stay legible, and it was
+   .16em at 9.5px that made the old ones hard to read, not the tracking
+   itself. */
+.nav .grp{font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  padding:20px 10px 7px;font-weight:700;margin-top:6px;border-top:1px solid var(--line)}
+.nav .grp:first-child{border-top:0;margin-top:0;padding-top:12px}
+.nav button{display:flex;align-items:center;gap:10px;width:100%;background:none;border:0;color:var(--ink-2);
+  padding:8px 10px;border-radius:var(--r-sm);text-align:left;font-size:14px;font-weight:500;line-height:1.25;
+  position:relative;margin:1px 0}
+.nav .ni{flex:0 0 17px;color:var(--muted)}
+.nav button:hover{background:rgba(255,255,255,.7);color:var(--ink)}
+.nav button:hover .ni{color:var(--ink-2)}
 /* With the numbers gone the active item carries its own marker: a bar on
    the left as well as the tint, so it reads even on a washed-out screen. */
-.nav button.on{background:var(--sel);color:var(--ink);font-weight:700;box-shadow:inset 3px 0 0 var(--brand)}
+/* The current module: a white card lifted off the sidebar, as in the
+   brief's reference, with its icon in the primary blue. Drawn with
+   box-shadow rather than a border so it does not shift the text. */
+.nav button.on{background:var(--card);color:var(--ink);font-weight:650;
+  box-shadow:0 0 0 1px var(--line),0 1px 2px rgba(15,23,42,.05)}
+.nav button.on .ni{color:var(--brand)}
 .nav button.off{opacity:.62;cursor:not-allowed}
 .nav button.off:hover{background:none;color:var(--ink-2)}
 .nav .badge{margin-left:auto;background:var(--bad);color:#fff;font-size:12px;font-weight:700;border-radius:10px;padding:1px 6px}
 .nav .later{margin-left:auto;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);white-space:nowrap;padding-left:6px}
-.sidefoot{padding:11px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+/* The division at the foot of the menu, per the brief: which division's
+   records these are, and the one setting that changes how capture
+   behaves. */
+.sidefoot{padding:12px 16px 13px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.divbox{margin-bottom:9px}
+.divnm{font-family:var(--display);font-size:13px;font-weight:650;color:var(--ink);line-height:1.3}
+.divsub{font-size:12px;color:var(--muted);margin-top:1px}
+.sidelinks{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 
 .main{flex:1;min-width:0;display:flex;flex-direction:column}
-.top{background:var(--card);border-bottom:1px solid var(--line);padding:0 22px;height:58px;display:flex;align-items:center;gap:11px;position:sticky;top:0;z-index:40}
+.top{background:var(--card);border-bottom:1px solid var(--line);padding:0 22px;height:52px;display:flex;align-items:center;gap:11px;position:sticky;top:0;z-index:40}
 .srch{flex:1;max-width:420px;position:relative}
 .srch input{width:100%;box-sizing:border-box;padding:8px 12px 8px 31px;border:1px solid var(--line);border-radius:8px;outline:0}
 .srch svg{position:absolute;left:9px;top:9px;opacity:.45}
@@ -124,11 +153,10 @@ input,select,textarea{font-family:inherit;font-size:inherit}
    grids and use the room; reading-heavy pages (Help) widen their
    column count rather than their line length -- see .helpbody. */
 .page{padding:19px 22px 28px}
-.phead{display:flex;align-items:flex-start;gap:13px;margin-bottom:15px;flex-wrap:wrap}
-.phead h1{margin:0;font-size:31px;font-weight:750;letter-spacing:-.026em;color:var(--ink);line-height:1.12}
-.accent{width:40px;height:2px;border-radius:1px;background:var(--brand);margin:11px 0 9px}
-.eyebrow{font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600}
-.phead p{margin:10px 0 0;color:var(--ink-2);font-size:14px;max-width:780px}
+.phead{display:flex;align-items:flex-end;gap:13px;margin:4px 0 18px;flex-wrap:wrap}
+.phead h1{margin:5px 0 0;font-family:var(--display);font-size:27px;font-weight:650;letter-spacing:-.022em;color:var(--ink);line-height:1.15}
+.eyebrow{font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.phead p{margin:6px 0 0;color:var(--muted);font-size:14px;max-width:780px}
 .pact{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
 .clausetag{font-family:var(--mono);font-size:12px;background:var(--brand-lt);color:var(--brand-dk);border:1px solid #c6e0f3;padding:3px 7px;border-radius:5px;font-weight:600;white-space:nowrap}
 
@@ -160,18 +188,6 @@ label.btn{margin:0}
 .three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:13px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:13px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh)}
-/* The metric cards carry the page. A figure is the thing being read,
-   so it gets the size and the display face, and everything around it
-   stays quiet. Status colour sits on the left edge only — a whole card
-   tinted red reads as an alarm when it is a number slightly under
-   target. */
-.kpi{padding:15px 17px}
-.kpi .k{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:650}
-.kpi .v{font-size:30px;font-weight:700;color:var(--ink);line-height:1.12;margin:7px 0 3px;font-variant-numeric:tabular-nums}
-.kpi .d{font-size:13px;color:var(--ink-2)}
-.kpi.good{border-left:3px solid var(--ok)}
-.kpi.alert{border-left:3px solid var(--bad)}
-.kpi.watch{border-left:3px solid var(--warn)}
 /* Sentence case, as the titles are actually written. The stylesheet used
    to capitalise them at 11px with wide tracking -- "PASS RATE BY
    MANUFACTURING STAGE" -- which is the hardest way to set a heading that
@@ -182,24 +198,14 @@ label.btn{margin:0}
 .card h3 .cnt{font-weight:500;font-size:13px}
 .card h3 .cl{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted);font-weight:500;letter-spacing:0;text-transform:none}
 .card .bd{padding:15px}
-.kpi{padding:14px 15px}
-.kpi .k{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600}
 /* The display face, with tabular figures. This rule used --num, the
    monospace stack, and as the later of two rules it won — so the
    headline figures rendered in a code font rather than the display
    face the design calls for. Tabular numerals keep a column of them
    aligned without needing monospace to do it. */
-.kpi .v{font-family:var(--display);font-size:30px;font-weight:700;letter-spacing:-.025em;margin:7px 0 4px;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
-.kpi .d{font-size:13px;color:var(--ink-2)}
 /* Semantic state lives on the left edge, not in the fill. A tinted card
    draws the eye whether or not the number matters; an edge marks the state
    without shouting, which is what HC Analytics does. */
-.kpi{border-left:3px solid var(--brand)}
-.kpi.good{border-left-color:var(--ok)}
-.kpi.warn{border-left-color:var(--warn)}
-.kpi.alert{border-left-color:var(--bad)}
-.kpi.alert .v{color:var(--bad)}
-.kpi .k{display:flex;align-items:center;gap:6px}
 
 table{width:100%;border-collapse:collapse;font-size:14px}
 /* A rule rather than a filled band. The band made every table look
@@ -602,8 +608,8 @@ input:focus, select:focus, textarea:focus{
    and would be worse on a tablet under factory lighting. */
 .summary{background:var(--brand-dk);color:#fff;border-radius:var(--r);padding:17px 19px;
   box-shadow:var(--sh)}
-.summary .k{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:#FFFFFF;
-  font-weight:650;margin-bottom:9px}
+.summary .k{font-family:var(--display);font-size:15px;letter-spacing:-.005em;text-transform:none;color:#FFFFFF;
+  font-weight:650;margin-bottom:8px}
 .summary p{margin:0 0 9px;font-size:14.5px;line-height:1.5}
 .summary p:last-child{margin-bottom:0}
 .summary .sub{color:#EFF6FF;font-size:13.5px}
@@ -633,6 +639,9 @@ input:focus, select:focus, textarea:focus{
    width instead and scrolls sideways inside its own card, the same way
    the wide tables already do. */
 .chartbox{overflow-x:auto;-webkit-overflow-scrolling:touch}
+/* Marks the stage chart so it can be found apart from the monthly one,
+   which comes first on the dashboard. */
+.stagechart svg{display:block}
 .chartbox > svg{min-width:460px}
 
 @media(max-width:700px){
@@ -742,3 +751,101 @@ input:focus, select:focus, textarea:focus{
 #sideScrim{position:fixed;inset:0;background:rgba(15,23,42,.38);z-index:55}
 @media(max-width:900px){.menubtn{display:grid}}
 @media(prefers-reduced-motion:reduce){.side{transition:none}}
+
+/* =====================================================================
+   Metric cards, as in the brief's reference: a small spaced label, the
+   figure in Sora, and a line underneath that carries the status in its
+   colour -- red, amber or green only when there is a status to carry.
+
+   These were defined twice, and the second set gave EVERY card a blue
+   left stripe, so cards with nothing wrong carried a coloured edge as
+   though they meant something. One set now, and no stripe: the reference
+   has none, and a stripe on every card is noise.
+   ===================================================================== */
+.kpi{padding:16px 18px}
+.kpi .k{display:flex;align-items:center;gap:6px;font-size:11.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);font-weight:700}
+.kpi .v{font-family:var(--display);font-size:25px;font-weight:650;letter-spacing:-.02em;
+  margin:9px 0 6px;line-height:1.1;color:var(--ink);font-variant-numeric:tabular-nums}
+.kpi .d{font-size:13px;color:var(--muted);line-height:1.45}
+.kpi.alert .v{color:var(--bad)}
+.kpi.alert .d{color:var(--bad);font-weight:600}
+.kpi.warn .d,.kpi.watch .d{color:var(--warn);font-weight:600}
+.kpi.good .d{color:var(--ok);font-weight:600}
+/* A progress bar under a figure that has a target, as the reference does
+   for its rate. The marker is the target itself, so the gap is visible. */
+.kbar{position:relative;height:6px;border-radius:3px;background:var(--line-2);margin:4px 0 8px}
+.kbar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--brand)}
+.kbar.under i{background:var(--bad)}
+.kbar b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink-2);border-radius:1px}
+
+
+/* =====================================================================
+   The dashboard, in the brief's form.
+   ===================================================================== */
+/* Card header: title, a quiet line saying what it covers, and whatever
+   belongs on the right. */
+.ch{display:flex;align-items:flex-start;gap:12px;padding:15px 18px 0}
+.ch h3{margin:0;padding:0;border:0;background:none;font-family:var(--display);font-size:15px;
+  font-weight:650;color:var(--ink);letter-spacing:-.005em;text-transform:none;display:block}
+.ch .cs{font-size:13px;color:var(--muted);margin-top:3px}
+.ch .cr{margin-left:auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:flex-end}
+.ch + .bd{padding-top:12px}
+.lg{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);white-space:nowrap}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--brand);display:inline-block}
+.dot.dim{background:#E2E8F0;box-shadow:inset 0 0 0 1px #7D8DA3}
+.dot.bad{background:var(--bad)}
+.tagq{font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.link{background:none;border:0;padding:0;color:var(--brand-dk);font-weight:650;font-size:13px;cursor:pointer}
+.link:hover{text-decoration:underline}
+
+/* The readiness panel: a name, a line saying why it matters, and a
+   status on the right -- red only when there is something to act on. */
+.ready{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line-2)}
+.ready > div{flex:1;min-width:0}
+.ready b{display:block;font-size:14px;font-weight:600;color:var(--ink)}
+.ready span{display:block;font-size:12.5px;color:var(--muted);margin-top:1px}
+.rb{font-style:normal;font-size:12.5px;font-weight:700;padding:3px 9px;border-radius:4px;
+  background:var(--line-2);color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.rb.bad{background:var(--bad-bg);color:var(--bad)}
+.rb.ok{background:var(--ok-bg);color:var(--ok)}
+.btn.wide{width:100%;justify-content:center;margin-top:12px;padding:8px 12px}
+
+/* The summary's bar: the yield against the target marker, in white. */
+.sbar{position:relative;height:6px;border-radius:3px;background:rgba(255,255,255,.28);margin:12px 0 10px}
+.sbar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:#fff}
+.sbar b{position:absolute;top:-4px;bottom:-4px;width:2px;background:#fff;border-radius:1px;opacity:.9}
+
+/* Department context, full width: several columns of rows on a wide
+   screen rather than one long column. */
+.deptgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:2px 36px}
+
+/* If a division has not run 024 the stage chart moves into the wide slot
+   and the pair below has only the cost card, which then takes the row. */
+.pair > :only-child{grid-column:1 / -1}
+
+/* =====================================================================
+   Phones. Rendered at 390px, which is how these were found.
+   ===================================================================== */
+@media(max-width:700px){
+  /* The top bar stacked into four rows with the menu button alone on one
+     of them. Now two: menu and search, then everything else. The name is
+     dropped -- the initials beside Sign out still say who is signed in. */
+  .top{row-gap:8px}
+  .menubtn{order:-2}
+  .srch{flex:1 1 0;order:-1}
+  .topright{flex:1 1 100%;justify-content:flex-start}
+  .who{display:none}
+}
+@media(max-width:520px){
+  /* The second top-bar row needed 394px on a 342px screen, so Sign out
+     wrapped onto a third. The pass-rate chip goes on a phone -- it repeats
+     the first card on the dashboard -- and the gaps tighten. The overdue
+     chip stays: it is the one that asks for something. */
+  #chipYield{display:none !important}
+  .topright{gap:7px}
+  /* Two cards abreast left 150px each, and "NONCONFORMANCES OPEN" ran
+     past its card's edge. One column on a phone, as the brief asks:
+     stacked, without clipping. */
+  .four{grid-template-columns:1fr}
+}

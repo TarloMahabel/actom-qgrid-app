@@ -11,7 +11,7 @@
 --  Paste into the Supabase SQL editor of a NEW, EMPTY project and run.
 --  Order matters; do not run sections out of sequence.
 --
---  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 009-photo-storage.sql, 010-handover.sql, 011-fault-clearing.sql, 012-dashboard.sql, 013-planned-dates.sql, 014-ncr.sql, 015-ncr-status-and-close-path.sql, 016-ai-suggestions.sql, 017-ai-chat.sql, 018-actions-by-cause.sql, 019-customer-complaints.sql, 020-complaint-import.sql, 021-customer-care-form.sql, 022-after-sales-report.sql, 023-executive-dashboard.sql
+--  Built from: 001-init-inspections.sql, 002-app-wiring.sql, 003-publish-roles.sql, 004-publish-approval-optional.sql, 005-lock-ref-sequences.sql, 006-fix-silent-publish.sql, 007-no-empty-templates.sql, 008-fault-list.sql, 009-photo-storage.sql, 010-handover.sql, 011-fault-clearing.sql, 012-dashboard.sql, 013-planned-dates.sql, 014-ncr.sql, 015-ncr-status-and-close-path.sql, 016-ai-suggestions.sql, 017-ai-chat.sql, 018-actions-by-cause.sql, 019-customer-complaints.sql, 020-complaint-import.sql, 021-customer-care-form.sql, 022-after-sales-report.sql, 023-executive-dashboard.sql, 024-inspections-by-month.sql
 --
 --  This script is for a fresh project. It is not idempotent: running it
 --  twice will fail on "type user_role already exists", which is the
@@ -4220,7 +4220,32 @@ end $verify$;
 
 
 -- ============================================================
---  SECTION 24 — Group reference data
+--  SECTION 24 — 024-inspections-by-month.sql
+-- ============================================================
+
+create or replace view v_inspections_by_month with (security_invoker = on) as
+select date_trunc('month', completed_at)::date                           as period,
+       count(*)                                                           as completed,
+       count(*) filter (where result = 'pass')                            as passed,
+       round(100.0 * count(*) filter (where result = 'pass')
+             / nullif(count(*), 0), 1)                                    as fpy
+  from inspections
+ where status = 'completed'
+   and completed_at >= date_trunc('month', now()) - interval '11 months'
+ group by 1;
+
+grant select on v_inspections_by_month to authenticated;
+
+comment on view v_inspections_by_month is
+  'Completed inspections and those passed first time, per month, for the '
+  'last twelve months. Same definition as v_scorecard.fpy_30d, so the '
+  'dashboard''s chart and its headline figure always reconcile.';
+
+notify pgrst, 'reload schema';
+
+
+-- ============================================================
+--  SECTION 25 — Group reference data
 -- ============================================================
 
 insert into manufacturing_stages (name, sort_order) values
@@ -4245,7 +4270,7 @@ on conflict (code) do nothing;
 
 
 -- ============================================================
---  SECTION 25 — Division seed — EDIT BEFORE RUNNING
+--  SECTION 26 — Division seed — EDIT BEFORE RUNNING
 -- ============================================================
 
 insert into division_profile (code, name, hold_points)
@@ -4275,7 +4300,7 @@ on conflict (family_id, stage_id) do nothing;
 
 
 -- ============================================================
---  SECTION 26 — Migration ledger stamp
+--  SECTION 27 — Migration ledger stamp
 --
 --  Running this script bypasses scripts/migrate.mjs, so the ledger it
 --  reads would be empty and the next run would try to apply everything
@@ -4313,12 +4338,13 @@ insert into public.qgrid_migrations (filename) values
   ('020-complaint-import.sql'),
   ('021-customer-care-form.sql'),
   ('022-after-sales-report.sql'),
-  ('023-executive-dashboard.sql')
+  ('023-executive-dashboard.sql'),
+  ('024-inspections-by-month.sql')
 on conflict (filename) do nothing;
 
 
 -- ============================================================
---  SECTION 27 — Verification
+--  SECTION 28 — Verification
 --  Run these and check the results before going any further.
 -- ============================================================
 

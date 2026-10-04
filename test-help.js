@@ -147,6 +147,17 @@ s.check('a step that cannot be seen is skipped, not shown pointing at nothing',
 /* Having a size is not the same as being on screen. */
 s.check('off-screen is treated as not visible', /r\.right <= 0 \|\| r\.left >= window\.innerWidth/.test(app));
 
+/* The tour describes what the page looks like, so it goes stale when the
+   look changes. 0.29.0 moved metric-card status from a left edge to the
+   line beneath the figure, and the tour went on saying "a coloured edge
+   on the left" -- caught by reading, not by this suite, until now. */
+const css = read('apps/inspect/styles.css');
+const tourText = TOUR.map(t => t.body).join(' ');
+s.check('the tour does not describe a coloured edge the cards no longer have',
+  !/coloured edge|left edge|stripe/i.test(tourText) || /\.kpi[^{]*\{[^}]*border-left/.test(css));
+s.check('what the tour says about a figure needing attention is what the page does',
+  /line beneath it turns red/.test(tourText) && /\.kpi\.alert \.d\{color:var\(--bad\)/.test(css));
+
 s.group('offered, not imposed');
 /* A forced walkthrough would land on everyone already using the system
    the day it shipped. */

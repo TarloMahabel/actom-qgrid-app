@@ -22,10 +22,23 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.28.2";
+window.APP_VERSION = "0.29.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.29.0", d: "2026-10-04", t: "The full design brief",
+    items: [
+      "The section headings down the left — Inspections, Nonconformance, Customer, Setup — are now easy to pick out. Each module has a small icon, so the headings sit to the left of everything under them, with space and a thin line between sections.",
+      "The typefaces the design calls for, Sora for headings and figures and Manrope for everything else, are now built into the system rather than approximated. They load from this site, so a tablet with a weak signal is not left waiting on anyone else to show text.",
+      "The module you are in shows as a white card lifted off the menu, with its icon in blue. The division's name sits at the foot of the menu.",
+      "Page titles have a small heading above them naming the section, in place of the blue underline.",
+      "The dashboard follows the brief's layout. The headline figures carry their status in the colour of the line beneath them, and first pass yield has a bar showing how far it is from target. A new chart compares, month by month, how many inspections were completed and how many passed first time. Beside it, What needs attention lists what is waiting, and the blue panel says where things stand. Nonconformances by department run the full width below.",
+      "Headline cards no longer have a coloured stripe down the left. Every card had one, including ones with nothing wrong, so it meant nothing.",
+      "On a phone the top bar takes two rows instead of four, and the headline cards stack one above another so none of their labels are cut off.",
+      "The monthly chart needs a small addition to the database. Until it is made, the dashboard shows pass rate by stage in that space instead."
+    ]
+  },
   {
     v: "0.28.2", d: "2026-10-04", t: "Easier to read",
     items: [
