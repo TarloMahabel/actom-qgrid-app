@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.28.1";
+window.APP_VERSION = "0.28.2";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.28.2", d: "2026-10-04", t: "Easier to read",
+    items: [
+      "Text throughout is larger and darker. Nothing is now smaller than 12 points, ordinary text is a size up, and grey text is dark enough to read comfortably under workshop lighting — some of it was previously below the recognised minimum for legibility.",
+      "Panel headings are written normally rather than in small spaced-out capitals, which were the hardest thing on the page to read at a glance.",
+      "The numbers beside each module in the menu have gone. The module you are in is now marked with a blue bar down its left edge.",
+      "Reference numbers such as NCR-26-0001 no longer break across two lines.",
+      "Charts use the same larger text as the rest of the page."
+    ]
+  },
   {
     v: "0.28.1", d: "2026-10-04", t: "Wide screens use their width",
     items: [

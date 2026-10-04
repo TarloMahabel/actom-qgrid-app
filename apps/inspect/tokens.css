@@ -28,7 +28,12 @@
   --tile-a:#2F5F93; --tile-b:#1E3A5F;
 
   /* Ink: charcoal-blue, not black. Secondary text in muted slate. */
-  --ink:#1E293B; --ink-2:#475569; --muted:#64748B;
+  /* Measured, not chosen by eye. The previous muted grey was 4.40:1 on the
+     sidebar -- under the 4.5:1 WCAG AA minimum for text that size, which
+     covered every section heading in the menu. Now 6.2:1 at worst, and
+     secondary text is 10:1. Small text under fluorescent workshop light
+     needs the margin. */
+  --ink:#1E293B; --ink-2:#334155; --muted:#4F5D72;
 
   /* Hairlines. --line is the border of every panel; --line-2 is for
      rules inside one, where a full-strength border would cut it up. */

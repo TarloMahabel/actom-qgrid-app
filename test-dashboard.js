@@ -134,7 +134,7 @@ s.check('with the reason, not just the list', /would read\s+as nothing overdue/.
 s.check('cost of quality is money, not a percentage of turnover',
   !/of production value/.test(exSrc));
 s.check('and says how many records carry a cost',
-  /records that carry a cost/.test(exSrc) && /records_with_cost/.test(ex023));
+  /records carry a cost/.test(exSrc) && /records_with_cost/.test(ex023));
 s.check('the financial year comes from the division',
   /fy_start\(\)/.test(ex023) && /fy_start_month/.test(ex023));
 s.check('the yield target is a setting, not a constant', /fpy_target/.test(ex023));

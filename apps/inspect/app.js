@@ -284,7 +284,7 @@ function subscribe() {
    4. Views
    ------------------------------------------------------------ */
 const NAV = [
-  { g: "Main" },
+  { g: "Overview" },
   { id: "main",  n: 1, t: "Dashboard",               col: "--m1",
     tabs: ["Executive", "Across the modules"] },
   { g: "Inspections" },
@@ -315,14 +315,13 @@ function buildNav() {
   $("nav").innerHTML = NAV.filter(n => !(setupIds.includes(n.id) && !canConfigure()))
     .map(n => {
       if (n.g) return `<div class="grp">${n.g}</div>`;
-      /* No inline colour on the number. An inline style beats the
-         stylesheet, so a colour set here cannot be overridden by the
-         palette — which is exactly how 0.27.2 shipped grey numbers on
-         coloured squares that nobody could read. */
-      if (n.off) return `<button class="off" title="Deferred to a later phase"><span class="num">·</span><span>${n.t}</span><span class="later">Phase 2+</span></button>`;
+      /* No module numbers (0.28.2). They identified nothing a name did not
+         already, cost 29px of a 252px menu, and took the attention the
+         active marker should have. */
+      if (n.off) return `<button class="off" title="Deferred to a later phase"><span>${n.t}</span><span class="later">Phase 2+</span></button>`;
       const badge = n.id === "work" ? myQueue().length : n.id === "sched" ? unassigned().length : 0;
       return `<button class="${n.id === S.view ? "on" : ""}" data-go="${n.id}">
-        <span class="num">${n.n}</span><span>${n.t}</span>
+        <span>${n.t}</span>
         ${badge ? `<span class="badge">${badge}</span>` : ""}</button>`;
     }).join("");
 }
@@ -349,10 +348,18 @@ function tabbar(m) {
   return ts.length ? `<div class="tabs">${ts.map((t, i) =>
     `<button class="${i === S.tab ? "on" : ""}" data-tab="${i}">${t}</button>`).join("")}</div>` : "";
 }
+/* The section a module sits under in the menu -- "Inspections",
+   "Nonconformance". Used for the page eyebrow now that "Module 3" refers
+   to a number the menu no longer shows. */
+function navGroup(id) {
+  let g = "";
+  for (const n of NAV) { if (n.g) g = n.g; else if (n.id === id) return g; }
+  return "";
+}
 function head(m, desc, act) {
   return `<div class="phead"><div>
     <h1>${m.t}</h1><div class="accent"></div>
-    <div class="eyebrow">Module ${m.n} · ACTOM QMS 360</div>
+    <div class="eyebrow">${esc(navGroup(m.id))}</div>
     ${desc ? `<p>${desc}</p>` : ""}</div><div class="pact">${act || ""}</div></div>`;
 }
 
@@ -438,8 +445,8 @@ function vExec() {
       ${kpi("Customer cares open", d.cares_open,
         d.cares_no_reply ? `${d.cares_no_reply} with no reply yet` : "all have been answered",
         d.cares_no_reply ? "alert" : "good")}
-      ${kpi(`Cost of quality · FY from ${esc(fy)}`, money(d.cost_of_quality),
-        `from ${d.cost_records} of ${d.cost_population} records that carry a cost`)}
+      ${kpi("Cost of quality", money(d.cost_of_quality),
+        `financial year from ${esc(fy)} · ${d.cost_records} of ${d.cost_population} records carry a cost`)}
     </div>
 
     <!-- The right column stacks two panels so it fills the chart's height.
@@ -5168,7 +5175,7 @@ function lineBarChart(rows, opts) {
      also need less room underneath, which is most of why the chart was
      taller than three bars warranted. */
   const flat = rows.length <= 7;
-  const W = opts.width || 760, H = flat ? 214 : 250, padL = 40, padR = 16, padT = 24, padB = flat ? 30 : 48;
+  const W = opts.width || 760, H = flat ? 222 : 256, padL = 44, padR = 16, padT = 26, padB = flat ? 34 : 52;
   if (!rows.length) return `<div class="empty">${esc(opts.empty || "No data yet.")}</div>`;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const vals = rows.map(r => Number(r.v) || 0);
@@ -5178,11 +5185,11 @@ function lineBarChart(rows, opts) {
   const y = v => padT + plotH - (v / max) * plotH;
   /* Flat labels are cut to what fits the column, with the full text kept
      in a <title> so nothing is lost on hover. */
-  const fit = Math.max(4, Math.floor(step / 6.2));
+  const fit = Math.max(4, Math.floor(step / 7.4));
   const axisLabel = (k, cx) => flat
-    ? `<text x="${cx}" y="${H - padB + 17}" text-anchor="middle" font-size="10.5"
+    ? `<text x="${cx}" y="${H - padB + 17}" text-anchor="middle" font-size="12.5"
         fill="var(--ink-2)"><title>${esc(k)}</title>${esc(k.length > fit ? k.slice(0, fit - 1) + "…" : k)}</text>`
-    : `<text x="${cx}" y="${H - padB + 16}" text-anchor="middle" font-size="9.5"
+    : `<text x="${cx}" y="${H - padB + 16}" text-anchor="middle" font-size="12"
         fill="var(--ink-2)" transform="rotate(-42 ${cx} ${H - padB + 16})">${esc(k)}</text>`;
   const tick = Math.max(1, Math.round(max / 4));
   const ticks = []; for (let v = 0; v <= max; v += tick) ticks.push(v);
@@ -5190,13 +5197,13 @@ function lineBarChart(rows, opts) {
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
     ${ticks.map(v => `<line x1="${padL}" x2="${W - padR}" y1="${y(v)}" y2="${y(v)}"
         stroke="var(--line)" stroke-width="1"/>
-      <text x="${padL - 7}" y="${y(v) + 4}" text-anchor="end" font-size="10"
+      <text x="${padL - 7}" y="${y(v) + 4}" text-anchor="end" font-size="12"
         fill="var(--muted)">${v}</text>`).join("")}
     ${rows.map((r, i) => {
       const cx = padL + step * i + step / 2;
       if (r.v == null) {
         /* No bar, and said so. See the note above. */
-        return `<text x="${cx}" y="${y(0) - 6}" text-anchor="middle" font-size="9"
+        return `<text x="${cx}" y="${y(0) - 6}" text-anchor="middle" font-size="12"
                   fill="var(--muted)">none</text>
           ${axisLabel(r.k, cx)}`;
       }
@@ -5215,13 +5222,13 @@ function lineBarChart(rows, opts) {
       return `<rect x="${cx - barW / 2}" y="${y(r.v)}" width="${barW}" height="${y(0) - y(r.v)}"
           rx="2" fill="${over ? "var(--bad, #c0392b)" : "var(--brand, #1f4e79)"}"
           ><title>${esc(r.k)}: ${r.v}${esc(opts.unit || "")}</title></rect>
-        <text x="${cx}" y="${y(r.v) - 6}" text-anchor="middle" font-size="12"
+        <text x="${cx}" y="${y(r.v) - 6}" text-anchor="middle" font-size="13.5"
           font-weight="700" fill="${over ? "var(--bad, #c0392b)" : "var(--brand-dk, #16304f)"}">${r.v}</text>
         ${axisLabel(r.k, cx)}`;
     }).join("")}
     ${opts.limit != null ? `<line x1="${padL}" x2="${W - padR}" y1="${y(opts.limit)}" y2="${y(opts.limit)}"
         stroke="var(--bad, #c0392b)" stroke-width="2" stroke-dasharray="6 4"/>
-      <text x="${W - padR}" y="${y(opts.limit) - 5}" text-anchor="end" font-size="10"
+      <text x="${W - padR}" y="${y(opts.limit) - 5}" text-anchor="end" font-size="12"
         font-weight="600" fill="var(--bad, #c0392b)">limit ${opts.limit}${esc(opts.unit || "")}</text>` : ""}
     <line x1="${padL}" x2="${W - padR}" y1="${y(0)}" y2="${y(0)}" stroke="var(--ink-2)" stroke-width="1"/>
   </svg>`;

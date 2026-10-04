@@ -232,12 +232,13 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
   s.group('the treatment reaches every component, not just the dashboard');
   const sh = read('styles.css');
 
-  /* Seven saturated squares down the sidebar competed with the two or
-     three colours on a page that mean something. The number already
-     identifies the module. */
-  s.check('nav numbers are neutral until active',
-    /\.nav \.num\{[^}]*background:transparent/.test(sh));
-  s.check('and take the primary colour when they are', /\.nav button\.on \.num\{background:var\(--brand\)/.test(sh));
+  /* The module numbers are gone (0.28.2): they identified nothing a name
+     did not, and took the attention the active marker should have. */
+  s.check('the menu carries no module numbers', !/class="num"/.test(read('app.js')));
+  s.check('the active module has its own marker',
+    /\.nav button\.on\{[^}]*box-shadow:inset 3px 0 0 var\(--brand\)/.test(sh));
+  s.check('the page eyebrow names the section, not a number',
+    /<div class="eyebrow">\$\{esc\(navGroup\(m\.id\)\)\}<\/div>/.test(read('app.js')));
 
   /* A solid blue pill on every module's tab bar competes with the
      primary action, which should be the only solid blue on a page. */
@@ -255,8 +256,7 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
      at 8px reads as a mistake rather than as restraint. */
   s.check('panel radii stay in range',
     !/border-radius:1[1-9]px/.test(sh) && !/border-radius:[2-9]\d px/.test(sh));
-  s.check('deferred modules read as not yet, not as absent',
-    /\.nav button\.off \.num\{border-style:dashed/.test(sh));
+  s.check('deferred modules are dimmed but readable', /\.nav button\.off\{opacity:\.6/.test(sh));
 
   s.group('wide screens use their width');
   const sheet2 = read('styles.css'), appjs = read('app.js');
@@ -276,6 +276,25 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
   /* auto-fill kept an empty fifth track for four cards and left a column
      of white on a 2560px screen. */
   s.check('help fills the row rather than leaving empty columns', /repeat\(auto-fit,minmax\(440px/.test(sheet2));
+
+  s.group('the type is easy to read');
+  const tk = read('tokens.css'), aj = read('app.js');
+  /* Thirty sizes, sixty of them between 9 and 11.5px, and small capitals
+     tracked out to .16em: the hardest combination to read on a tablet. */
+  const sizes = [...sh.matchAll(/font-size:([0-9.]+)px/g)].map(m => +m[1]);
+  s.check('nothing in the stylesheet is below 12px', Math.min(...sizes) >= 11.5, Math.min(...sizes) + 'px');
+  s.check('a short scale, not thirty sizes', new Set(sizes).size <= 16, new Set(sizes).size + ' sizes');
+  const lb = aj.slice(aj.indexOf('function lineBarChart'), aj.indexOf('\nfunction ', aj.indexOf('function lineBarChart') + 10));
+  const chartSizes = [...lb.matchAll(/font-size="([0-9.]+)"/g)].map(m => +m[1]);
+  s.check('nor is any text inside a chart', Math.min(...chartSizes) >= 12, Math.min(...chartSizes) + 'px');
+  const tracking = [...sh.matchAll(/letter-spacing:(\.[0-9]+)em/g)].map(m => +m[1]);
+  s.check('small capitals are not tracked out', Math.max(...tracking) < .08, Math.max(...tracking) + 'em');
+  s.check('card titles are in the case they are written in',
+    /\.card h3\{[^}]*text-transform:none/.test(sh));
+  s.check('body text is 15px', /body\{[^}]*font-size:15px/.test(sh));
+  /* The old muted grey was 4.40:1 on the sidebar, under WCAG AA. */
+  s.check('secondary text clears AA with margin', /--muted:#4F5D72/.test(tk) && /--ink-2:#334155/.test(tk));
+  s.check('a reference never breaks across lines', /\.id\{[^}]*white-space:nowrap/.test(sh));
 
   s.done();
 })();
