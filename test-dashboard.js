@@ -150,7 +150,7 @@ s.group('it reads as a dashboard, not a stack of tables');
 /* A column of percentages makes you read every row to find the one that
    matters. A chart against a target line shows you. */
 s.check('pass rate by stage is drawn, not tabulated',
-  /lineBarChart\(stages\.map/.test(exSrc));
+  /fitBox\("stageChart", "line", stages\.map/.test(exSrc));
 s.check('with the target drawn on it', /limit: target, unit: "%"/.test(exSrc));
 s.check('and a legend saying what the colours mean', /below target/i.test(exSrc));
 
@@ -162,8 +162,7 @@ s.check('it counts what actually needs acting on', /const outstanding = attentio
 s.check('and says so when nothing does', /Nothing on this page is outstanding/.test(exSrc));
 
 /* A header reading nothing above two unlabelled columns is furniture. */
-s.check('label-and-figure lists have no empty header band',
-  /const lines = rows =>/.test(exSrc) && /\.statline/.test(require('fs').readFileSync(require('path').join(REPO, 'apps/inspect/styles.css'), 'utf8')));
+s.check('no list is drawn with an empty header band', !/T\(\["", ""\]/.test(exSrc));
 s.check('the page heading no longer prints undefined',
   /\$\{desc \? `<p>\$\{desc\}<\/p>` : ""\}/.test(exSrc));
 
@@ -173,8 +172,9 @@ s.group('a chart never states the opposite of the truth');
    complaints and response time, false for pass rate. */
 s.check('the helper takes the direction explicitly', /opts\.better === "higher"/.test(exSrc));
 s.check('pass rate says higher is better', /unit: "%", better: "higher"/.test(exSrc));
-s.check('every chart call states a direction',
-  (exSrc.match(/lineBarChart\(/g) || []).length - 1 === (exSrc.match(/better: "(higher|lower)"/g) || []).length);
+s.check('every chart states which way is good',
+  /fitBox\("stageChart", "line"[\s\S]{0,200}better: "higher"/.test(exSrc)
+  && (exSrc.match(/better: "lower"/g) || []).length === 2);
 
 /* An inline style beats the stylesheet. A colour set inline on the nav
    number cannot be overridden by the palette, which is how 0.27.2

@@ -450,15 +450,9 @@ function vExec() {
   /* A metric card as the brief draws it: label, figure, and a line whose
      colour carries the status. `extra` is anything between figure and
      line -- the yield's progress bar. */
-  const kpi = (k, v, note, tone, extra) =>
-    `<div class="card kpi ${tone || ""}"><div class="k">${esc(k)}</div>
+  const kpi = (k, v, note, tone, extra, title) =>
+    `<div class="card kpi ${tone || ""}"${title ? ` title="${esc(title)}"` : ""}><div class="k">${esc(k)}</div>
       <div class="v">${v}</div>${extra || ""}<div class="d">${note}</div></div>`;
-
-  /* A plain row of label and figure. T() draws a header band, and a
-     header reading nothing above two unlabelled columns is furniture. */
-  const lines = rows => rows.map(([k, v, tone]) => `
-    <div class="statline"><span>${esc(k)}</span>
-      <b class="${tone || ""}">${esc(String(v))}</b></div>`).join("");
 
   /* A card header in the brief's form: title, a quiet line saying what it
      covers, and anything that belongs on the right -- a legend, a link. */
@@ -479,34 +473,47 @@ function vExec() {
   ];
   const outstanding = attention.filter(([, n]) => Number(n) > 0);
 
-  /* The yield against its target, drawn as the reference draws its rate:
-     a bar, with a marker at the target so the gap is visible. */
   const yieldBar = fpy == null ? "" : `<div class="kbar ${fpy < target ? "under" : ""}"
       role="img" aria-label="First pass yield ${fpy}% against a ${target}% target">
       <i style="width:${Math.max(0, Math.min(100, fpy))}%"></i><b style="left:${target}%"></b></div>`;
 
-  /* The monthly chart, from v_inspections_by_month. Where a division has
-     not run 024 the slot shows pass rate by stage instead -- never an
-     empty chart, which would read as "no inspections this year". */
+  /* The cost split by source, which used to need a card of its own. */
+  const coq = S.costOfQuality || [];
+  const bySource = coq.map(x => `${x.source === "Nonconformance" ? "NCRs" : "customer cares"} ${money(x.cost)}`).join(" · ");
+  const withCost = `${d.cost_records} of ${d.cost_population} records carry a cost`;
+
+  /* THE CHARTS ARE DRAWN TWICE. Once here, small, so they do not hold the
+     grid open; then fitCharts() measures the space the layout actually
+     gave each one and redraws it to fill exactly that. The dashboard is
+     laid out to fill one screen, and a chart of fixed height either
+     overflows it or leaves a gap. */
   const months = S.inspByMonth;
   const mLabel = p => new Date(p).toLocaleDateString("en-ZA", { month: "short" });
-  const stageChart = stages.length
-    ? `<div class="chartbox stagechart">${lineBarChart(stages.map(x => ({ k: x.stage, v: Number(x.pass_rate) })),
-        { limit: target, unit: "%", better: "higher", width: chartWidth(1 / 2),
-          empty: "Nothing completed in the last 30 days." })}</div>`
-    : `<div class="empty">Nothing has been completed in the last 30 days.</div>`;
-  const monthly = months && months.length
-    ? `<div class="card">${ch("Inspections by month",
-          "Completed, and passed first time · last 12 months",
+  S.fit = {};
+  const fitBox = (id, kind, rows, opts, cls) => {
+    S.fit[id] = { kind, rows, opts };
+    return `<div class="chartbox fit ${cls || ""}" id="${id}">${kind === "grouped"
+      ? groupedBarChart(rows, { ...opts, height: S.fitH?.[id] || 210 })
+      : lineBarChart(rows, { ...opts, height: S.fitH?.[id] || 210 })}</div>`;
+  };
+  const hasMonths = !!(months && months.length);
+  const monthCard = hasMonths
+    ? `<div class="card ccard">${ch("Inspections by month", "Completed, and passed first time · last 12 months",
           `<span class="lg"><i class="dot dim"></i>Completed</span><span class="lg"><i class="dot"></i>Passed first time</span>`)}
-        <div class="bd"><div class="chartbox" id="monthChart">${groupedBarChart(
-          (S.monthChart = { rows: months.map(m => ({ k: mLabel(m.period), a: Number(m.completed), b: Number(m.passed) })),
-            opts: { width: chartWidth(2 / 3), names: ["Completed", "Passed first time"] } }).rows,
-          { ...S.monthChart.opts, height: narrow() ? 250 : (S.monthFitH || 352) })}</div></div></div>`
-    : `<div class="card">${ch("Pass rate by manufacturing stage", "Rolling 30 days")}
-        <div class="bd">${stageChart}</div></div>`;
+        <div class="bd">${fitBox("monthChart", "grouped",
+          months.map(m => ({ k: mLabel(m.period), a: Number(m.completed), b: Number(m.passed) })),
+          { width: chartWidth(0.37), names: ["Completed", "Passed first time"] })}</div></div>`
+    : "";
+  const stageCard = `<div class="card ccard${hasMonths ? "" : " span2"}">${ch("Pass rate by manufacturing stage", "Rolling 30 days",
+        `<span class="lg"><i class="dot bad"></i>Below target</span><span class="lg"><i class="dot"></i>At or above</span>`)}
+      <div class="bd">${stages.length
+        ? fitBox("stageChart", "line", stages.map(x => ({ k: x.stage, v: Number(x.pass_rate) })),
+            { limit: target, unit: "%", better: "higher", width: chartWidth(hasMonths ? 0.29 : 0.66),
+              empty: "Nothing completed in the last 30 days." }, "stagechart")
+        : `<div class="empty">Nothing has been completed in the last 30 days.</div>`}</div></div>`;
 
-  return `<div class="four">
+  return `<div class="execgrid">
+    <div class="four">
       ${kpi("First pass yield", fpy == null ? "—" : fpy + "%",
         fpy == null ? "no inspections completed in 30 days"
           : fpy >= target ? `at or above the ${target}% target`
@@ -516,45 +523,28 @@ function vExec() {
         `${d.ncrs_major} major · ${d.ncrs_critical} critical · ${d.ncrs_over_30d} over 30 days`,
         d.ncrs_over_30d ? "alert" : d.ncrs_open ? "" : "good")}
       ${kpi("Customer cares open", d.cares_open,
-        (d.cares_no_reply ? `${d.cares_no_reply} with no reply yet` : "all have been answered")
+        (d.cares_no_reply ? `${d.cares_no_reply} with no reply yet` : "all answered")
           + (d.care_response_days != null ? ` · ${d.care_response_days} days to answer on average` : ""),
         d.cares_no_reply ? "alert" : "good")}
       ${kpi("Cost of quality", money(d.cost_of_quality),
-        `financial year from ${esc(fy)} · ${d.cost_records} of ${d.cost_population} records carry a cost`)}
+        `${bySource ? bySource + "<br>" : ""}${withCost}`, "", "",
+        `Financial year from ${fy}. In Rands rather than as a share of turnover: this system inspects panels and does not invoice them, so it does not know what production was worth.`)}
     </div>
 
-    <div class="split">
-      ${monthly}
-      <div class="stack">
-        <!-- The brief's readiness panel, holding what this system has to
-             say about readiness: the records waiting on somebody. -->
-        <div class="card">${ch("What needs attention", "", `<span class="tagq">live</span>`)}
-          <div class="bd">${attention.map(([k, n, why]) => `
-            <div class="ready"><div><b>${esc(k)}</b><span>${esc(why)}</span></div>
-              <em class="rb ${Number(n) > 0 ? "bad" : "ok"}">${Number(n) > 0 ? esc(String(n)) : "None"}</em></div>`).join("")}
-            <button class="btn sm wide" data-go="work">Open the inspection workbench →</button>
-          </div></div>
+    ${monthCard}
+    ${stageCard}
 
-        <div class="summary">
-          <div class="k">Where this stands</div>
-          <p>${outstanding.length
-            ? `${outstanding.length} thing${outstanding.length === 1 ? "" : "s"} on this page
-               need${outstanding.length === 1 ? "s" : ""} somebody to act:
-               ${outstanding.map(([k, n]) => `${n} ${k.toLowerCase()}`).join(", ")}.`
-            : `Nothing on this page is outstanding. Every fault has a disposition, every
-               nonconformance has a cause, and no customer is waiting on a reply.`}</p>
-          ${fpy == null
-            ? `<p class="sub">No inspections have been completed in the last thirty days, so there is no yield to report.</p>`
-            : `<div class="sbar" role="img" aria-label="First pass yield ${fpy}% against a ${target}% target">
-                <i style="width:${Math.max(0, Math.min(100, fpy))}%"></i><b style="left:${target}%"></b></div>
-               <p class="sub">First pass yield ${fpy}% against a ${target}% target${fpy < target
-                 ? ` — ${(target - fpy).toFixed(1)} points short` : ""}.</p>`}
-        </div>
-      </div>
-    </div>
+    <!-- The brief's readiness panel, holding what this system has to
+         say about readiness: the records waiting on somebody. -->
+    <div class="card attn">${ch("What needs attention", "", `<span class="tagq">live</span>`)}
+      <div class="bd">${attention.map(([k, n, why]) => `
+        <div class="ready"><div><b>${esc(k)}</b><span>${esc(why)}</span></div>
+          <em class="rb ${Number(n) > 0 ? "bad" : "ok"}">${Number(n) > 0 ? esc(String(n)) : "None"}</em></div>`).join("")}
+        <button class="btn sm wide" data-go="work">Open the inspection workbench →</button>
+      </div></div>
 
-    <!-- The brief's department-context section, full width. -->
-    <div class="card" style="margin-bottom:13px">${ch("Nonconformances by department", "This year",
+    <!-- The brief's department-context section. -->
+    <div class="card dept">${ch("Nonconformances by department", "This year",
         `<button class="link" data-go="ncr">Open NCR management →</button>`)}
       <div class="bd">${(S.ncrByDept || []).length
         ? `<div class="deptgrid">${(S.ncrByDept || []).slice(0, 12).map(x => `
@@ -566,69 +556,53 @@ function vExec() {
         : `<div class="empty">Nothing recorded against a department yet.</div>`}
       </div></div>
 
-    <div class="pair">
-      ${months && months.length ? `<div class="card">${ch("Pass rate by manufacturing stage", "Rolling 30 days",
-          `<span class="lg"><i class="dot bad"></i>Below target</span><span class="lg"><i class="dot"></i>At or above</span>`)}
-        <div class="bd">${stageChart}</div></div>` : ""}
-      <div class="card">${ch("Cost of quality", `Financial year from ${fy}`)}
-        <div class="bd">
-        ${lines((S.costOfQuality || []).map(x => [
-          `${x.source} · ${x.records_with_cost} of ${x.records} carry a cost`, money(x.cost)]))}
-        <div class="note" style="margin-top:11px">Rands rather than a share of turnover. This
-          system inspects panels; it does not invoice them, so it does not know what production
-          was worth, and a percentage against a figure nobody has gets quoted and cannot be
-          defended.</div>
-      </div></div>
+    <div class="summary">
+      <div class="k">Where this stands</div>
+      <p>${outstanding.length
+        ? `${outstanding.length} thing${outstanding.length === 1 ? "" : "s"}
+           need${outstanding.length === 1 ? "s" : ""} somebody to act:
+           ${outstanding.map(([k, n]) => `${n} ${k.toLowerCase()}`).join(", ")}.`
+        : `Nothing on this page is outstanding. Every fault has a disposition, every
+           nonconformance has a cause, and no customer is waiting on a reply.`}</p>
     </div>
+  </div>`;
+}
 
-    <!-- A strip, not a card. A full panel listing five em-dashes spent a
-         quarter of the screen saying "nothing here". -->
-    <div class="notbuilt">
-      <b>Not built yet</b>
-      <span>Calibration · Supplier quality · Document control · Training &amp; competency · Audits &amp; compliance</span>
-      <em>No tile above for any of these, deliberately: a zero against Calibration would read
-        as nothing overdue, when what is true is that nobody is tracking it here.</em>
-    </div>`;
+/* Fit each chart to the space the layout gave it.
+
+   The dashboard fills one screen: the charts' row takes whatever height is
+   left after the headline cards and the bottom row. So the charts are first
+   drawn small, then each is measured -- the width of its box and the
+   height left in its card below the header -- and redrawn to fill exactly
+   that. Measured, not estimated, because the space differs with every
+   screen and with how the text in the other cards wraps.
+
+   Not on a stacked (narrow) layout, where there is no fixed height to
+   fill and the page simply scrolls. Heights are remembered so the next
+   draw starts at the right size instead of jumping. */
+function fitCharts() {
+  const grid = document.querySelector(".execgrid");
+  if (!grid || !S.fit) return;
+  const stacked = getComputedStyle(grid).gridTemplateColumns.split(" ").length < 3;
+  for (const [id, f] of Object.entries(S.fit)) {
+    const box = $(id);
+    const card = box && box.closest(".card");
+    if (!card) continue;
+    const c = card.getBoundingClientRect(), b = box.getBoundingClientRect();
+    if (!c.height || !b.width) continue;                        // not laid out (tests)
+    const below = parseFloat(getComputedStyle(box.parentElement).paddingBottom) || 0;
+    const h = stacked ? 250 : Math.round(Math.max(150, Math.min(1100, c.bottom - b.top - below)));
+    const w = Math.round(b.width);
+    S.fitH = { ...(S.fitH || {}), [id]: h };
+    const opts = { ...f.opts, width: Math.max(stacked ? 460 : 260, w), height: h };
+    box.innerHTML = f.kind === "grouped" ? groupedBarChart(f.rows, opts) : lineBarChart(f.rows, opts);
+  }
 }
 
 /* Two series side by side per category -- the brief's monthly comparison.
    Drawn at its real width like lineBarChart, so text stays the same size
    on any screen. The quieter series is the total, the primary blue the
    part of it that matters, as in the reference. */
-
-/* Size the monthly chart to the column beside it.
-
-   The right-hand column -- the attention panel and the summary -- is a
-   different height at every screen width, because its text wraps
-   differently. A chart of fixed height left between 90 and 190px of empty
-   card beneath it depending on the screen. So after the page is drawn,
-   the chart is redrawn at the height that brings the two sides level.
-   Only when they sit side by side; stacked on a narrow screen there is
-   nothing to match. Remembered, so the next draw starts at the right
-   height rather than jumping. */
-function fitMonthlyChart() {
-  const box = $("monthChart");
-  if (!box || !S.monthChart) return;
-  const card = box.closest(".card"), split = card && card.parentElement;
-  const stack = split && split.querySelector(".stack");
-  const svg = box.querySelector("svg");
-  if (!stack || !svg) return;
-  if (getComputedStyle(split).gridTemplateColumns.split(" ").length < 2) return;
-  const c = card.getBoundingClientRect(), stackH = stack.getBoundingClientRect().height;
-  const g = svg.getBoundingClientRect();
-  if (!c.height || !stackH || !g.height) return;                // not laid out (tests)
-  /* What the card needs besides the chart: everything above it, and the
-     padding below it. Not card height minus chart height -- the card is
-     stretched to the column, so that difference IS the empty space, and
-     the first version of this function measured it as padding and so
-     never changed anything. */
-  const below = parseFloat(getComputedStyle(box.parentElement).paddingBottom) || 0;
-  const chrome = (g.top - c.top) + below;
-  const want = Math.round(Math.max(236, Math.min(560, stackH - chrome)));
-  if (Math.abs(want - g.height) < 6) return;
-  S.monthFitH = want;
-  box.innerHTML = groupedBarChart(S.monthChart.rows, { ...S.monthChart.opts, height: want });
-}
 
 function groupedBarChart(rows, opts) {
   const W = opts.width || 760, H = opts.height || 236, padL = 44, padR = 12, padT = 18, padB = 34;
@@ -5314,7 +5288,7 @@ function lineBarChart(rows, opts) {
      also need less room underneath, which is most of why the chart was
      taller than three bars warranted. */
   const flat = rows.length <= 7;
-  const W = opts.width || 760, H = flat ? 222 : 256, padL = 44, padR = 16, padT = 26, padB = flat ? 34 : 52;
+  const W = opts.width || 760, H = opts.height || (flat ? 222 : 256), padL = 44, padR = 16, padT = 26, padB = flat ? 34 : 52;
   if (!rows.length) return `<div class="empty">${esc(opts.empty || "No data yet.")}</div>`;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const vals = rows.map(r => Number(r.v) || 0);
@@ -5418,12 +5392,14 @@ function vAfterSales() {
           : `<div class="empty">Nothing recorded for that month.</div>`}
       </div></div>
       <div class="card"><h3>This year so far</h3><div class="bd">
-        ${T(["", ""], [
-          ["Customer cares", months.reduce((a, m) => a + Number(m.cares), 0)],
-          ["Still open", months.reduce((a, m) => a + Number(m.still_open), 0)],
-          ["Cleared with a date", months.reduce((a, m) => a + Number(m.cleared), 0)],
-          ["Cost recorded", "R" + months.reduce((a, m) => a + Number(m.cost || 0), 0).toLocaleString("en-ZA")]
-        ])}
+        ${/* Label and figure, as on the dashboard. T(["",""]) drew an empty
+             grey header band above two unlabelled columns -- found here by
+             the same check that removed it from the dashboard in 0.27.1. */
+          [["Customer cares", months.reduce((a, m) => a + Number(m.cares), 0)],
+           ["Still open", months.reduce((a, m) => a + Number(m.still_open), 0)],
+           ["Cleared with a date", months.reduce((a, m) => a + Number(m.cleared), 0)],
+           ["Cost recorded", "R" + months.reduce((a, m) => a + Number(m.cost || 0), 0).toLocaleString("en-ZA")]
+          ].map(([k, v]) => `<div class="statline"><span>${esc(k)}</span><b>${esc(String(v))}</b></div>`).join("")}
       </div></div>
     </div>
 
@@ -5928,7 +5904,10 @@ function render() {
      that belongs in Administration -- and on a wide monitor it added a
      band of empty space below every page. */
   $("page").innerHTML = VIEWS[S.view](m);
-  if (S.view === "main" && S.tab === 0) requestAnimationFrame(fitMonthlyChart);
+  /* The dashboard fills one screen; every other page scrolls as normal. */
+  const exec = S.view === "main" && S.tab === 0;
+  $("page").classList.toggle("fill", exec);
+  if (exec) requestAnimationFrame(fitCharts);
 
   $("whoName").textContent = S.profile.full_name;
   $("whoEmail").textContent = S.profile.email;

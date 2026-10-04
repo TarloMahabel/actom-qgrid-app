@@ -103,10 +103,10 @@ input,select,textarea{font-family:inherit;font-size:inherit}
    .16em at 9.5px that made the old ones hard to read, not the tracking
    itself. */
 .nav .grp{font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
-  padding:20px 10px 7px;font-weight:700;margin-top:6px;border-top:1px solid var(--line)}
+  padding:15px 10px 6px;font-weight:700;margin-top:5px;border-top:1px solid var(--line)}
 .nav .grp:first-child{border-top:0;margin-top:0;padding-top:12px}
 .nav button{display:flex;align-items:center;gap:10px;width:100%;background:none;border:0;color:var(--ink-2);
-  padding:8px 10px;border-radius:var(--r-sm);text-align:left;font-size:14px;font-weight:500;line-height:1.25;
+  padding:6.5px 10px;border-radius:var(--r-sm);text-align:left;font-size:14px;font-weight:500;line-height:1.25;
   position:relative;margin:1px 0}
 .nav .ni{flex:0 0 17px;color:var(--muted)}
 .nav button:hover{background:rgba(255,255,255,.7);color:var(--ink)}
@@ -848,4 +848,73 @@ input:focus, select:focus, textarea:focus{
      past its card's edge. One column on a phone, as the brief asks:
      stacked, without clipping. */
   .four{grid-template-columns:1fr}
+}
+
+/* =====================================================================
+   The dashboard on one screen.
+
+   It ran to about 1,500px on a 1080p monitor, so half of it sat below
+   the fold -- and a dashboard you have to scroll is one whose bottom half
+   nobody reads. On a screen large enough, the page is now exactly the
+   height of the window: headline cards across the top, the bottom row at
+   its natural height, and the charts' row taking everything in between.
+   fitCharts() then redraws each chart to fill the space it was given.
+
+   The charts' row is minmax(min-content, 1fr), not 1fr or minmax(0,1fr):
+   it takes the spare height when there is some, but never less than the
+   attention panel needs. On a short window the page grows and scrolls
+   rather than cards overlapping or being cut off.
+
+   Below 1200px wide, or 700px tall, none of this applies: the cards stack
+   and the page scrolls, which on a tablet or phone is what people expect.
+   ===================================================================== */
+.execgrid{display:grid;grid-template-columns:1fr;gap:12px}
+.execgrid > .four{grid-column:1 / -1;margin:0}
+.execgrid > *{min-width:0}
+.ccard{display:flex;flex-direction:column}
+.ccard > .bd{flex:1;min-height:0}
+.attn > .bd{padding-bottom:14px}
+.attn .ready{padding:9px 0}
+
+@media(min-width:1200px){
+  .execgrid{grid-template-columns:1.3fr 1fr .95fr;grid-template-rows:auto minmax(min-content,1fr) auto}
+  .execgrid > .ccard.span2{grid-column:1 / 3}
+  .execgrid > .dept{grid-column:1 / 3}
+  .execgrid > .summary{display:flex;flex-direction:column;justify-content:center}
+}
+@media(min-width:1200px) and (min-height:640px){
+  .page.fill{display:flex;flex-direction:column;height:calc(100vh - 52px);box-sizing:border-box;
+    padding-top:14px;padding-bottom:14px}
+  .page.fill > .phead{margin:0 0 12px}
+  .page.fill > .execgrid{flex:1;min-height:0}
+  .page.fill .kpi{padding:13px 16px}
+  .page.fill .kpi .v{font-size:24px;margin:6px 0 5px}
+  .page.fill .dept .deptrow{margin-bottom:5px}
+  .page.fill .dept > .bd{padding-top:8px;padding-bottom:10px}
+}
+@media(min-width:760px) and (max-width:1199px){
+  .execgrid{grid-template-columns:1fr 1fr}
+  .execgrid > .ccard{grid-column:1 / -1}
+}
+
+/* The 460px minimum on charts is a phone rule: it keeps labels readable by
+   letting the chart scroll sideways rather than shrink. On a desktop grid a
+   chart's column can be narrower than 460px, and the minimum then
+   stretched the drawing -- proportionally, so its height grew with it:
+   a stage chart measured 439px tall in a space for 300 at 1440x900, which
+   pushed the page into scrolling. From 760px up, charts are drawn at
+   exactly their box's measured width and need no minimum. */
+@media(min-width:760px){.execgrid .chartbox > svg{min-width:0}}
+
+/* Shorter screens: the second line under each attention item goes, and
+   the page description with it, so the dashboard still fits a 1280x720
+   window rather than scrolling for want of 90px. */
+@media(min-width:1200px) and (max-height:820px){
+  .page.fill .attn .ready span{display:none}
+  .page.fill .attn .ready{padding:7px 0}
+  .page.fill > .phead p{display:none}
+  .page.fill .summary p{margin-bottom:6px}
+  /* The workbench is one click away in the menu; on a short screen its
+     button here is the difference between fitting and scrolling. */
+  .page.fill .attn .btn.wide{display:none}
 }

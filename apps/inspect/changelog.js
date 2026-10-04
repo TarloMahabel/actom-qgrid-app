@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.29.0";
+window.APP_VERSION = "0.29.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.29.1", d: "2026-10-04", t: "The dashboard fits on one screen",
+    items: [
+      "The dashboard now fits on a single screen on an ordinary desktop monitor, with nothing to scroll down to. The two charts sit side by side with What needs attention, and size themselves to fill whatever space the screen leaves.",
+      "The separate cost of quality panel has gone; its split between nonconformances and customer cares is now on the cost card itself. Hover over that card for the financial year and why the figure is in Rands.",
+      "The note about modules not built yet has gone from the dashboard. The menu already shows them locked, and Help explains why they have no figures.",
+      "On a smaller laptop screen the dashboard may still need a short scroll; on a tablet or phone the panels stack as before.",
+      "Fixed: the This year so far panel on the After Sales report had an empty grey heading bar above its figures."
+    ]
+  },
   {
     v: "0.29.0", d: "2026-10-04", t: "The full design brief",
     items: [

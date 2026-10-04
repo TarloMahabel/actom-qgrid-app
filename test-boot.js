@@ -254,7 +254,7 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
      left; a rule and space separate the sections. */
   s.check('every menu item carries an icon', /\$\{navIcon\(n\.id\)\}<span>/.test(read('app.js')));
   s.check('section headings are separated by space and a rule',
-    /\.nav \.grp\{[^}]*padding:20px[^}]*border-top:1px solid var\(--line\)/.test(sh));
+    /\.nav \.grp\{[^}]*padding:1\dpx[^}]*border-top:1px solid var\(--line\)/.test(sh));
   s.check('the division sits at the foot of the menu', /class="divnm" id="sideDivision"/.test(read('index.html')));
   s.check('the eyebrow comes before the title', /<div class="eyebrow">\$\{esc\(navGroup\(m\.id\)\)\}<\/div>\s*<h1>/.test(read('app.js')));
   s.check('the page eyebrow names the section, not a number',
@@ -290,18 +290,25 @@ const CONFIG = 'window.GRID_CONFIG={url:"https://abcdefghij.supabase.co",key:"ey
   /* With the cap gone a fixed 760-unit chart stretched to 2560px drew its
      labels at about 24px. It is drawn at its real width instead. */
   s.check('charts are drawn at the width they are shown', /width: chartWidth\(/.test(appjs));
-  /* The refit redraws with the options stored at first draw, width
-     included, so it is counted by what it reuses rather than repeated. */
-  s.check('every chart call passes its width',
-    (appjs.match(/(lineBarChart|groupedBarChart)\((?!S\.monthChart)/g) || []).length - 2
-      === (appjs.match(/width: chartWidth\(/g) || []).length);
-  s.check('the refit reuses the stored width', /groupedBarChart\(S\.monthChart\.rows, \{ \.\.\.S\.monthChart\.opts/.test(appjs)
-    && /opts: \{ width: chartWidth\(2 \/ 3\)/.test(appjs));
-  /* Sized to the column beside it. The first version measured card minus
-     chart, which -- with the card stretched -- is the empty space itself,
-     and so never changed anything. */
-  s.check('the monthly chart is fitted to the column beside it',
-    /const chrome = \(g\.top - c\.top\) \+ below/.test(appjs) && /requestAnimationFrame\(fitMonthlyChart\)/.test(appjs));
+  /* Dashboard charts are drawn through fitBox, small, then redrawn by
+     fitCharts at the width and height the layout actually gave them. */
+  s.check('both dashboard charts start from an estimated width',
+    /fitBox\("monthChart"[\s\S]{0,400}width: chartWidth\(/.test(appjs) && /fitBox\("stageChart"[\s\S]{0,300}width: chartWidth\(/.test(appjs));
+  s.check('and are redrawn at the measured width', /width: Math\.max\(stacked \? 460 : 260, w\)/.test(appjs));
+  s.check('the After Sales charts pass their width', (appjs.match(/better: "lower", width: chartWidth\(1\)/g) || []).length === 2);
+  /* Height is what is left in the card below the header -- measured, not
+     card minus chart, which with the card stretched is the empty space. */
+  s.check('charts are fitted to the height the layout gives them',
+    /c\.bottom - b\.top - below/.test(appjs) && /requestAnimationFrame\(fitCharts\)/.test(appjs));
+  /* A dashboard you have to scroll is one whose bottom half nobody reads. */
+  s.check('the dashboard page is one screen tall on a large display',
+    /\.page\.fill\{[^}]*height:calc\(100vh - 52px\)/.test(sh) && /\$\("page"\)\.classList\.toggle\("fill", exec\)/.test(appjs));
+  s.check('the charts row takes the spare height but never less than its content',
+    /grid-template-rows:auto minmax\(min-content,1fr\) auto/.test(sh));
+  /* The phone minimum stretched desktop charts proportionally, 439px tall
+     in a 300px space. */
+  s.check('the phone minimum chart width does not apply on a desktop grid',
+    /@media\(min-width:760px\)\{\.execgrid \.chartbox > svg\{min-width:0\}\}/.test(sh));
   s.check('the quieter chart series is outlined to meet 3:1', /"#E2E8F0", opts\.names\[0\], r\.k, "#7D8DA3"/.test(appjs));
   s.check('a division without 024 gets the stage chart, not an empty one', /S\.inspByMonth = ibm\.error \? null/.test(appjs));
   s.check('and are redrawn when the window changes size', /chartResizeT = setTimeout/.test(appjs));
