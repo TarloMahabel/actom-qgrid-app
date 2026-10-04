@@ -326,7 +326,23 @@ function buildNav() {
         ${badge ? `<span class="badge">${badge}</span>` : ""}</button>`;
     }).join("");
 }
-const go = v => { S.view = v; S.tab = 0; buildNav(); render(); window.scrollTo(0, 0); };
+/* The narrow-screen menu. Opening it moves focus into it; closing puts
+   focus back on the button, so a keyboard or screen-reader user is never
+   left somewhere they cannot see. */
+const narrow = () => window.innerWidth <= 900;
+function setMenu(open) {
+  const side = document.querySelector(".side"), btn = $("btnMenu"), scrim = $("sideScrim");
+  if (!side) return;
+  open = !!open && narrow();
+  side.classList.toggle("open", open);
+  scrim?.classList.toggle("hidden", !open);
+  if (btn) {
+    btn.setAttribute("aria-expanded", String(open));
+    btn.setAttribute("aria-label", open ? "Close the menu" : "Open the menu");
+  }
+  if (open) side.querySelector("#nav button")?.focus({ preventScroll: true });
+}
+const go = v => { setMenu(false); S.view = v; S.tab = 0; buildNav(); render(); window.scrollTo(0, 0); };
 function tabsFor(m) { return m.tabs; }
 function tabbar(m) {
   const ts = tabsFor(m);
@@ -2553,6 +2569,7 @@ function vPrint() {
   /* One print view, three kinds of record. */
   if ((S.report || {}).kind === "ncr") return vNcrPrint();
   if ((S.report || {}).kind === "care") return vCarePrint();
+  if ((S.report || {}).kind === "help") return vHelpPrint();
 
   const rep = S.report || {};
   const insp = byId(S.inspections, rep.id);
@@ -5324,8 +5341,412 @@ function vCust(m) {
   return head(m) + body;
 }
 
+
+/* =====================================================================
+   Help, the help guide, and the tour.
+
+   ONE BODY OF CONTENT, THREE WAYS IN. The Help page, the printable guide
+   and the tour all read from HELP below. Written once, it cannot say one
+   thing on screen and another on paper.
+
+   HELP THAT IS WRONG IS WORSE THAN NONE. The Customer cares form went on
+   telling people a technical care needed a linked NCR for a release after
+   the rule had changed to a root cause, and a test was defending the old
+   wording. So test-help.js checks this content against the application:
+   every topic that names a module must name one that exists, every tab
+   it mentions must be a real tab, and every live module must have a
+   topic. If a module is renamed or a tab removed, the suite fails until
+   the help is updated -- rather than the help quietly drifting.
+
+   Written for the person using the system, in the same voice as the
+   release notes. No database terms, no developer vocabulary.
+   ===================================================================== */
+const HELP = [
+  /* ---------------- Getting started ---------------- */
+  { sec: "start", id: "welcome", title: "What this system is for",
+    body: [
+      "ACTOM QMS 360 is where this division records its quality work: the inspections done on panels as they are built, the faults those inspections find, the nonconformances raised when something is wrong, and the complaints customers make after delivery.",
+      "It replaces the spreadsheets and paper forms those used to live on. The difference that matters is that it keeps the record honest: it records who did what and when, it will not let a record be closed without the information an auditor would look for, and it does not let a finished record be quietly edited afterwards."
+    ] },
+  { sec: "start", id: "signin", title: "Signing in for the first time",
+    body: [
+      "Sign in with your ACTOM Microsoft account. The first time you do, your account is created but switched off, so you will see a message saying you are waiting for access.",
+      "That is deliberate. A System Administrator has to switch you on and give you a role before you can see anything, because what you are allowed to do depends on that role. If you have been waiting more than a working day, ask your Quality Manager."
+    ] },
+  { sec: "start", id: "layout", title: "Finding your way around",
+    body: [
+      "The modules are down the left-hand side, grouped by what they deal with: inspections, nonconformance, customer cares, and setup. Most modules have tabs across the top of the page.",
+      "The search box at the top finds inspections, works orders and panel serials. The red and green figures beside it are how many inspections are overdue and the pass rate over the last thirty days.",
+      "Modules under Later phases are greyed out because they have not been built yet. They are shown so you can see what is coming, not because something is broken."
+    ] },
+  { sec: "start", id: "roles", title: "What your role lets you do",
+    body: [
+      "Inspector — capture inspections assigned to you, record faults, take photographs, sign, and raise a nonconformance.",
+      "Supervisor — as an inspector, and can edit open nonconformances and customer cares.",
+      "Planner — schedules inspections and manages projects and works orders.",
+      "Quality Engineer — investigates nonconformances, records causes and corrective actions, and sees the reports.",
+      "Quality Manager and System Administrator — everything above, plus the setup modules: the form designer, the inspection requirements, and administration.",
+      "Read only — can see the registers and reports but cannot change anything."
+    ] },
+
+  /* ---------------- The modules ---------------- */
+  { sec: "modules", id: "m-main", view: "main", title: "Dashboard",
+    tabs: ["Executive", "Across the modules"],
+    body: [
+      "The Executive tab is one page answering how quality is doing: first pass yield against the target, nonconformances and customer cares still open, and the cost of quality for the financial year.",
+      "What needs attention lists records somebody has to act on, not statistics. The blue panel says in a sentence how many of them there are.",
+      "There is no figure for a module that has not been built. A zero against Calibration would read as nothing overdue, when what is true is that nobody is tracking it here."
+    ] },
+  { sec: "modules", id: "m-work", view: "work", title: "Inspection workbench",
+    tabs: ["My queue", "Capture", "Register", "Failed checks"],
+    body: [
+      "My queue is the inspections assigned to you. Open one to capture it.",
+      "On the Capture tab, work down the form. A measurement outside its tolerance is flagged as you enter it. Some fields need photographs, and the form tells you how many. Sign at the end; once signed, an inspection is locked and cannot be edited.",
+      "If you cannot finish an inspection, hand it over to someone else rather than leaving it. You will be asked for a reason, which is kept on the record.",
+      "The Register lists completed inspections and anything carrying a failed check, with filters along the top. Report on any row prints it.",
+      "Failed checks lists the faults waiting for somebody to decide what happens to them."
+    ] },
+  { sec: "modules", id: "m-sched", view: "sched", title: "Scheduling",
+    tabs: ["Schedule", "Unassigned", "Projects & works orders"],
+    body: [
+      "Inspections are generated from works orders, using the inspection requirements to decide which forms each product needs at each stage.",
+      "Unassigned shows inspections nobody has been given yet; the number beside Scheduling in the left-hand menu counts them.",
+      "Projects and works orders are set up on the third tab."
+    ] },
+  { sec: "modules", id: "m-dash", view: "dash", title: "Inspection reports",
+    tabs: ["Overview", "Faults per project", "Actions", "Pass rate by stage"],
+    body: [
+      "Faults per project shows where faults are coming from for a chosen month. An empty month says so, rather than showing a blank chart that could be mistaken for a good month.",
+      "Actions is the list of improvement actions agreed at the monthly quality review, with their deadlines and whether they have started.",
+      "Pass rate by stage shows which manufacturing stage is letting faults through."
+    ] },
+  { sec: "modules", id: "m-ncr", view: "ncr", title: "NCR management",
+    tabs: ["Register", "Repeat causes", "By department", "By supplier", "Reports"],
+    body: [
+      "Raise a nonconformance when something does not meet its requirement. A nonconformance moves through stages: open, contained, cause identified, action agreed, action done, verified, and closed.",
+      "Once a root cause is recorded, the nonconformance shows every corrective action already taken under that same cause, and marks any where the same part came back afterwards. Repeating an action that did not work is unlikely to be the answer.",
+      "Only a Quality Engineer or above can close a nonconformance, and only once it has a root cause, a corrective action, and every corrective action has been verified by someone checking that it worked.",
+      "Report on any row prints it as a controlled record. Download on the register produces a spreadsheet of the whole register."
+    ] },
+  { sec: "modules", id: "m-cust", view: "cust", title: "Customer cares",
+    tabs: ["Register", "Open", "After Sales report"],
+    body: [
+      "Log a customer care when a customer complains. It follows the QA-FM-005 form, and Form on any row prints it in that layout.",
+      "The clock on a first response starts when it is logged. Record the response as soon as the customer has been answered; the time it took is kept and cannot be changed.",
+      "Quotes, printed emails and other documents can be attached, including while you are logging it. Nothing can be attached once it is cleared.",
+      "Clearing one needs a note of what was done for the customer. A technical customer care also needs a root cause — the form asks for the five Why.",
+      "The After Sales report shows cares per month and average response time against their limits."
+    ] },
+  { sec: "modules", id: "m-dsn", view: "dsn", title: "Form designer", setup: true,
+    body: [
+      "Builds the inspection forms. Changes are made in a draft revision and only reach inspectors when the revision is published.",
+      "A revision with no questions on it cannot be published, because an inspection generated from it could never be completed.",
+      "Inspections already generated keep the revision they were created from, so a published change does not alter a record somebody has already captured."
+    ] },
+  { sec: "modules", id: "m-req", view: "req", title: "Inspection requirements", setup: true,
+    tabs: ["Requirements matrix"],
+    body: [
+      "The matrix says which form applies to which product family at which manufacturing stage. Scheduling reads it when inspections are generated."
+    ] },
+  { sec: "modules", id: "m-adm", view: "adm", title: "Administration", setup: true,
+    tabs: ["Users & roles", "Competency", "Reference lists", "Options", "Audit trail"],
+    body: [
+      "Users and roles is where new accounts are switched on and given a role.",
+      "Competency records who is qualified for what; some sign-offs need it.",
+      "Reference lists holds the stages, departments, defect codes and the other lists the rest of the system chooses from.",
+      "Options holds the division's settings, including hold points, whether a second person must approve a published form, and whether assisted drafting and the question panel are switched on.",
+      "The audit trail shows every change made, by whom and when."
+    ] },
+
+  /* ---------------- Rules ---------------- */
+  { sec: "rules", id: "r-locked", title: "Why can't I edit this?",
+    body: [
+      "A signed inspection, a closed nonconformance and a cleared customer care are locked. They are quality records, and a record that can be changed after it was signed off is not evidence of anything.",
+      "If something on a locked record is genuinely wrong, raise it with your Quality Engineer rather than working around it. Putting it right is a deliberate decision by Quality, and it is recorded."
+    ] },
+  { sec: "rules", id: "r-close", title: "Why won't it let me close this?",
+    body: [
+      "Closing a nonconformance needs a root cause, a corrective action, and every corrective action verified — and only a Quality Engineer or above can do it. Clearing a customer care needs a note of what was done, and a technical one needs a root cause.",
+      "The message tells you what is missing. These rules exist because the registers this system replaced closed most records without them, and nobody could later say why a fault happened or whether it was fixed."
+    ] },
+  { sec: "rules", id: "r-ai", title: "Assisted drafting and the question panel",
+    body: [
+      "Where your division has switched them on, the system can suggest spellings, a defect code, a first draft of a nonconformance description, and answer questions about what is in the register.",
+      "It never decides whether anything passes, fails or conforms, and it will not give a tolerance, a torque figure or a disposition. That determination is yours and is recorded against your name. If you ask it to judge, it will refuse and point you to your Quality Engineer.",
+      "Every suggestion is recorded, including the ones you ignore and the ones it refused."
+    ] },
+  { sec: "rules", id: "r-problem", title: "Something looks wrong",
+    body: [
+      "If a figure looks wrong, a page will not load, or the system refuses something you think it should allow, tell Group IT. Say what you were doing, which record it was, and what you expected to happen.",
+      "The version number at the bottom of the left-hand menu tells them exactly which release you are on. What's new, above it, lists what has changed."
+    ] }
+];
+
+/* Plain-language definitions. Kept short: a glossary entry that needs a
+   paragraph is a sign the term wants a topic of its own. */
+const GLOSSARY = [
+  ["Containment", "The immediate step taken to stop a problem spreading — quarantining the rest of a batch, for instance. It is not the fix."],
+  ["Corrective action", "The change that stops a problem happening again. Different from containment, which only stops it spreading."],
+  ["Customer care", "A complaint from a customer, recorded on the QA-FM-005 form."],
+  ["Defect code", "The category a fault is filed under. The same list is used by inspections and customer cares, so a fault is counted once however it was found."],
+  ["Disposition", "What happens to something that failed: rework, scrap, use as it is under a concession, or return to the supplier. Always a person's decision."],
+  ["Failed check", "A single question on an inspection that did not pass."],
+  ["First pass yield", "The share of inspections that pass first time, with nothing to put right."],
+  ["Five Why", "Asking why a problem happened, then why that happened, until you reach the cause rather than the symptom. QA-FM-005 asks for up to five."],
+  ["Hold point", "A stage that must be signed off before work moves on. A division setting."],
+  ["Nonconformance (NCR)", "A formal record that something does not meet its requirement, and the investigation into why."],
+  ["Root cause", "The underlying reason a problem happened, as opposed to what was seen."],
+  ["Verified", "Somebody other than the person who did a corrective action has checked that it worked."]
+];
+
+/* Not a member of NAV: Help is reached from the top bar, not the menu,
+   so it does not take a slot beside the modules people work in. */
+const HELP_MOD = { id: "help", n: "?", t: "Help",
+  tabs: ["Getting started", "The modules", "When it says no", "Glossary"] };
+
+function helpTopicsFor(tab) {
+  const sec = ["start", "modules", "rules"][tab];
+  /* Setup topics only for the people who can open those modules. Telling
+     an inspector how to publish a form they cannot reach is noise. */
+  return HELP.filter(h => h.sec === sec && (!h.setup || canConfigure()));
+}
+
+function helpCard(h) {
+  const tabs = h.tabs && h.tabs.length
+    ? `<div class="helptabs">${h.tabs.map(t => `<span>${esc(t)}</span>`).join("")}</div>` : "";
+  const open = h.view && NAV.find(n => n.id === h.view)
+    ? `<button class="btn sm" data-go="${h.view}">Open ${esc(h.title)}</button>` : "";
+  return `<article class="card helpcard" id="help-${h.id}"><h3>${esc(h.title)}</h3>
+    <div class="bd">${tabs}${h.body.map(p => `<p>${esc(p)}</p>`).join("")}${open}</div></article>`;
+}
+
+function vHelp(m) {
+  const q = (S.helpQ || "").trim().toLowerCase();
+  const search = `<div class="helpbar">
+      <input id="helpQ" type="search" placeholder="Search the help" value="${esc(S.helpQ || "")}"
+        aria-label="Search the help">
+      <button class="btn sm" data-act="start-tour">Take the tour</button>
+      <button class="btn sm" data-act="print-help">Print the guide</button>
+    </div>`;
+
+  let body;
+  if (q) {
+    /* Search across everything, setup topics included only where the
+       person can open them, and the glossary too. */
+    const hits = HELP.filter(h => (!h.setup || canConfigure()) &&
+      (h.title + " " + h.body.join(" ") + " " + (h.tabs || []).join(" ")).toLowerCase().includes(q));
+    const gl = GLOSSARY.filter(([k, v]) => (k + " " + v).toLowerCase().includes(q));
+    body = hits.length || gl.length
+      ? hits.map(helpCard).join("") + (gl.length ? `<div class="card"><h3>Glossary</h3><div class="bd">
+          ${gl.map(([k, v]) => `<div class="glos"><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("")}
+        </div></div>` : "")
+      : `<div class="empty">Nothing in the help mentions "${esc(S.helpQ)}". Try a shorter word, or ask your Quality Engineer.</div>`;
+  } else if (S.tab === 3) {
+    body = `<div class="card"><div class="bd">${GLOSSARY.map(([k, v]) =>
+      `<div class="glos"><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("")}</div></div>`;
+  } else {
+    body = helpTopicsFor(S.tab).map(helpCard).join("");
+  }
+  return `<div class="phead"><div><h1>Help</h1><div class="accent"></div>
+      <div class="eyebrow">ACTOM QMS 360 · user guide</div>
+      <p>How the system works, what each part is for, and why it sometimes says no.</p></div></div>`
+    + (q ? "" : tabbar(m)) + search + `<div class="helpbody">${body}</div>`;
+}
+
+function openHelp() { S.view = "help"; S.tab = 0; S.helpQ = ""; buildNav(); render(); window.scrollTo(0, 0); }
+
+/* The printable guide: the whole of HELP and the glossary, through the
+   report path every other printable record uses, so it saves as a PDF
+   the same way. Setup topics are included only for those who can open
+   setup -- a guide printed by an inspector is an inspector's guide. */
+function vHelpPrint() {
+  const secs = [["start", "Getting started"], ["modules", "The modules"], ["rules", "When it says no"]];
+  return `<div class="report" id="report">
+    <div class="rhead">
+      <div class="rlogo">${window.ACTOM_LOGO ? window.ACTOM_LOGO.onLight(46) : ""}</div>
+      <div class="rtitle"><h2>ACTOM QMS 360 — user guide</h2>
+        <div class="sub">${esc(DIVISION.name)} · version ${esc(window.APP_VERSION || "")}</div></div>
+    </div>
+    ${secs.map(([sec, name]) => `<div class="rsec"><h4>${esc(name)}</h4>
+      ${HELP.filter(h => h.sec === sec && (!h.setup || canConfigure())).map(h => `
+        <div class="helpprint"><b>${esc(h.title)}</b>
+          ${h.tabs ? `<div class="sub">Tabs: ${h.tabs.map(esc).join(" · ")}</div>` : ""}
+          ${h.body.map(p => `<p>${esc(p)}</p>`).join("")}</div>`).join("")}
+    </div>`).join("")}
+    <div class="rsec"><h4>Glossary</h4>
+      ${GLOSSARY.map(([k, v]) => `<div class="glos"><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("")}
+    </div>
+    <div class="sub" style="margin-top:14px">Printed ${new Date().toLocaleString("en-ZA")} by ${esc(S.profile.full_name)}.
+      This guide describes version ${esc(window.APP_VERSION || "")}; What's new in the system lists anything since.</div>
+  </div>`;
+}
+
+/* ---------------------------------------------------------------------
+   The tour.
+
+   OFFERED, NOT IMPOSED. A forced walkthrough on every first sign-in
+   would also land on everyone already using the system the day this
+   ships, which is the fastest way to teach people that the skip button
+   is the important one. So the first time a person signs in on a device
+   they are offered it, once, with a way to say no -- and it is always in
+   Help afterwards.
+
+   Remembered per person, not per device. Shop-floor tablets are shared,
+   and a tour taken by whoever signed in first should not count for
+   everyone after them.
+
+   The layer lives in the shell, outside #page, for the reason the photo
+   pickers and the suggestion bar do: #page is redrawn on realtime events,
+   and a tour step drawn inside it would vanish mid-sentence.
+   --------------------------------------------------------------------- */
+const TOUR = [
+  { title: "Welcome to ACTOM QMS 360",
+    body: "A two-minute look at where things are. Use the arrow keys or the buttons; Escape stops the tour at any point." },
+  { sel: "#nav", title: "Everything is down the left",
+    body: "The modules are grouped by what they deal with. The numbers in red show how many items in that module are waiting for you." },
+  { sel: "#search", title: "Search",
+    body: "Finds inspections, works orders and panel serials from anywhere in the system." },
+  { sel: ".four", view: "main", title: "How quality is doing",
+    body: "The dashboard opens on these four figures. A coloured edge on the left means one needs attention." },
+  { sel: '#nav button[data-go="work"]', title: "Your inspections",
+    body: "The inspection workbench holds your queue and the capture form. Most people spend most of their time here." },
+  { sel: '#nav button[data-go="ncr"]', title: "Nonconformances",
+    body: "Where something that does not meet its requirement is recorded and investigated through to a verified fix." },
+  { sel: '#nav button[data-go="cust"]', title: "Customer cares",
+    body: "Customer complaints, on the QA-FM-005 form, with the time to answer the customer recorded automatically." },
+  { sel: "#btnChat", title: "Ask about the register",
+    body: "Answers questions about what is in this division's records. It will never tell you whether something passes — that is your decision." },
+  { sel: "#whatsNew", title: "What's new",
+    body: "A red dot here means the system has changed since you last looked. The version number underneath identifies exactly which release you are on." },
+  { sel: "#btnHelp", title: "Help, any time",
+    body: "Everything in this tour, and more, is in Help. You can take the tour again from there." }
+];
+
+const tourKey = () => `qms.tour.${S.profile?.id || "anon"}`;
+const tourDone = () => { try { return !!localStorage.getItem(tourKey()); } catch { return true; } };
+const markTourDone = () => { try { localStorage.setItem(tourKey(), window.APP_VERSION || "1"); } catch {} };
+
+/* A step whose target is missing or hidden -- the question panel when a
+   division has it switched off, say -- is skipped rather than shown
+   pointing at nothing. */
+function tourTarget(st) {
+  if (!st.sel) return null;
+  const el = document.querySelector(st.sel);
+  if (!el || el.classList.contains("hidden")) return undefined;
+  const r = el.getBoundingClientRect();
+  /* Having a size is not the same as being on screen. On a phone the
+     menu is parked off the left edge with its full width intact, and the
+     first version of this lit up a sliver of the screen and described a
+     menu nobody could see. Steps inside the menu open it first (see
+     drawTour); anything else off screen is skipped. */
+  if (!r.width || !r.height) return undefined;
+  const inMenu = !!el.closest(".side");
+  if (!inMenu && (r.right <= 0 || r.left >= window.innerWidth)) return undefined;
+  return el;
+}
+
+function startTour() {
+  if (S.view !== "main") { S.view = "main"; S.tab = 0; buildNav(); render(); }
+  S.tour = { i: 0 };
+  hideTourOffer();
+  drawTour();
+}
+
+function tourMove(dir) {
+  if (!S.tour) return;
+  let i = S.tour.i + dir;
+  while (i >= 0 && i < TOUR.length && tourTarget(TOUR[i]) === undefined) i += dir;
+  if (i < 0) i = 0;
+  if (i >= TOUR.length) return endTour();
+  S.tour.i = i;
+  drawTour();
+}
+
+function endTour() {
+  S.tour = null;
+  markTourDone();
+  setMenu(false);
+  const L = $("tourLayer");
+  if (L) { L.innerHTML = ""; L.classList.add("hidden"); }
+}
+
+function drawTour() {
+  const L = $("tourLayer");
+  if (!L || !S.tour) return;
+  const st = TOUR[S.tour.i];
+  /* On a narrow screen, open the menu for steps that point into it and
+     close it for the ones that do not. */
+  const want = !!(st.sel && document.querySelector(st.sel)?.closest(".side"));
+  if (narrow()) setMenu(want);
+  const el = tourTarget(st);
+  if (el === undefined) return tourMove(1);
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (el) el.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+
+  const visible = TOUR.filter(t => tourTarget(t) !== undefined);
+  const n = visible.indexOf(st) + 1, of = visible.length;
+
+  L.classList.remove("hidden");
+  /* Positioned after the scroll has settled, against the viewport. */
+  const place = () => {
+    const r = el ? el.getBoundingClientRect() : null;
+    const spot = r ? `<div class="tourspot" style="top:${r.top - 6}px;left:${r.left - 6}px;
+        width:${r.width + 12}px;height:${r.height + 12}px"></div>` : `<div class="tourshade"></div>`;
+    L.innerHTML = spot + `<div class="tourcard" role="dialog" aria-modal="true"
+        aria-labelledby="tourTitle" tabindex="-1">
+      <div class="tourstep">Step ${n} of ${of}</div>
+      <h3 id="tourTitle">${esc(st.title)}</h3>
+      <p>${esc(st.body)}</p>
+      <div class="tourbtns">
+        <button class="btn sm" data-act="tour-end">Skip the tour</button>
+        <span style="flex:1"></span>
+        ${S.tour.i > 0 ? `<button class="btn sm" data-act="tour-back">Back</button>` : ""}
+        <button class="btn sm pri" data-act="tour-next">${n === of ? "Finish" : "Next"}</button>
+      </div></div>`;
+    const card = L.querySelector(".tourcard");
+    const cw = card.offsetWidth || 340, ch = card.offsetHeight || 180;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let top, left;
+    if (!r) { top = (vh - ch) / 2; left = (vw - cw) / 2; }
+    else {
+      /* Beside the target where there is room, otherwise below or above,
+         and never off the screen. */
+      /* A target taller than most of the screen -- the menu on a phone --
+         leaves no room beside, below or above it. The card goes to the
+         foot of the screen, where it covers the least useful part. */
+      if (r.height > vh * 0.6 && r.right + 16 + cw >= vw) { top = vh - ch - 12; left = (vw - cw) / 2; }
+      else if (r.right + 16 + cw < vw) { left = r.right + 16; top = r.top; }
+      else if (r.bottom + 16 + ch < vh) { top = r.bottom + 16; left = r.left; }
+      else { top = r.top - ch - 16; left = r.left; }
+      top = Math.max(12, Math.min(top, vh - ch - 12));
+      left = Math.max(12, Math.min(left, vw - cw - 12));
+    }
+    card.style.top = top + "px"; card.style.left = left + "px";
+    card.focus({ preventScroll: true });
+  };
+  setTimeout(place, el && !reduce ? 260 : 0);
+}
+
+function offerTour() {
+  if (tourDone() || S.tour) return;
+  const L = $("tourLayer");
+  if (!L) return;
+  L.classList.remove("hidden");
+  L.innerHTML = `<div class="touroffer" role="dialog" aria-labelledby="tourOfferTitle">
+    <b id="tourOfferTitle">New to ACTOM QMS 360?</b>
+    <p>A two-minute tour shows you where everything is. It is in Help whenever you want it.</p>
+    <div class="tourbtns">
+      <button class="btn sm" data-act="tour-later">Not now</button>
+      <button class="btn sm pri" data-act="start-tour">Take the tour</button>
+    </div></div>`;
+}
+function hideTourOffer() {
+  const L = $("tourLayer");
+  if (L && !S.tour) { L.innerHTML = ""; L.classList.add("hidden"); }
+}
+
 const VIEWS = { main: vMain, dash: vDash, work: vWork, sched: vSched, dsn: vDsn,
-                req: vReq, ncr: vNcr, cust: vCust, adm: vAdm };
+                req: vReq, ncr: vNcr, cust: vCust, adm: vAdm, help: vHelp };
 function render() {
   /* The report is its own view, not a tab: it has to be able to fill the page
      and print without the surrounding chrome. */
@@ -5340,7 +5761,7 @@ function render() {
     return;
   }
   document.body.classList.remove("printing");
-  const m = NAV.find(x => x.id === S.view);
+  const m = S.view === "help" ? HELP_MOD : NAV.find(x => x.id === S.view);
   if (!m || (setupIds.includes(m.id) && !canConfigure())) { S.view = "main"; S.tab = 0; return render(); }
   /* The ONLY place the footer is added. Views return their body and
      nothing else; three of them also appended it themselves, so the
@@ -5523,6 +5944,12 @@ document.addEventListener("click", async e => {
     case "close-complaint": return closeComplaintModal(t.dataset.id);
     case "do-close-complaint": return doCloseComplaint();
     case "cust-csv": return downloadComplaints();
+    case "start-tour": return startTour();
+    case "tour-next": return tourMove(1);
+    case "tour-back": return tourMove(-1);
+    case "tour-end": return endTour();
+    case "tour-later": markTourDone(); return hideTourOffer();
+    case "print-help": S.report = { kind: "help" }; S.view = "print"; buildNav(); return render();
     case "reg-filter": S.regFilter = t.dataset.f; return render();
     case "do-print": return window.print();
     case "close-report": {
@@ -5533,6 +5960,7 @@ document.addEventListener("click", async e => {
       S.report = null;
       if (kind === "ncr") { S.view = "ncr"; S.tab = 0; }
       else if (kind === "care") { S.view = "cust"; S.tab = 0; }
+      else if (kind === "help") { S.view = "help"; S.tab = 0; }
       else { S.view = "work"; S.tab = 2; }
       buildNav(); return render();
     }
@@ -5633,6 +6061,44 @@ $("btnRecheck").addEventListener("click", () => start());
 $("btnSignOut").addEventListener("click", signOutNow);
 $("btnSignOut2").addEventListener("click", signOutNow);
 $("btnRefresh").addEventListener("click", reload);
+$("btnHelp")?.addEventListener("click", () => { setMenu(false); openHelp(); });
+$("btnMenu")?.addEventListener("click", () => {
+  const open = !document.querySelector(".side")?.classList.contains("open");
+  setMenu(open);
+  if (!open) $("btnMenu").focus();
+});
+$("sideScrim")?.addEventListener("click", () => { setMenu(false); $("btnMenu")?.focus(); });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !S.tour && document.querySelector(".side.open")) {
+    setMenu(false); $("btnMenu")?.focus();
+  }
+});
+/* Widening the window past the breakpoint with the menu open would leave
+   the scrim over a page whose menu is already showing. */
+window.addEventListener("resize", () => { if (!narrow()) setMenu(false); });
+
+/* Search the help as you type. render() replaces the input, so focus and
+   the caret are put back where they were -- otherwise every keystroke
+   would throw the cursor out of the box. */
+document.addEventListener("input", e => {
+  if (e.target.id !== "helpQ") return;
+  S.helpQ = e.target.value;
+  const at = e.target.selectionStart;
+  render();
+  const q = $("helpQ");
+  if (q) { q.focus(); try { q.setSelectionRange(at, at); } catch {} }
+});
+
+/* The tour answers to the keyboard: Escape leaves, arrows and Enter move. */
+document.addEventListener("keydown", e => {
+  if (!S.tour) return;
+  if (e.key === "Escape") { e.preventDefault(); endTour(); }
+  else if (e.key === "ArrowRight" || e.key === "Enter") { e.preventDefault(); tourMove(1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); tourMove(-1); }
+});
+/* A resize or a scroll moves the target; the step is redrawn against
+   where it now is rather than left pointing at where it was. */
+window.addEventListener("resize", () => { if (S.tour) drawTour(); });
 
 /* Both pickers are wired once, to elements that outlive every render. The
    field they belong to is remembered on S.capture rather than read from the
@@ -5793,6 +6259,9 @@ async function boot() {
   subscribe();
   $("loader")?.classList.add("gone");
   setTimeout(() => $("loader")?.remove(), 600);
+  /* Offered once the page has settled, so it is not competing with the
+     loader for the person's attention. */
+  setTimeout(offerTour, 900);
 }
 supabase.auth.onAuthStateChange((event, session) => {
   const uid = (session && session.user && session.user.id) || null;

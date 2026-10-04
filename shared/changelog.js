@@ -22,10 +22,21 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.27.4";
+window.APP_VERSION = "0.28.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.28.0", d: "2026-10-04", t: "Help, a user guide, and a tour for new users",
+    items: [
+      "Help is now on the question-mark button at the top of every page. It covers getting started, what each module is for and what its tabs do, why the system sometimes refuses to close or change something, and a glossary of the terms it uses. There is a search box across all of it.",
+      "Print the guide turns the whole of Help into a document you can save as a PDF or hand to someone. It shows the version it describes, so a printed copy can be checked against what is on screen.",
+      "New users are offered a two-minute tour of where everything is. It is offered once, not forced, and can be taken again from Help at any time. On a shared tablet each person is offered it the first time they sign in, not just whoever used the tablet first.",
+      "Help only describes what you can do. An inspector does not see instructions for the setup modules they cannot open.",
+      "Fixed: on a phone or a tablet held upright, there was no way to open the menu down the left, so nobody could move between modules. There is now a menu button at the top left on narrow screens.",
+      "The help is checked against the system itself on every release. If a module is renamed, a tab removed or a closing rule changed, the release cannot go out until the help says the same thing."
+    ]
+  },
   {
     v: "0.27.4", d: "2026-10-02", t: "The dashboard, tightened",
     items: [

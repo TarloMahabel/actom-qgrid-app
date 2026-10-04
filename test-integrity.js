@@ -79,7 +79,12 @@ const unreachable = [...handled].filter(a =>
   !inMarkup.has(a) && !new RegExp('"' + a + '"').test(app));
 s.check('no handler is unreachable', unreachable.length === 0, unreachable.join(', '));
 
-const selector = (app.match(/closest\("([^"]+)"\)/) || [])[1] || '';
+/* The delegated selector is the closest() call that lists [data-act], not
+   simply the first closest() in the file -- any other use of closest()
+   earlier in app.js (the tour's `el.closest(".side")`, as it happened)
+   would otherwise be read as the selector and fail every attribute. */
+const selector = [...app.matchAll(/closest\("([^"]+)"\)/g)]
+  .map(m => m[1]).find(sel => sel.includes('[data-act]')) || '';
 const inSelector = new Set([...selector.matchAll(/\[data-([\w-]+)\]/g)].map(m => m[1]));
 const clickAttrs = ['act','go','tab','open-capture','sel','add','move','del','del-sec','tg',
   'cell','toggle-active','dispose','outcome','ref-save','ref-cancel','ref-add','ref-toggle',
