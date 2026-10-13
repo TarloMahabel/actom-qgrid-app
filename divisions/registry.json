@@ -32,6 +32,16 @@
       "status": "planned",
       "go_live": null,
       "seed": "db/seed/division_generic.sql"
+    },
+    {
+      "code": "APT",
+      "name": "ACTOM Power Transformers",
+      "supabase_project_ref": "qjpwsrtwafhrrcoqoftx",
+      "netlify_site_name": "actom-qgrid-apt",
+      "domain": "qgrid-apt.actom.co.za",
+      "status": "planned",
+      "go_live": null,
+      "seed": "db/seed/division_generic.sql"
     }
   ]
 }
