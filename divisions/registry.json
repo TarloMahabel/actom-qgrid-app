@@ -38,7 +38,7 @@
       "name": "ACTOM Power Transformers",
       "supabase_project_ref": "qjpwsrtwafhrrcoqoftx",
       "netlify_site_name": "actom-qgrid-apt",
-      "domain": "qgrid-apt.actom.co.za",
+      "domain": "actom-qgrid-apt.netlify.app",
       "status": "planned",
       "go_live": null,
       "seed": "db/seed/division_generic.sql"
