@@ -6,7 +6,7 @@
     {
       "code": "MVS",
       "name": "ACTOM MV Switchgear",
-      "supabase_project_ref": "REPLACE_ME",
+      "supabase_project_ref": "mxoaalgcrhynebrtgruz",
       "netlify_site_name": "actom-qgrid-mvs",
       "domain": "qgrid-mvs.actom.co.za",
       "status": "pilot",
