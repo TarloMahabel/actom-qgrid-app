@@ -22,10 +22,16 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.29.2";
+window.APP_VERSION = "0.29.3";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.29.3", d: "2026-10-15", t: "Fix APT field type: pass_fail → passfail",
+    items: [
+      "APT inspection templates used 'pass_fail' as the field type, which the designer does not recognise (shown as '?'). Corrected to 'passfail' across all 20 template revisions and the seed file."
+    ]
+  },
   {
     v: "0.29.2", d: "2026-10-15", t: "APT division seed",
     items: [
