@@ -22,10 +22,18 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.29.1";
+window.APP_VERSION = "0.29.2";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.29.2", d: "2026-10-15", t: "APT division seed",
+    items: [
+      "Adds db/seed/division_apt.sql: 20 published inspection templates for ACTOM Power Transformers, covering Incoming Inspection, Core & Coil Assembly, Tank Fabrication, Winding, Dry-out / Vacuum Treatment, Oil Filling and Final QA stages.",
+      "The 48-row requirements matrix assigns the primary hold-point template to each active family-stage combination. Supplementary templates (crimp joint records, pressing check sheets, exit check sheets, etc.) are published and available for ad-hoc use.",
+      "The seed file is idempotent and stage-name-based, so it runs correctly on a fresh APT database without depending on row IDs assigned by an earlier migration."
+    ]
+  },
   {
     v: "0.29.1", d: "2026-10-04", t: "The dashboard fits on one screen",
     items: [
