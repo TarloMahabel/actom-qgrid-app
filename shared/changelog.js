@@ -22,10 +22,16 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.29.6";
+window.APP_VERSION = "0.29.7";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.29.7", d: "2026-10-16", t: "Fix migration 026: v_complaints view rebuild",
+    n: "Corrected the 026 migration file to drop and recreate v_complaints " +
+       "rather than using CREATE OR REPLACE VIEW, which PostgreSQL rejects " +
+       "when new columns are added before existing ones."
+  },
   {
     v: "0.29.6", d: "2026-10-16", t: "Customer cares: designed form capture",
     n: "Logging a customer care now offers a Form picker. Selecting a designed CC template " +

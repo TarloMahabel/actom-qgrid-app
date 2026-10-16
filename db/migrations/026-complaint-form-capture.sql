@@ -96,10 +96,14 @@ create policy complaint_results_update on complaint_results
 -- ------------------------------------------------------------
 --  3. Rebuild v_complaints with template_rev_id.
 --
---  The view is recreated in full: CREATE OR REPLACE does not let
---  you add or remove columns, only replace them.
+--  PostgreSQL's CREATE OR REPLACE VIEW does not allow reordering
+--  existing columns — adding a new column in the middle would cause
+--  "cannot change name of view column" errors on existing databases.
+--  We drop and recreate so template_rev_id can be appended last.
 -- ------------------------------------------------------------
-create or replace view v_complaints with (security_invoker = on) as
+drop view if exists v_complaints;
+
+create view v_complaints with (security_invoker = on) as
 select c.id, c.ref, c.legacy_ref, c.customer, c.company_name, c.site, c.details,
        c.contact_person, c.contact_tel, c.contracts_engineer,
        c.contract_number, c.delivery_date,
@@ -124,7 +128,6 @@ select c.id, c.ref, c.legacy_ref, c.customer, c.company_name, c.site, c.details,
        n.ref                                     as ncr_ref,
        c.ncr_id,
        rb.full_name                              as raised_by_name,
-       c.template_rev_id,
        (select count(*) from complaint_documents d
          where d.complaint_id = c.id)            as documents,
        round(extract(epoch from
@@ -132,7 +135,8 @@ select c.id, c.ref, c.legacy_ref, c.customer, c.company_name, c.site, c.details,
        round(extract(epoch from
          (c.responded_at - c.called_at)) / 86400.0, 1) as response_days,
        (c.closed_at::date - c.called_at::date)   as days_to_close,
-       (current_date - c.called_at::date)        as age_days
+       (current_date - c.called_at::date)        as age_days,
+       c.template_rev_id
   from complaints c
   left join complaint_sections s  on s.id = c.section_id
   left join complaint_types t     on t.id = c.type_id
