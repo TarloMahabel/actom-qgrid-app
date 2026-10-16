@@ -22,10 +22,16 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.29.7";
+window.APP_VERSION = "0.29.8";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.29.8", d: "2026-10-16", t: "Responsive header: hide name/email on smaller screens",
+    n: "On screens narrower than 1200px the email address in the top bar is now hidden. " +
+       "Below 1000px the full name is also hidden — the avatar initials still show who is signed in. " +
+       "This frees enough room that the chips and buttons no longer crowd on a 1280px laptop."
+  },
   {
     v: "0.29.7", d: "2026-10-16", t: "Fix migration 026: v_complaints view rebuild",
     n: "Corrected the 026 migration file to drop and recreate v_complaints " +
