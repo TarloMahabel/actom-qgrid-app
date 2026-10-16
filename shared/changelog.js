@@ -22,10 +22,18 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.29.5";
+window.APP_VERSION = "0.29.6";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.29.6", d: "2026-10-16", t: "Customer cares: designed form capture",
+    n: "Logging a customer care now offers a Form picker. Selecting a designed CC template " +
+       "opens the form immediately after logging so details can be captured field by field. " +
+       "The Form button on any complaint logged with a template opens the designed form " +
+       "directly instead of the static QA-FM-005 layout. Answers save as you type. " +
+       "The form is read-only once the complaint is cleared."
+  },
   {
     v: "0.29.5", d: "2026-10-16", t: "Form designer: module selector for customer care templates",
     n: "The 'New template' dialog now has a Module field. Choosing Customer care hides the " +

@@ -1885,6 +1885,34 @@ function saveAnswer(fieldId, patch) {
   }, 500);
 }
 
+/* Answers for the customer care designed form, written through as given. */
+const careTimers = {};
+function saveCareAnswer(fieldId, patch) {
+  const state = S.careCapture || {};
+  const rev = byId(S.revisions, state.complaint?.template_rev_id);
+  const field = rev?.definition?.sections.flatMap(s => s.items).find(f => f.id === fieldId);
+  const row = { complaint_id: state.id, field_id: fieldId,
+                label: field?.label || fieldId, updated_by: S.profile.id, ...patch };
+  if (field?.type === "measure" && patch.value_num != null && patch.value_num !== "") {
+    const n = Number(patch.value_num);
+    row.outcome = (n < Number(field.min) || n > Number(field.max)) ? "fail" : "pass";
+  }
+  S.careCapture.results[fieldId] = { ...(S.careCapture.results[fieldId] || {}), ...row };
+  clearTimeout(careTimers[fieldId]);
+  careTimers[fieldId] = setTimeout(async () => {
+    const el = $("careState");
+    try {
+      const { error } = await supabase.from("complaint_results")
+        .upsert(row, { onConflict: "complaint_id,field_id" });
+      if (error) throw error;
+      if (el) el.textContent = "Saved " + new Date().toLocaleTimeString("en-ZA");
+    } catch (e) {
+      if (el) el.innerHTML = `<span style="color:var(--bad)">${esc(explain(e))}</span>`;
+      toast(explain(e), "bad");
+    }
+  }, 500);
+}
+
 /* Moves an inspection that has not been started onto the newest published
    revision of its template. Deliberately refused once anything is captured:
    an inspection is evidence against the revision it was answered under, and
@@ -2690,6 +2718,125 @@ function vCarePrint() {
         </div>
       </div>
     </div>
+  </div>`;
+}
+
+/* Opens the designed CC template form for a specific complaint. */
+async function openCareForm(id) {
+  S.careCapture = { id, results: {}, loading: true };
+  S.view = "care-form"; buildNav(); render();
+  busy(true);
+  try {
+    const [full, answers] = await Promise.all([
+      supabase.from("v_complaints").select("*").eq("id", id).maybeSingle(),
+      supabase.from("complaint_results").select("*").eq("complaint_id", id)
+    ]);
+    if (full.error) throw full.error;
+    if (!full.data) throw new Error("That customer care could not be read.");
+    S.careCapture.complaint = full.data;
+    S.careCapture.results = {};
+    for (const r of (answers.data || [])) S.careCapture.results[r.field_id] = r;
+    S.careCapture.loading = false;
+  } catch (e) {
+    S.careCapture = { id, results: {}, loading: false, error: explain(e) };
+  } finally { busy(false); render(); }
+}
+
+/* Renders the designed CC template form for a complaint.
+   Editable while the complaint is open; read-only once cleared. */
+function vCareForm() {
+  const state = S.careCapture || {};
+  if (state.loading) return `<div class="card"><div class="empty">Loading the form…</div></div>`;
+  if (state.error) return `<div class="card"><div class="bd"><div class="note q">${esc(state.error)}</div></div></div>`;
+  const c = state.complaint;
+  if (!c) return `<div class="card"><div class="empty">No form loaded.</div></div>`;
+
+  const rev = byId(S.revisions, c.template_rev_id);
+  if (!rev?.definition) return `<div class="note q" style="margin:16px">
+    The template for this complaint is not available.
+    <button class="btn sm" data-act="close-care-form" style="margin-left:12px">← Back</button></div>`;
+
+  const tpl = byId(S.templates, rev.template_id);
+  const def = rev.definition;
+  const locked = !!c.closed_at;
+  const val = fid => state.results[fid] || {};
+
+  const ctrlCC = f => {
+    const v = val(f.id);
+    if (locked) {
+      const disp = v.outcome ? v.outcome
+        : v.value_text ? v.value_text
+        : v.value_num != null ? String(v.value_num) : "";
+      return `<div class="ro">${esc(disp || "—")}</div>`;
+    }
+    if (f.type === "passfail") return `<div class="seg" data-care-field="${f.id}">
+      ${["pass","fail","na"].map(o => `<button data-care-outcome="${o}"
+        class="${v.outcome === o ? (o==="pass"?"p":o==="fail"?"f":"n") : ""}"
+        >${o === "na" ? "N/A" : o[0].toUpperCase() + o.slice(1)}</button>`).join("")}</div>`;
+    if (f.type === "measure") {
+      const n = v.value_num;
+      const out = n == null ? "" : (Number(n) < Number(f.min) || Number(n) > Number(f.max)) ? "bad" : "ok";
+      return `<div class="mrow"><input type="number" step="any" data-care-num="${f.id}" value="${n ?? ""}"
+        style="padding:6px 9px;border:1px solid ${out === "bad" ? "var(--bad)" : "var(--line)"};border-radius:7px">
+        <span class="tol">${esc(f.unit || "")} · ${esc(f.min ?? "—")} – ${esc(f.max ?? "—")}</span></div>`;
+    }
+    if (f.type === "number") return `<input type="number" step="any" data-care-num="${f.id}"
+      value="${v.value_num ?? ""}" style="max-width:160px;padding:6px 9px;border:1px solid var(--line);border-radius:7px">`;
+    if (f.type === "text") return f.multi
+      ? `<textarea rows="2" data-care-txt="${f.id}" style="width:100%;padding:6px 9px;border:1px solid var(--line);border-radius:7px">${esc(v.value_text || "")}</textarea>`
+      : `<input data-care-txt="${f.id}" value="${esc(v.value_text || "")}" style="width:100%;padding:6px 9px;border:1px solid var(--line);border-radius:7px">`;
+    if (f.type === "select") return `<select data-care-txt="${f.id}"
+      style="max-width:280px;padding:6px 9px;border:1px solid var(--line);border-radius:7px">
+      <option value=""></option>${(f.opts || []).map(o =>
+        `<option ${v.value_text === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+    if (f.type === "date") return `<input type="date" data-care-txt="${f.id}" value="${esc(v.value_text || "")}"
+      style="max-width:180px;padding:6px 9px;border:1px solid var(--line);border-radius:7px">`;
+    if (f.type === "sign") return locked
+      ? `<div class="ro">${esc(v.value_text || "—")}</div>`
+      : signaturePad(f);
+    return `<div class="ro" style="font-size:12px;color:var(--muted)">${esc(f.type)} — not supported in this view</div>`;
+  };
+
+  const fields = def.sections.flatMap(s => s.items)
+    .filter(f => !["info", "section"].includes(f.type));
+  const answered = fields.filter(f => {
+    const v = val(f.id);
+    return v.outcome || v.value_text || v.value_num != null;
+  }).length;
+
+  return `<div style="max-width:820px;margin:0 auto;padding:16px 16px 40px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn" data-act="close-care-form">← Back to register</button>
+      <h2 style="margin:0;font-size:18px">${esc(c.ref)} · Customer care form</h2>
+      ${locked ? `<span class="tag" style="background:var(--ok-bg);color:var(--ok);
+        border:1px solid #bfe4d1">Cleared</span>` : ""}
+    </div>
+    ${locked ? `<div class="note" style="margin-bottom:13px;background:var(--ok-bg);
+        border-color:#bfe4d1;color:#12613f">
+        <b>This complaint is cleared and locked.</b> The form is read-only.</div>` : ""}
+    <div class="card" style="margin-bottom:13px"><div class="bd">
+      <div class="three">
+        <div class="fld"><label>Customer</label><div class="ro">${esc(c.customer || "—")}</div></div>
+        <div class="fld"><label>Section</label><div class="ro">${esc(c.section || "—")}</div></div>
+        <div class="fld"><label>Type</label><div class="ro">${esc(c.complaint_type || "—")}</div></div>
+      </div>
+    </div></div>
+    <div class="card"><h3>${esc(tpl?.name || "Form")} <span class="cl">rev ${rev.rev}</span></h3>
+    <div class="bd"><div class="pv" id="careForm">
+      ${def.sections.map(s => `<div class="pvsec"><div class="h">${esc(s.title)}</div>
+        ${s.items.map(f => {
+          if (f.type === "info") return `<div class="note" style="margin-bottom:8px">${esc(f.label)}</div>`;
+          return `<div class="pvi"><div class="q">${esc(f.label)}${f.req ? '<span class="req">*</span>' : ""}</div>
+            ${f.help ? `<div class="h2">${esc(f.help)}</div>` : ""}${ctrlCC(f)}</div>`;
+        }).join("")}</div>`).join("")}
+    </div></div></div>
+    ${!locked ? `<div class="card" style="margin-top:13px"><div class="bd">
+      <div style="display:flex;align-items:center;gap:12px;font-size:12.5px;flex-wrap:wrap">
+        <span id="careState">Answers save as you go.</span>
+        <span style="flex:1"></span>
+        <span>${answered} of ${fields.length} answered</span>
+      </div>
+    </div></div>` : ""}
   </div>`;
 }
 
@@ -4946,7 +5093,16 @@ function lab(label, control, hint) {
 function newComplaintModal() {
   const opts = (list, sel) => list.map(x =>
     `<option value="${x.id}"${x.id === sel ? " selected" : ""}>${esc(x.name)}</option>`).join("");
-  openModal("Log a customer care — QA-FM-005", `
+  const ccRevs = (S.templates || [])
+    .filter(t => t.module === "customer_care")
+    .map(t => ({ tpl: t, rev: revFor(t.id) }))
+    .filter(x => x.rev);
+  openModal("Log a customer care", `
+    ${ccRevs.length ? lab("Form", `<select id="kCCRev">
+      <option value="">— no designed form —</option>
+      ${ccRevs.map(x => `<option value="${x.rev.id}">${esc(x.tpl.name)}</option>`).join("")}
+      </select>`,
+      "The designed form opens after logging so you can capture the complaint details.") : ""}
     <div class="two">
       <div>${lab("Customer", `<input id="kCust" placeholder="who complained">`)}</div>
       <div>${lab("Site or project", `<input id="kSite" placeholder="where, if it matters">`)}</div>
@@ -4957,7 +5113,7 @@ function newComplaintModal() {
     <div class="two">
       <div>${lab("Section", `<select id="kSection"><option value="">— not stated —</option>${opts(S.complaintSections)}</select>`)}</div>
       <div>${lab("Complaint type", `<select id="kType"><option value="">— not classified —</option>${opts(S.complaintTypes)}</select>`,
-        "A technical customer care needs a root cause before it can be cleared — QA-FM-005 asks for the five Why. A nonconformance can be linked as well where one is warranted.")}</div>
+        "A technical customer care needs a root cause before it can be cleared. A nonconformance can be linked as well where one is warranted.")}</div>
     </div>
     <div class="two">
       <div>${lab("Defect code", `<select id="kDefect"><option value="">— none —</option>${
@@ -4993,6 +5149,7 @@ function renderStaged() {
 async function saveComplaint() {
   const customer = $("kCust").value.trim();
   const details = $("kDetails").value.trim();
+  const revId = $("kCCRev")?.value || null;
   if (!customer) { toast("A complaint needs a customer.", "bad"); return; }
   if (!details) { toast("Say what the customer reported.", "bad"); return; }
   busy(true);
@@ -5006,7 +5163,8 @@ async function saveComplaint() {
       p_defect_code: $("kDefect").value ? Number($("kDefect").value) : null,
       p_owner: null,
       p_site_engineer: $("kEng").value.trim() || null,
-      p_contract: $("kContract").value.trim() || null
+      p_contract: $("kContract").value.trim() || null,
+      p_template_rev_id: revId || null
     });
     if (error) throw error;
 
@@ -5032,10 +5190,18 @@ async function saveComplaint() {
     S.careStaged = [];
     closeModal();
     await reload();
-    toast(failed
-      ? `${data.ref} logged, but ${failed} of ${staged} documents did not attach. Open it and try again.`
-      : `${data.ref} logged${staged ? ` with ${staged} document${staged === 1 ? "" : "s"}` : ""}. The clock on a first response starts now.`,
-      failed ? "bad" : "ok");
+    if (revId && data.id) {
+      toast(failed
+        ? `${data.ref} logged; ${failed} of ${staged} documents did not attach. Opening the form…`
+        : `${data.ref} logged${staged ? ` with ${staged} document${staged === 1 ? "" : "s"}` : ""}. Opening the form…`,
+        failed ? "bad" : "ok");
+      await openCareForm(data.id);
+    } else {
+      toast(failed
+        ? `${data.ref} logged, but ${failed} of ${staged} documents did not attach. Open it and try again.`
+        : `${data.ref} logged${staged ? ` with ${staged} document${staged === 1 ? "" : "s"}` : ""}. The clock on a first response starts now.`,
+        failed ? "bad" : "ok");
+    }
   } catch (e) { toast(explain(e), "bad"); }
   finally { busy(false); }
 }
@@ -5477,8 +5643,10 @@ function vCust(m) {
             : `${c.response_hours} h`,
           pill(({ open: "Open", in_progress: "In progress", closed: "Closed" })[c.status] || c.status),
           `<button class="btn sm" data-act="open-complaint" data-id="${c.id}">Open</button>
-           <button class="btn sm" data-act="care-report" data-id="${c.id}"
-             title="Open the printable QA-FM-005">Form</button>`
+           ${c.template_rev_id
+             ? `<button class="btn sm" data-act="care-form" data-id="${c.id}">Form</button>`
+             : `<button class="btn sm" data-act="care-report" data-id="${c.id}"
+                  title="Open the printable QA-FM-005">Form</button>`}`
         ]))
         : emptyBecause("Nothing here",
             S.tab === 1 ? "Nothing is open. Every complaint has been closed."
@@ -5910,17 +6078,22 @@ function render() {
     return;
   }
   document.body.classList.remove("printing");
-  const m = S.view === "help" ? HELP_MOD : NAV.find(x => x.id === S.view);
-  if (!m || (setupIds.includes(m.id) && !canConfigure())) { S.view = "main"; S.tab = 0; return render(); }
-  /* No footer. It repeated figures the dashboard already shows, the
-     division name the sidebar already shows, and a hold-point setting
-     that belongs in Administration -- and on a wide monitor it added a
-     band of empty space below every page. */
-  $("page").innerHTML = VIEWS[S.view](m);
-  /* The dashboard fills one screen; every other page scrolls as normal. */
-  const exec = S.view === "main" && S.tab === 0;
-  $("page").classList.toggle("fill", exec);
-  if (exec) requestAnimationFrame(fitCharts);
+  if (S.view === "care-form") {
+    $("page").innerHTML = vCareForm();
+    $("page").classList.remove("fill");
+  } else {
+    const m = S.view === "help" ? HELP_MOD : NAV.find(x => x.id === S.view);
+    if (!m || (setupIds.includes(m.id) && !canConfigure())) { S.view = "main"; S.tab = 0; return render(); }
+    /* No footer. It repeated figures the dashboard already shows, the
+       division name the sidebar already shows, and a hold-point setting
+       that belongs in Administration -- and on a wide monitor it added a
+       band of empty space below every page. */
+    $("page").innerHTML = VIEWS[S.view](m);
+    /* The dashboard fills one screen; every other page scrolls as normal. */
+    const exec = S.view === "main" && S.tab === 0;
+    $("page").classList.toggle("fill", exec);
+    if (exec) requestAnimationFrame(fitCharts);
+  }
 
   $("whoName").textContent = S.profile.full_name;
   $("whoEmail").textContent = S.profile.email;
@@ -5948,7 +6121,7 @@ function render() {
 /* One delegated listener rather than handlers sprinkled through the markup:
    the page is re-rendered constantly, and rebound handlers leak. */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-ncra],[data-planned],[data-action-set],[data-fc],[data-rm-photo],[data-sig-clear],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
+  const t = e.target.closest("[data-go],[data-goto],[data-tab],[data-act],[data-open-capture],[data-sel],[data-add],[data-move],[data-del],[data-del-sec],[data-tg],[data-cell],[data-toggle-active],[data-dispose],[data-outcome],[data-care-outcome],[data-ref-save],[data-ref-cancel],[data-ref-add],[data-ref-toggle],[data-ref-del],[data-ncra],[data-planned],[data-action-set],[data-fc],[data-rm-photo],[data-sig-clear],[data-pick],[data-shoot],[data-fault-add],[data-fault-del],[data-tpl],[data-id]");
   if (!t) return;
   const d = t.dataset;
 
@@ -5988,6 +6161,11 @@ document.addEventListener("click", async e => {
     return render();
   }
   if (d.cell) { const [f, s] = d.cell.split(":").map(Number); return editCell(f, s); }
+  if (d.careOutcome) {
+    const fid = t.closest("[data-care-field]").dataset.careField;
+    saveCareAnswer(fid, { outcome: d.careOutcome, value_num: null, value_text: null });
+    render(); return;
+  }
   if (d.outcome) {
     const fid = t.closest("[data-field]").dataset.field;
     saveAnswer(fid, { outcome: d.outcome, value_num: null, value_text: null });
@@ -6083,6 +6261,8 @@ document.addEventListener("click", async e => {
     case "raise-ncr": return raiseNcrFromFault(t.dataset.id);
     case "print-report": return openReport(t.dataset.id);
     case "ncr-report": return openNcrReport(t.dataset.id);
+    case "care-form": return openCareForm(t.dataset.id);
+    case "close-care-form": S.careCapture = null; S.view = "cust"; S.tab = 0; buildNav(); return render();
     case "care-report": return openCareReport(t.dataset.id);
     case "add-care-doc": return addCareDoc(t.dataset.id);
     case "stage-care-doc": return addCareDoc("new");
@@ -6166,6 +6346,8 @@ document.addEventListener("change", e => {
   if (d.num !== undefined) return saveAnswer(d.num, { value_num: e.target.value === "" ? null : Number(e.target.value) });
   if (d.txt !== undefined) return saveAnswer(d.txt, { value_text: e.target.value });
   if (d.equip !== undefined) return saveAnswer(d.equip, { equipment_id: e.target.value ? Number(e.target.value) : null });
+  if (d.careNum !== undefined) return saveCareAnswer(d.careNum, { value_num: e.target.value === "" ? null : Number(e.target.value) });
+  if (d.careTxt !== undefined) return saveCareAnswer(d.careTxt, { value_text: e.target.value });
   if (d.fault) {
     const [fid, id, col] = d.fault.split("|");
     return saveFault(fid, id, col, e.target.value);
