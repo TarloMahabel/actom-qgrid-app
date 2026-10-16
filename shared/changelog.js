@@ -22,10 +22,16 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.29.3";
+window.APP_VERSION = "0.29.4";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.29.4", d: "2026-10-16", t: "Add template modules: customer care forms",
+    n: "Inspection templates now have a module field (inspection or customer_care). " +
+       "Customer care templates can be built in the form designer but do not appear " +
+       "in the inspection requirements matrix. stage_id is now optional for non-inspection templates."
+  },
   {
     v: "0.29.3", d: "2026-10-15", t: "Fix APT field type: pass_fail → passfail",
     items: [
