@@ -1263,20 +1263,21 @@ function libraryView(m) {
         <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
           <span class="id" style="font-size:12.6px">${esc(r.t.code)}</span>
           <b style="font-size:13.5px">${esc(r.t.name)}</b>
+          ${r.t.module === "customer_care" ? pill("Customer care") : ""}
           ${r.pub ? pill(`Published rev ${r.pub.rev}`) : pill("Never published")}
           ${r.draft ? pill(`Draft rev ${r.draft.rev}`) : ""}
         </div>
         <div class="sub" style="margin-top:4px">
-          ${esc(stageName(r.t.stage_id))} ·
-          ${esc(byId(S.families, r.t.family_id)?.name || "all families")} ·
-          ${r.fields} field${r.fields === 1 ? "" : "s"} ·
-          competency level ${r.t.min_competency} ·
-          ${r.revs.length} revision${r.revs.length === 1 ? "" : "s"}
+          ${r.t.module === "customer_care"
+            ? `Customer care form · ${r.fields} field${r.fields === 1 ? "" : "s"} · competency level ${r.t.min_competency} · ${r.revs.length} revision${r.revs.length === 1 ? "" : "s"}`
+            : `${esc(stageName(r.t.stage_id))} · ${esc(byId(S.families, r.t.family_id)?.name || "all families")} · ${r.fields} field${r.fields === 1 ? "" : "s"} · competency level ${r.t.min_competency} · ${r.revs.length} revision${r.revs.length === 1 ? "" : "s"}`}
         </div>
         <div class="sub" style="margin-top:3px">
-          ${r.inUse
-            ? `Used by ${r.inUse} requirement${r.inUse === 1 ? "" : "s"} in the matrix`
-            : `<span style="color:var(--warn)">Not referenced by the requirements matrix — nothing will be scheduled from it</span>`}
+          ${r.t.module === "customer_care"
+            ? "Customer care forms are not scheduled from the requirements matrix"
+            : r.inUse
+              ? `Used by ${r.inUse} requirement${r.inUse === 1 ? "" : "s"} in the matrix`
+              : `<span style="color:var(--warn)">Not referenced by the requirements matrix — nothing will be scheduled from it</span>`}
         </div>
       </div>
       <div style="display:flex;gap:7px;align-items:center">
@@ -1290,15 +1291,16 @@ function libraryView(m) {
   </div></div>`;
 
   const drafts = rows.filter(r => r.draft).length;
-  const unused = rows.filter(r => !r.inUse).length;
+  const inspRows = rows.filter(r => r.t.module !== "customer_care");
+  const unused = inspRows.filter(r => !r.inUse).length;
 
-  return head(m, "The inspection forms this division uses. Open one to change it, or create a new one.",
+  return head(m, "The forms this division uses. Open one to change it, or create a new one.",
     `<button class="btn pri" data-act="new-template">New template</button>`)
     + `<div class="four" style="margin-bottom:14px">
-        <div class="card kpi"><div class="k">Templates</div><div class="v">${S.templates.length}</div><div class="d">across ${new Set(S.templates.map(t => t.stage_id)).size} stages</div></div>
+        <div class="card kpi"><div class="k">Templates</div><div class="v">${S.templates.length}</div><div class="d">${inspRows.length} inspection · ${rows.length - inspRows.length} customer care</div></div>
         <div class="card kpi ${rows.filter(r => r.pub).length === S.templates.length ? "good" : "warn"}"><div class="k">Published</div><div class="v">${rows.filter(r => r.pub).length}</div><div class="d">usable by the scheduler</div></div>
         <div class="card kpi ${drafts ? "warn" : "good"}"><div class="k">Open drafts</div><div class="v">${drafts}</div><div class="d">awaiting a second approver</div></div>
-        <div class="card kpi ${unused ? "warn" : "good"}"><div class="k">Not in the matrix</div><div class="v">${unused}</div><div class="d">nothing scheduled from them</div></div>
+        <div class="card kpi ${unused ? "warn" : "good"}"><div class="k">Not in the matrix</div><div class="v">${unused}</div><div class="d">inspection templates only</div></div>
       </div>`
     + (S.templates.length
         ? rows.sort((a, b) => a.t.code.localeCompare(b.t.code)).map(card).join("")
@@ -2047,7 +2049,7 @@ function editCell(familyId, stageId) {
   openModal(`${fam.name} · ${stg.name}`, `
     <div class="fld"><label>Inspection template</label><select id="cTpl">
       <option value="">— none —</option>
-      ${S.templates.map(t => `<option value="${t.id}" ${existing?.template_id === t.id ? "selected" : ""}>${esc(t.code)} — ${esc(t.name)}${revFor(t.id) ? "" : " (no published revision)"}</option>`).join("")}
+      ${S.templates.filter(t => t.module === "inspection" || !t.module).map(t => `<option value="${t.id}" ${existing?.template_id === t.id ? "selected" : ""}>${esc(t.code)} — ${esc(t.name)}${revFor(t.id) ? "" : " (no published revision)"}</option>`).join("")}
     </select><div class="hint">A template with no published revision saves here but generates nothing until it is published.</div></div>
     <div class="fld"><label>Requirement level</label><select id="cLvl">
       ${levels.map(l => `<option value="${l[0]}" ${existing?.level === l[0] ? "selected" : ""}>${l[1]}</option>`).join("")}</select></div>
@@ -2168,10 +2170,17 @@ async function saveDisposition() {
 }
 
 function newTemplate() {
-  openModal("New inspection template", `
+  openModal("New template", `
+    <div class="fld"><label>Module</label><select id="tModule" onchange="
+      const cc = this.value === 'customer_care';
+      document.getElementById('tStageRow').style.display = cc ? 'none' : '';
+    ">
+      <option value="inspection">Inspection</option>
+      <option value="customer_care">Customer care</option>
+    </select></div>
     <div class="two"><div class="fld"><label>Code</label><input id="tCode" placeholder="IT-ASM-05"></div>
     <div class="fld"><label>Name</label><input id="tName" placeholder="Assembly inspection"></div></div>
-    <div class="two"><div class="fld"><label>Manufacturing stage</label><select id="tStage">${S.stages.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select></div>
+    <div class="two" id="tStageRow"><div class="fld"><label>Manufacturing stage</label><select id="tStage">${S.stages.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select></div>
     <div class="fld"><label>Product family</label><select id="tFam"><option value="">All families</option>${S.families.map(f => `<option value="${f.id}">${esc(f.name)}</option>`).join("")}</select></div></div>
     <div class="fld"><label>Minimum competency to perform</label><select id="tComp">
       <option value="1">Level 1 — any trained user</option><option value="2" selected>Level 2 — competent under supervision</option><option value="3">Level 3 — may sign off independently</option></select></div>`,
@@ -2180,9 +2189,13 @@ function newTemplate() {
 async function saveTemplate() {
   busy(true);
   try {
+    const mod = $("tModule").value;
+    const isCC = mod === "customer_care";
     const { data, error } = await supabase.from("inspection_templates").insert({
       code: $("tCode").value.trim(), name: $("tName").value.trim(),
-      stage_id: +$("tStage").value, family_id: $("tFam").value ? +$("tFam").value : null,
+      module: mod,
+      stage_id: isCC ? null : +$("tStage").value,
+      family_id: isCC ? null : ($("tFam").value ? +$("tFam").value : null),
       min_competency: +$("tComp").value, created_by: S.profile.id
     }).select().single();
     if (error) throw error;
