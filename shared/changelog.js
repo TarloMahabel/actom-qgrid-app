@@ -22,10 +22,21 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.31.0";
+window.APP_VERSION = "0.32.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.32.0", d: "2026-10-20", t: "Phase 2: instrument calibration register + report builder",
+    n: "New module: Instrument Calibration Register tracks all measuring equipment across the division — " +
+       "serial number, description, model, location, assignee, calibration dates, and whether calibration is " +
+       "internal or external. Instruments are colour-coded by expiry: overdue (red), due within 3 months (orange), " +
+       "6 months (amber), 12 months (yellow), valid (green). PDF calibration certificates can be attached to each " +
+       "calibration record. A separate register tracks broken, lost and decommissioned instruments. " +
+       "Delivery tracking logs instruments sent to external calibration houses with PO number and expected return. " +
+       "New module: Report Builder lets you define, save and share tabular reports against any module view, " +
+       "with column selection, filters and sort. Reports can be exported as CSV or Excel."
+  },
   {
     v: "0.31.0", d: "2026-10-20", t: "NCR raised alert sent via n8n webhook",
     n: "The notification sent when an NCR is raised now goes through an n8n workflow " +
