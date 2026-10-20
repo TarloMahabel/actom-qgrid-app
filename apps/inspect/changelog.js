@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.29.8";
+window.APP_VERSION = "0.30.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.30.0", d: "2026-10-20", t: "NCR notifications: in-app alerts and email",
+    n: "A red chip in the top bar now shows how many NCRs need attention — open more than 30 days, " +
+       "no containment recorded within 7 days, no root cause within 14 days, or a corrective action " +
+       "past its due date. Clicking it opens the NCR register. " +
+       "Email notifications are now sent via Resend: Quality Engineers and Managers are notified " +
+       "immediately when an NCR is raised; a daily digest at 07:00 SAST lists overdue and stalled NCRs " +
+       "for Quality Managers; and corrective action owners receive a personal email when their action " +
+       "is past its due date."
+  },
   {
     v: "0.29.8", d: "2026-10-16", t: "Responsive header: hide name/email on smaller screens",
     n: "On screens narrower than 1200px the email address in the top bar is now hidden. " +

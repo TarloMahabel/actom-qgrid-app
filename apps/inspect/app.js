@@ -3705,6 +3705,7 @@ async function saveNcr() {
     if (error) throw error;
     closeModal();
     toast(`${data.ref} raised.`, "ok");
+    supabase.functions.invoke("notify-ncr", { body: { type: "raised", ncrId: data.id } }).catch(() => {});
     await reload();
     S.view = "ncr"; S.tab = 0; buildNav();
     openNcr(data.id);
@@ -6115,6 +6116,26 @@ function render() {
   const pr = S.dash.pass_rate_30d;
   $("chipYield").classList.toggle("hidden", pr == null);
   $("chipYield").textContent = `Pass rate ${pr}%`;
+
+  if (S.ncrReady) {
+    const today = new Date().toISOString().slice(0, 10);
+    const actionNcrIds = new Set(
+      (S.ncrActions || [])
+        .filter(a => a.due_date && !a.done_at && a.due_date < today)
+        .map(a => a.ncr_id)
+    );
+    const ncrAlerts = (S.ncrs || []).filter(n =>
+      n.status !== "closed" && (
+        n.age_days > 30 ||
+        (n.status === "open" && n.age_days > 7) ||
+        (n.status === "contained" && n.age_days > 14) ||
+        actionNcrIds.has(n.id)
+      )
+    ).length;
+    $("chipNcrStall").classList.toggle("hidden", !ncrAlerts);
+    $("chipNcrStall").textContent = `${ncrAlerts} NCR alert${ncrAlerts === 1 ? "" : "s"}`;
+  }
+
   paintSignatures();     // canvas bitmaps do not survive a re-render
 }
 
