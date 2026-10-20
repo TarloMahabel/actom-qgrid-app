@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.32.0";
+window.APP_VERSION = "0.33.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.33.0", d: "2026-10-20", t: "Calibration register UI",
+    n: "The Calibration Register module is now live. Register tab shows all active instruments with colour-coded expiry status. " +
+       "Open any instrument to view its full history, record a new calibration, log a delivery to a calibration house, and mark it returned. " +
+       "Out of service tab lists decommissioned instruments kept for ISO 9001 clause 7.1.5 evidence. " +
+       "Deliveries tab shows all instruments currently with external calibration houses, with PO numbers and expected return dates. " +
+       "Reports tab gives a summary by expiry bucket and upcoming expiries by calendar month. " +
+       "Top-bar alert chip appears when instruments are overdue or due within 90 days. " +
+       "Download exports the full register as a CSV."
+  },
   {
     v: "0.32.0", d: "2026-10-20", t: "Phase 2: instrument calibration register + report builder",
     n: "New module: Instrument Calibration Register tracks all measuring equipment across the division — " +

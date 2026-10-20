@@ -59,6 +59,9 @@ const S = {
   projects: [], worksOrders: [], inspections: [], failedChecks: [], people: [], competencies: [], handovers: [],
   faultsByProject: [], actions: [], report: null,
   ncrs: [], ncrActions: [], rootCauses: [], ncrOpen: null, ncrReady: false,
+  instruments: [], calibrationReady: false, calSummary: [], calByMonth: [],
+  instrumentLocations: [], calibOpen: null, calibHistory: null,
+  calibFilter: { bucket: "all", q: "" },
   regFilter: "all",               // Register tab: which records are shown
   period: new Date().toISOString().slice(0, 7),
   dash: {},
@@ -180,7 +183,8 @@ async function loadData() {
     S.defects = df.data; S.equipment = eq.data;
 
     const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd, fbp, acts,
-           ncr, ncra, rcs, dash, cmp, cmpT, cmpS, cbm, cbd, sc, coq, sy, nbd, ibm] = await Promise.all([
+           ncr, ncra, rcs, dash, cmp, cmpT, cmpS, cbm, cbd, sc, coq, sy, nbd, ibm,
+           inst, calSum, calMon, instLoc] = await Promise.all([
       supabase.from("inspection_templates").select("*").order("code"),
       supabase.from("template_revisions").select("*").order("rev", { ascending: false }),
       supabase.from("inspection_requirements").select("*"),
@@ -206,7 +210,11 @@ async function loadData() {
       supabase.from("v_cost_of_quality").select("*"),
       supabase.from("v_stage_yield").select("*"),
       supabase.from("v_ncr_by_department").select("*"),
-      supabase.from("v_inspections_by_month").select("*").order("period")
+      supabase.from("v_inspections_by_month").select("*").order("period"),
+      supabase.from("v_instruments").select("*").order("serial_number").limit(1000),
+      supabase.from("v_calibration_summary").select("*"),
+      supabase.from("v_calibration_due_by_month").select("*"),
+      supabase.from("instrument_locations").select("*").order("name")
     ]);
     for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd]) if (r.error) throw r.error;
     /* The dashboard views are not load-bearing: a division that has not run
@@ -243,6 +251,11 @@ async function loadData() {
        024 gets the stage chart in that slot instead of an empty one that
        would read as "no inspections this year". */
     S.inspByMonth = ibm.error ? null : (ibm.data || []);
+    S.instruments = inst.error ? [] : (inst.data || []);
+    S.calibrationReady = !inst.error;
+    S.calSummary = calSum.error ? [] : (calSum.data || []);
+    S.calByMonth = calMon.error ? [] : (calMon.data || []);
+    S.instrumentLocations = instLoc.error ? [] : (instLoc.data || []);
     S.templates = tpl.data; S.revisions = rev.data; S.requirements = req.data;
     S.projects = prj.data; S.worksOrders = wo.data;
     S.inspections = ins.data; S.failedChecks = fc.data;
@@ -309,8 +322,11 @@ const NAV = [
   { id: "req",   n: 8, t: "Inspection requirements", col: "--m5", tabs: ["Requirements matrix"] },
   { id: "adm",   n: 9, t: "Administration",          col: "--m6",
     tabs: ["Users & roles", "Competency", "Reference lists", "Options", "Audit trail"] },
+  { g: "Calibration" },
+  { id: "calib", n: 10, t: "Calibration register", col: "--m5",
+    tabs: ["Register", "Out of service", "Deliveries", "Reports"] },
   { g: "Later phases" },
-  ...["Calibration","Document control","Training & competency",
+  ...["Document control","Training & competency",
       "Supplier quality","Audits & compliance","Performance analytics"]
      .map(t => ({ off: 1, t }))
 ];
@@ -335,6 +351,7 @@ const ICON_PATHS = {
   dsn:   '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
   req:   '<path d="m3 7 2 2 4-4M3 17l2 2 4-4M13 6h8M13 12h8M13 18h8"/>',
   adm:   '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+  calib: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/>',
   later: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
 };
 const navIcon = id => `<svg class="ni" width="17" height="17" viewBox="0 0 24 24" fill="none"
@@ -471,6 +488,11 @@ function vExec() {
     ["Nonconformances with no root cause", d.ncrs_no_cause, "cannot be closed until there is one"],
     ["Customer cares with no reply", d.cares_no_reply, "the customer has not heard back"]
   ];
+  if (S.calibrationReady) {
+    const calibOverdue = (S.instruments || []).filter(i => i.active && i.bucket === "overdue").length;
+    if (calibOverdue) attention.push(
+      ["Instruments overdue for calibration", calibOverdue, "calibration certificates have expired"]);
+  }
   const outstanding = attention.filter(([, n]) => Number(n) > 0);
 
   const yieldBar = fpy == null ? "" : `<div class="kbar ${fpy < target ? "under" : ""}"
@@ -5661,6 +5683,575 @@ function vCust(m) {
 }
 
 
+/* ---- Calibration register ---- */
+
+function calBucketPill(bucket) {
+  const map = {
+    overdue:          ["p-bad",  "Overdue"],
+    due_90d:          ["p-bad",  "Due ≤90 d"],
+    due_180d:         ["p-warn", "Due ≤180 d"],
+    due_365d:         ["p-warn", "Due ≤365 d"],
+    valid:            ["p-ok",   "Valid"],
+    faulty_equipment: ["p-bad",  "Faulty"],
+    on_hold:          ["p-info", "On hold"],
+    not_in_service:   ["p-grey", "Not in service"],
+    no_record:        ["p-grey", "No record"],
+  };
+  const [cls, label] = map[bucket] || ["p-grey", bucket || "—"];
+  return `<span class="pill ${cls}">${label}</span>`;
+}
+
+function vCalib(m) {
+  if (!S.calibrationReady) {
+    return head(m) + `<div class="card"><div class="bd">
+      <div class="note q">This division has not had migration 028 applied yet.
+        Ask Group IT to run <b>db/migrations/028-instruments.sql</b> and the
+        migrations that follow (029, 030).</div></div></div>`;
+  }
+  if (S.calibOpen) return calibDetail(m);
+
+  let body;
+  if (S.tab === 0) body = calibRegister();
+  else if (S.tab === 1) body = calibOos();
+  else if (S.tab === 2) body = calibDeliveries();
+  else body = calibReports();
+
+  return head(m,
+    "Track calibrated measuring instruments against ISO 9001:2015 clause 7.1.5.",
+    `<button class="btn" data-act="refresh">Refresh</button>
+     ${canConfigure() ? `<button class="btn pri" data-act="new-instrument">Add instrument</button>` : ""}`)
+    + tabbar(m) + body;
+}
+
+function calibRegister() {
+  const all = (S.instruments || []).filter(i => i.active !== false);
+  const f = S.calibFilter || {};
+  const BUCKETS = [
+    ["all",      "All"],
+    ["overdue",  "Overdue"],
+    ["due_90d",  "Due ≤90 d"],
+    ["due_180d", "Due ≤180 d"],
+    ["due_365d", "Due ≤365 d"],
+    ["valid",    "Valid"],
+    ["no_record","No record"],
+  ];
+  const cur = f.bucket || "all";
+  const filtered = all
+    .filter(i => cur === "all" || i.bucket === cur)
+    .filter(i => !f.q || (i.serial_number + " " + (i.description || "") + " " + (i.location || "")).toLowerCase().includes(f.q.toLowerCase()));
+
+  const overdue = all.filter(i => i.bucket === "overdue").length;
+  const due90   = all.filter(i => i.bucket === "due_90d").length;
+  const noRec   = all.filter(i => i.bucket === "no_record").length;
+
+  return `<div class="four" style="margin-bottom:14px">
+      <div class="card kpi ${overdue ? "alert" : "good"}"><div class="k">Overdue</div>
+        <div class="v">${overdue}</div><div class="d">calibration expired</div></div>
+      <div class="card kpi ${due90 ? "warn" : "good"}"><div class="k">Due ≤90 days</div>
+        <div class="v">${due90}</div><div class="d">action needed soon</div></div>
+      <div class="card kpi"><div class="k">Active instruments</div>
+        <div class="v">${all.length}</div><div class="d">in the register</div></div>
+      <div class="card kpi ${noRec ? "warn" : "good"}"><div class="k">No record</div>
+        <div class="v">${noRec}</div><div class="d">no calibration on file</div></div>
+    </div>
+
+    <div class="filters">
+      ${BUCKETS.map(([v, l]) =>
+        `<button class="btn sm${cur === v ? " on" : ""}" data-act="calib-filter" data-f="${v}">${l}</button>`
+      ).join("")}
+      <span class="spacer"></span>
+      <input type="search" id="calibQ" placeholder="search serial, description…"
+        style="width:200px;padding:5px 9px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:13px"
+        value="${esc(f.q || "")}">
+      <button class="btn sm" data-act="calib-csv" title="Download register as CSV">Download</button>
+    </div>
+
+    <div class="card"><h3>Register <span class="cl">${filtered.length} shown</span></h3><div class="bd">
+      ${T(["Serial no.", "Description", "Location", "Type", "Calibrated", "Expires", "Days", "Status", ""],
+        filtered.slice(0, 200).map(i => [
+          `<span class="id">${esc(i.serial_number)}</span>`,
+          `${esc((i.description || "").slice(0, 50))}${i.model ? `<div class="sub">${esc(i.model)}</div>` : ""}`,
+          esc(i.location || "—"),
+          esc(i.calibration_type || "—"),
+          i.calibrated_at ? fmtDate(i.calibrated_at) : `<span class="cnt">—</span>`,
+          i.expires_at ? fmtDate(i.expires_at) : `<span class="cnt">—</span>`,
+          i.days_to_expiry != null
+            ? (Number(i.days_to_expiry) < 0
+                ? `<span style="color:var(--bad)">${Math.abs(Number(i.days_to_expiry))} overdue</span>`
+                : String(i.days_to_expiry))
+            : "—",
+          calBucketPill(i.bucket),
+          `<button class="btn sm" data-act="open-calib" data-id="${i.id}">Open</button>`
+        ]))}
+    </div></div>`;
+}
+
+function calibOos() {
+  const inactive = (S.instruments || []).filter(i => !i.active);
+  const stages   = (S.instruments || []).filter(i => i.active &&
+    (i.workflow_stage === "faulty_equipment" || i.workflow_stage === "on_hold" || i.workflow_stage === "not_in_service"));
+
+  return `<div class="card"><h3>Decommissioned instruments <span class="cl">${inactive.length}</span></h3>
+    <div class="bd">
+      <div class="note" style="margin-bottom:12px">ISO 9001:2015 clause 7.1.5.2 requires that
+        out-of-tolerance findings be recorded. Decommissioned instruments stay in the register
+        as evidence; they are not deleted.</div>
+      ${T(["Serial no.", "Description", "Decommissioned", "Reason", ""],
+        inactive.length
+          ? inactive.map(i => [
+              `<span class="id">${esc(i.serial_number)}</span>`,
+              esc((i.description || "").slice(0, 50)),
+              fmtDate(i.decommissioned_at),
+              esc(i.decommission_reason || "—"),
+              `<button class="btn sm" data-act="open-calib" data-id="${i.id}">Open</button>`
+            ])
+          : [])}
+    </div></div>
+
+    ${stages.length ? `<div class="card" style="margin-top:12px"><h3>Temporarily out of service
+        <span class="cl">${stages.length}</span></h3>
+      <div class="bd">
+        ${T(["Serial no.", "Description", "Status", ""],
+          stages.map(i => [
+            `<span class="id">${esc(i.serial_number)}</span>`,
+            esc((i.description || "").slice(0, 50)),
+            calBucketPill(i.bucket),
+            `<button class="btn sm" data-act="open-calib" data-id="${i.id}">Open</button>`
+          ]))}
+      </div></div>` : ""}`;
+}
+
+function calibDeliveries() {
+  const open = (S.instruments || []).filter(i => i.delivery_id);
+  return `<div class="card"><h3>Open deliveries — instruments with calibration houses
+      <span class="cl">${open.length}</span></h3>
+    <div class="bd">
+      ${open.length === 0
+        ? `<div class="empty">No instruments currently out for calibration.</div>`
+        : T(["Serial no.", "Description", "PO no.", "Calibration house", "Sent", "Expected return", "Days out", ""],
+            open.map(i => {
+              const sent = i.sent_at ? new Date(i.sent_at) : null;
+              const daysOut = sent ? Math.floor((Date.now() - sent.getTime()) / 86400000) : "—";
+              const overdue = i.expected_return && i.expected_return < today();
+              return [
+                `<span class="id">${esc(i.serial_number)}</span>`,
+                esc((i.description || "").slice(0, 40)),
+                esc(i.po_number || "—"),
+                esc(i.calibration_house || "—"),
+                fmtDate(i.sent_at),
+                i.expected_return
+                  ? `${fmtDate(i.expected_return)}${overdue ? ` <span style="color:var(--bad)">late</span>` : ""}`
+                  : "—",
+                String(daysOut),
+                `<button class="btn sm" data-act="mark-returned" data-id="${i.delivery_id}"
+                   title="Record that this instrument has returned">Mark returned</button>
+                 <button class="btn sm" data-act="open-calib" data-id="${i.id}">Open</button>`
+              ];
+            }))}
+    </div></div>`;
+}
+
+function calibReports() {
+  const sum = S.calSummary || [];
+  const mon = S.calByMonth || [];
+  const total = sum.reduce((a, r) => a + Number(r.instruments || 0), 0);
+
+  return `<div class="card"><h3>Status summary — active instruments</h3>
+    <div class="bd">
+      ${sum.length === 0
+        ? `<div class="empty">No data yet. Run migration 030 and reload.</div>`
+        : T(["Status", "Total", "External", "Internal"],
+            sum.map(r => [
+              calBucketPill(r.bucket),
+              `<b>${r.instruments}</b>`,
+              String(r.external_count),
+              String(r.internal_count)
+            ]))}
+      ${total ? `<div class="hint" style="margin-top:8px">${total} active instruments total.</div>` : ""}
+    </div></div>
+
+    <div class="card" style="margin-top:12px"><h3>Upcoming expiries — next 12 months</h3>
+    <div class="bd">
+      ${mon.length === 0
+        ? `<div class="empty">No instruments with upcoming calibration dates.</div>`
+        : T(["Month", "Expiring", "External", "Internal"],
+            mon.map(r => [
+              new Date(r.period + "T00:00:00").toLocaleString("en-ZA", { month: "long", year: "numeric" }),
+              String(r.instruments),
+              String(r.external_count),
+              String(r.internal_count)
+            ]))}
+    </div></div>`;
+}
+
+function calibDetail(m) {
+  const inst = (S.instruments || []).find(i => i.id === S.calibOpen);
+  if (!inst) {
+    return head(m) + `<div class="card"><div class="bd">
+      <div class="empty">Instrument not found.
+        <button class="btn sm" data-act="close-calib-view" style="margin-left:8px">← Back</button>
+      </div></div></div>`;
+  }
+
+  const wfLabel = {
+    active: "Active", quotation_stage: "Quotation stage",
+    requisition_stage: "Requisition stage", purchase_order_stage: "PO raised",
+    sent_for_calibration: "Sent for calibration", on_hold: "On hold",
+    faulty_equipment: "Faulty equipment", not_in_service: "Not in service",
+  };
+  const hist = S.calibHistory;
+
+  return `<div class="phead"><div>
+    <div class="eyebrow"><button class="btn sm" data-act="close-calib-view"
+        style="margin-right:8px">← Register</button>${esc(inst.serial_number)}</div>
+    <h1>${esc(inst.description)}</h1>
+    ${inst.model ? `<p style="margin:2px 0 0;color:var(--muted);font-size:13px">Model: ${esc(inst.model)}</p>` : ""}
+  </div><div class="pact">
+    <span style="margin-right:8px">${calBucketPill(inst.bucket)}</span>
+    ${canConfigure() ? `<button class="btn" data-act="edit-instrument" data-id="${inst.id}">Edit</button>` : ""}
+    ${canConfigure() && inst.active ? `<button class="btn" data-act="decommission-instrument" data-id="${inst.id}">Decommission</button>` : ""}
+    ${canConfigure() && !inst.active ? `<button class="btn" data-act="reactivate-instrument" data-id="${inst.id}">Reactivate</button>` : ""}
+  </div></div>
+
+  <div class="two">
+    <div class="card"><div class="bd">
+      <table class="rtab"><tbody>
+        <tr><th>Location</th><td>${esc(inst.location || inst.location_other || "—")}</td></tr>
+        <tr><th>Used by</th><td>${esc(inst.used_by || "—")}</td></tr>
+        <tr><th>Calibration type</th><td>${esc(inst.calibration_type || "—")}</td></tr>
+        <tr><th>Workflow stage</th><td>${esc(wfLabel[inst.workflow_stage] || inst.workflow_stage || "—")}</td></tr>
+        ${!inst.active ? `<tr><th>Decommissioned</th><td>${fmtDate(inst.decommissioned_at)}</td></tr>
+          <tr><th>Reason</th><td>${esc(inst.decommission_reason || "—")}</td></tr>` : ""}
+        ${inst.notes ? `<tr><th>Notes</th><td>${esc(inst.notes)}</td></tr>` : ""}
+      </tbody></table>
+    </div></div>
+
+    <div class="card"><div class="bd">
+      <h3 style="margin-top:0">Latest calibration</h3>
+      ${inst.calibrated_at ? `
+        <table class="rtab"><tbody>
+          <tr><th>Calibrated</th><td>${fmtDate(inst.calibrated_at)}</td></tr>
+          <tr><th>Expires</th><td>${fmtDate(inst.expires_at)}</td></tr>
+          <tr><th>Days to expiry</th><td>${inst.days_to_expiry != null
+            ? (Number(inst.days_to_expiry) < 0
+                ? `<span style="color:var(--bad)">${Math.abs(Number(inst.days_to_expiry))} days overdue</span>`
+                : `${inst.days_to_expiry} days`)
+            : "—"}</td></tr>
+          <tr><th>Certificate ref</th><td>${esc(inst.certificate_ref || "—")}</td></tr>
+          ${inst.calibration_house ? `<tr><th>Calibration house</th><td>${esc(inst.calibration_house)}</td></tr>` : ""}
+          ${inst.calibrated_by ? `<tr><th>Calibrated by</th><td>${esc(inst.calibrated_by)}</td></tr>` : ""}
+          ${inst.calibration_comment ? `<tr><th>Comment</th><td>${esc(inst.calibration_comment)}</td></tr>` : ""}
+        </tbody></table>
+        ${canConfigure() && inst.active ? `<div style="margin-top:12px">
+          <button class="btn sm pri" data-act="new-cal-record" data-id="${inst.id}">Record next calibration</button>
+        </div>` : ""}` : `
+        <div class="note q" style="margin-bottom:12px">No calibration record on file yet.</div>
+        ${canConfigure() && inst.active ? `<button class="btn sm pri" data-act="new-cal-record" data-id="${inst.id}">Record calibration</button>` : ""}
+      `}
+    </div></div>
+  </div>
+
+  ${inst.delivery_id ? `<div class="card" style="margin-top:12px"><div class="bd">
+    <h3 style="margin-top:0">Currently with calibration house</h3>
+    <table class="rtab"><tbody>
+      <tr><th>PO number</th><td>${esc(inst.po_number || "—")}</td></tr>
+      <tr><th>Sent</th><td>${fmtDate(inst.sent_at)}</td></tr>
+      <tr><th>Expected return</th><td>${fmtDate(inst.expected_return)}</td></tr>
+    </tbody></table>
+    ${canConfigure() ? `<div style="margin-top:12px">
+      <button class="btn sm" data-act="mark-returned" data-id="${inst.delivery_id}">Mark as returned</button>
+    </div>` : ""}
+  </div></div>` : (canConfigure() && inst.active && inst.calibration_type === "external" ? `
+    <div style="margin-top:12px">
+      <button class="btn sm" data-act="new-delivery" data-id="${inst.id}">Log delivery to calibration house</button>
+    </div>` : "")}
+
+  <div class="card" style="margin-top:12px"><div class="bd">
+    <h3 style="margin-top:0">Calibration history</h3>
+    ${hist === null
+      ? `<div class="empty">Loading history…</div>`
+      : hist.length === 0
+        ? `<div class="empty">No calibration records yet.</div>`
+        : T(["Calibrated", "Expires", "Certificate ref", "House / person", "Comment"],
+            hist.map(c => [
+              fmtDate(c.calibrated_at),
+              fmtDate(c.expires_at),
+              esc(c.certificate_ref || "—"),
+              esc(c.calibration_house || c.calibrated_by || "—"),
+              esc((c.comment || "").slice(0, 60))
+            ]))}
+  </div></div>`;
+}
+
+/* ---- Calibration actions ---- */
+
+function instrumentModal(inst) {
+  const locs = S.instrumentLocations || [];
+  const wfStages = [
+    ["active", "Active"], ["quotation_stage", "Quotation stage"],
+    ["requisition_stage", "Requisition stage"], ["purchase_order_stage", "PO raised"],
+    ["sent_for_calibration", "Sent for calibration"],
+    ["on_hold", "On hold"], ["faulty_equipment", "Faulty equipment"],
+    ["not_in_service", "Not in service"],
+  ];
+  openModal(inst ? "Edit instrument" : "Add instrument", `
+    <div class="two">
+      <div class="fld"><label>Serial number</label>
+        <input id="iSerial" value="${esc(inst?.serial_number || "")}" placeholder="e.g. VN-023"></div>
+      <div class="fld"><label>Model</label>
+        <input id="iModel" value="${esc(inst?.model || "")}" placeholder="make / model"></div>
+    </div>
+    <div class="fld"><label>Description</label>
+      <input id="iDesc" value="${esc(inst?.description || "")}" placeholder="what the instrument measures"></div>
+    <div class="two">
+      <div class="fld"><label>Location</label>
+        <select id="iLoc">
+          <option value="">— not set —</option>
+          ${locs.map(l => `<option value="${l.id}"${inst?.location_id === l.id ? " selected" : ""}>${esc(l.name)}</option>`).join("")}
+        </select></div>
+      <div class="fld"><label>Used by</label>
+        <input id="iUsedBy" value="${esc(inst?.used_by || "")}" placeholder="department or person"></div>
+    </div>
+    <div class="two">
+      <div class="fld"><label>Calibration type</label>
+        <select id="iCalType">
+          <option value="external"${!inst || inst.calibration_type === "external" ? " selected" : ""}>External</option>
+          <option value="internal"${inst?.calibration_type === "internal" ? " selected" : ""}>Internal</option>
+        </select></div>
+      <div class="fld"><label>Workflow stage</label>
+        <select id="iStage">
+          ${wfStages.map(([v, l]) => `<option value="${v}"${inst?.workflow_stage === v ? " selected" : ""}>${esc(l)}</option>`).join("")}
+        </select></div>
+    </div>
+    <div class="fld"><label>Notes</label>
+      <textarea id="iNotes" rows="2">${esc(inst?.notes || "")}</textarea></div>`,
+    [["Cancel", "close"], [inst ? "Save changes" : "Add instrument", inst ? "save-instrument-edit" : "save-instrument", "pri"]],
+    { inst });
+}
+
+async function saveInstrument() {
+  const serial = $("iSerial").value.trim();
+  const desc   = $("iDesc").value.trim();
+  if (!serial || !desc) return toast("Serial number and description are required.", "bad");
+  busy(true);
+  try {
+    const { error } = await supabase.from("instruments").insert({
+      serial_number:    serial,
+      description:      desc,
+      model:            $("iModel").value.trim() || null,
+      location_id:      $("iLoc").value ? Number($("iLoc").value) : null,
+      used_by:          $("iUsedBy").value.trim() || null,
+      calibration_type: $("iCalType").value,
+      workflow_stage:   $("iStage").value,
+      notes:            $("iNotes").value.trim() || null,
+      created_by:       S.profile.id,
+    });
+    if (error) throw error;
+    closeModal(); toast("Instrument added.", "ok"); await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function updateInstrument() {
+  const { inst } = modalCtx;
+  const serial = $("iSerial").value.trim();
+  const desc   = $("iDesc").value.trim();
+  if (!serial || !desc) return toast("Serial number and description are required.", "bad");
+  busy(true);
+  try {
+    const { error } = await supabase.from("instruments").update({
+      serial_number:    serial,
+      description:      desc,
+      model:            $("iModel").value.trim() || null,
+      location_id:      $("iLoc").value ? Number($("iLoc").value) : null,
+      used_by:          $("iUsedBy").value.trim() || null,
+      calibration_type: $("iCalType").value,
+      workflow_stage:   $("iStage").value,
+      notes:            $("iNotes").value.trim() || null,
+    }).eq("id", inst.id);
+    if (error) throw error;
+    closeModal(); toast("Instrument updated.", "ok"); await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+function decommissionModal(id) {
+  openModal("Decommission instrument", `
+    <div class="note q" style="margin-bottom:12px">ISO 9001 requires records of equipment found
+      to be unsuitable. The instrument stays in the register as inactive — it is not deleted.</div>
+    <div class="fld"><label>Date decommissioned</label>
+      <input id="dDate" type="date" value="${today()}"></div>
+    <div class="fld"><label>Reason</label>
+      <select id="dReason">
+        <option value="lost">Lost</option>
+        <option value="broken">Broken / damaged</option>
+        <option value="scrapped">Scrapped</option>
+        <option value="not_in_service">Not in service</option>
+        <option value="other">Other</option>
+      </select></div>`,
+    [["Cancel", "close"], ["Decommission", "save-decommission", ""]],
+    { id });
+}
+
+async function saveDecommission() {
+  const { id } = modalCtx;
+  const date   = $("dDate").value;
+  if (!date) return toast("A date is required.", "bad");
+  busy(true);
+  try {
+    const { error } = await supabase.from("instruments").update({
+      active: false, decommissioned_at: date, decommission_reason: $("dReason").value,
+    }).eq("id", id);
+    if (error) throw error;
+    closeModal(); S.calibOpen = null; toast("Instrument decommissioned.", "ok"); await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function reactivateInstrument(id) {
+  if (!confirm("Reactivate this instrument? It will return to the active register.")) return;
+  busy(true);
+  try {
+    const { error } = await supabase.from("instruments").update({
+      active: true, decommissioned_at: null, decommission_reason: null,
+      workflow_stage: "active",
+    }).eq("id", id);
+    if (error) throw error;
+    toast("Instrument reactivated.", "ok"); await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+function calRecordModal(instrumentId) {
+  const inst = (S.instruments || []).find(i => i.id === instrumentId);
+  const isExt = !inst || inst.calibration_type === "external";
+  openModal("Record calibration", `
+    <div class="note" style="margin-bottom:12px">Add the calibration certificate details.
+      The expiry date must be after the calibration date.</div>
+    <div class="two">
+      <div class="fld"><label>Calibration date</label>
+        <input id="calDate" type="date" value="${today()}"></div>
+      <div class="fld"><label>Expiry date</label>
+        <input id="calExpiry" type="date"></div>
+    </div>
+    <div class="two">
+      <div class="fld"><label>Certificate reference</label>
+        <input id="calCertRef" placeholder="e.g. CAL-2026-00123"></div>
+      ${isExt
+        ? `<div class="fld"><label>Calibration house</label>
+            <input id="calHouse" placeholder="name of the lab"></div>`
+        : `<div class="fld"><label>Calibrated by</label>
+            <input id="calBy" placeholder="name of the person"></div>`}
+    </div>
+    <div class="fld"><label>Comment</label>
+      <textarea id="calComment" rows="2" placeholder="optional notes"></textarea></div>`,
+    [["Cancel", "close"], ["Save record", "save-cal-record", "pri"]],
+    { instrumentId, isExt });
+}
+
+async function saveCalRecord() {
+  const { instrumentId, isExt } = modalCtx;
+  const calDate = $("calDate").value;
+  const expiry  = $("calExpiry").value;
+  if (!calDate || !expiry) return toast("Calibration date and expiry date are required.", "bad");
+  if (expiry <= calDate) return toast("Expiry must be after the calibration date.", "bad");
+  busy(true);
+  try {
+    const { error } = await supabase.from("calibrations").insert({
+      instrument_id:    instrumentId,
+      calibrated_at:    calDate,
+      expires_at:       expiry,
+      certificate_ref:  $("calCertRef").value.trim() || null,
+      calibration_house: isExt ? ($("calHouse")?.value.trim() || null) : null,
+      calibrated_by:    !isExt ? ($("calBy")?.value.trim() || null) : null,
+      comment:          $("calComment").value.trim() || null,
+      created_by:       S.profile.id,
+    });
+    if (error) throw error;
+    closeModal(); toast("Calibration recorded.", "ok"); await reload();
+    if (S.calibOpen) await openCalib(S.calibOpen);
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+function deliveryModal(instrumentId) {
+  openModal("Log delivery to calibration house", `
+    <div class="two">
+      <div class="fld"><label>PO number</label>
+        <input id="delPo" placeholder="purchase order reference"></div>
+      <div class="fld"><label>Calibration house</label>
+        <input id="delHouse" placeholder="name of the lab"></div>
+    </div>
+    <div class="two">
+      <div class="fld"><label>Date sent</label>
+        <input id="delSent" type="date" value="${today()}"></div>
+      <div class="fld"><label>Expected return</label>
+        <input id="delReturn" type="date"></div>
+    </div>
+    <div class="fld"><label>Notes</label>
+      <textarea id="delNotes" rows="2"></textarea></div>`,
+    [["Cancel", "close"], ["Log delivery", "save-delivery", "pri"]],
+    { instrumentId });
+}
+
+async function saveDelivery() {
+  const { instrumentId } = modalCtx;
+  const sent = $("delSent").value;
+  if (!sent) return toast("Date sent is required.", "bad");
+  busy(true);
+  try {
+    const { error } = await supabase.from("calibration_deliveries").insert({
+      instrument_id:    instrumentId,
+      po_number:        $("delPo").value.trim() || null,
+      calibration_house: $("delHouse").value.trim() || null,
+      sent_at:          sent,
+      expected_return:  $("delReturn").value || null,
+      notes:            $("delNotes").value.trim() || null,
+      created_by:       S.profile.id,
+    });
+    if (error) throw error;
+    closeModal(); toast("Delivery logged.", "ok"); await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function markReturned(deliveryId) {
+  if (!confirm("Mark this instrument as returned from the calibration house?")) return;
+  busy(true);
+  try {
+    const { error } = await supabase.from("calibration_deliveries")
+      .update({ returned_at: today() }).eq("id", deliveryId);
+    if (error) throw error;
+    toast("Marked as returned.", "ok"); await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+function downloadCalibRegister() {
+  const rows = (S.instruments || []).filter(i => i.active !== false);
+  const cols = ["serial_number","description","model","location","used_by","calibration_type",
+    "workflow_stage","calibrated_at","expires_at","days_to_expiry","bucket","certificate_ref","calibration_house"];
+  const header = ["Serial number","Description","Model","Location","Used by","Calibration type",
+    "Workflow stage","Calibrated","Expires","Days to expiry","Status","Certificate ref","Calibration house"];
+  const lines = [header.join(","),
+    ...rows.map(r => cols.map(k => `"${String(r[k] ?? "").replace(/"/g, '""')}"`).join(","))];
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "calibration-register.csv"; a.click();
+}
+
+async function openCalib(id) {
+  S.calibOpen = id; S.calibHistory = null;
+  render(); busy(true);
+  try {
+    const { data, error } = await supabase.from("calibrations")
+      .select("*").eq("instrument_id", id).order("calibrated_at", { ascending: false });
+    if (error) throw error;
+    S.calibHistory = data || [];
+  } catch (e) { toast(explain(e), "bad"); S.calibHistory = []; }
+  finally { busy(false); render(); }
+}
+
 /* =====================================================================
    Help, the help guide, and the tour.
 
@@ -5756,6 +6347,16 @@ const HELP = [
       "Quotes, printed emails and other documents can be attached, including while you are logging it. Nothing can be attached once it is cleared.",
       "Clearing one needs a note of what was done for the customer. A technical customer care also needs a root cause — the form asks for the five Why.",
       "The After Sales report shows cares per month and average response time against their limits."
+    ] },
+  { sec: "modules", id: "m-calib", view: "calib", title: "Calibration register",
+    tabs: ["Register", "Out of service", "Deliveries", "Reports"],
+    body: [
+      "The calibration register tracks every measuring instrument in the division against ISO 9001:2015 clause 7.1.5. Each instrument has a serial number, description, location and assigned person.",
+      "Instruments are colour-coded by expiry status: red for overdue, amber for due within 90 days or 180 days, yellow for due within 12 months, and green for valid. Instruments with no calibration record on file are shown separately.",
+      "When you record a calibration, enter the date it was calibrated, when it expires, and the certificate reference. For external calibration, you can also log the calibration house and the PO number.",
+      "Deliveries tracks instruments currently out with a calibration house. Log the PO number, date sent and expected return, then mark it returned when it comes back.",
+      "Out of service shows instruments that have been decommissioned. ISO 9001 requires that instruments found to be out-of-tolerance are recorded; decommissioned instruments stay in the register as evidence and are not deleted.",
+      "Only a QC Supervisor or above can add or edit instruments."
     ] },
   { sec: "modules", id: "m-dsn", view: "dsn", title: "Form designer", setup: true,
     body: [
@@ -6065,7 +6666,7 @@ function hideTourOffer() {
 }
 
 const VIEWS = { main: vMain, dash: vDash, work: vWork, sched: vSched, dsn: vDsn,
-                req: vReq, ncr: vNcr, cust: vCust, adm: vAdm, help: vHelp };
+                req: vReq, ncr: vNcr, cust: vCust, calib: vCalib, adm: vAdm, help: vHelp };
 function render() {
   /* The report is its own view, not a tab: it has to be able to fill the page
      and print without the surrounding chrome. */
@@ -6137,6 +6738,12 @@ function render() {
     $("chipNcrStall").textContent = `${ncrAlerts} NCR alert${ncrAlerts === 1 ? "" : "s"}`;
   }
 
+  if (S.calibrationReady) {
+    const calibAlerts = (S.instruments || [])
+      .filter(i => i.active && (i.bucket === "overdue" || i.bucket === "due_90d")).length;
+    $("chipCalib").classList.toggle("hidden", !calibAlerts);
+    $("chipCalib").textContent = `${calibAlerts} cal. alert${calibAlerts === 1 ? "" : "s"}`;
+  }
   paintSignatures();     // canvas bitmaps do not survive a re-render
 }
 
@@ -6331,6 +6938,22 @@ document.addEventListener("click", async e => {
       if (existingId) { await supabase.from("inspection_requirements").delete().eq("id", existingId); }
       closeModal(); return reload(); }
     case "save-disposition": return saveDisposition();
+    case "calib-filter": S.calibFilter.bucket = t.dataset.f; return render();
+    case "open-calib": return openCalib(t.dataset.id);
+    case "close-calib-view": S.calibOpen = null; S.calibHistory = null; return render();
+    case "new-instrument": return instrumentModal(null);
+    case "save-instrument": return saveInstrument();
+    case "edit-instrument": return instrumentModal((S.instruments || []).find(i => i.id === t.dataset.id));
+    case "save-instrument-edit": return updateInstrument();
+    case "decommission-instrument": return decommissionModal(t.dataset.id);
+    case "save-decommission": return saveDecommission();
+    case "reactivate-instrument": return reactivateInstrument(t.dataset.id);
+    case "new-cal-record": return calRecordModal(t.dataset.id);
+    case "save-cal-record": return saveCalRecord();
+    case "new-delivery": return deliveryModal(t.dataset.id);
+    case "save-delivery": return saveDelivery();
+    case "mark-returned": return markReturned(t.dataset.id);
+    case "calib-csv": return downloadCalibRegister();
     case "close": return closeModal();
   }
 });
@@ -6438,6 +7061,14 @@ window.addEventListener("resize", () => { if (!narrow()) setMenu(false); });
    the caret are put back where they were -- otherwise every keystroke
    would throw the cursor out of the box. */
 document.addEventListener("input", e => {
+  if (e.target.id === "calibQ") {
+    S.calibFilter.q = e.target.value;
+    const at = e.target.selectionStart;
+    render();
+    const q = $("calibQ");
+    if (q) { q.focus(); try { q.setSelectionRange(at, at); } catch {} }
+    return;
+  }
   if (e.target.id !== "helpQ") return;
   S.helpQ = e.target.value;
   const at = e.target.selectionStart;
