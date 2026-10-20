@@ -22,10 +22,15 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.35.0";
+window.APP_VERSION = "0.35.1";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.35.1", d: "2026-10-20", t: "Nav: all sections collapsed by default",
+    n: "All navigation sections now start collapsed. Click any section heading to expand it. " +
+       "Navigating to a module automatically opens its section."
+  },
   {
     v: "0.35.0", d: "2026-10-20", t: "Report builder fixes + collapsible menu",
     n: "Report builder: column picker now works for all views even when the view has no data yet " +

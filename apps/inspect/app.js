@@ -64,7 +64,7 @@ const S = {
   calibFilter: { bucket: "all", q: "" },
   reportViews: [], savedReports: [], reportOpen: null,
   reportBuilding: null, reportSchema: null, reportResults: null,
-  navCollapsed: { "Later phases": true },
+  navCollapsed: { Inspections: true, Nonconformance: true, Customer: true, Setup: true, Calibration: true, Reporting: true, "Later phases": true },
   regFilter: "all",               // Register tab: which records are shown
   period: new Date().toISOString().slice(0, 7),
   dash: {},
@@ -409,7 +409,11 @@ function setMenu(open) {
   }
   if (open) side.querySelector("#nav button")?.focus({ preventScroll: true });
 }
-const go = v => { setMenu(false); S.view = v; S.tab = 0; buildNav(); render(); window.scrollTo(0, 0); };
+const go = v => {
+  setMenu(false); S.view = v; S.tab = 0;
+  const g = navGroup(v); if (g && S.navCollapsed[g]) S.navCollapsed[g] = false;
+  buildNav(); render(); window.scrollTo(0, 0);
+};
 function tabsFor(m) { return m.tabs; }
 function tabbar(m) {
   const ts = tabsFor(m);
