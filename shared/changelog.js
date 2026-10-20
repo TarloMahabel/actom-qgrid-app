@@ -22,10 +22,17 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.30.0";
+window.APP_VERSION = "0.31.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.31.0", d: "2026-10-20", t: "NCR raised alert sent via n8n webhook",
+    n: "The notification sent when an NCR is raised now goes through an n8n workflow " +
+       "rather than a Supabase Edge Function. The webhook URL is read from " +
+       "division_profile.ncr_notify_fn_url — set this in each division's database " +
+       "to activate the raised-NCR email. No change to what Quality Engineers and Managers receive."
+  },
   {
     v: "0.30.0", d: "2026-10-20", t: "NCR notifications: in-app alerts and email",
     n: "A red chip in the top bar now shows how many NCRs need attention — open more than 30 days, " +

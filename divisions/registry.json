@@ -42,6 +42,16 @@
       "status": "planned",
       "go_live": null,
       "seed": "db/seed/division_generic.sql"
+    },
+    {
+      "code": "GEN",
+      "name": "ACTOM Genlux",
+      "supabase_project_ref": "rzomkhtialmiyxodlxji",
+      "netlify_site_name": "actom-qgrid-gen",
+      "domain": "actom-qgrid-gen.netlify.app",
+      "status": "planned",
+      "go_live": null,
+      "seed": "db/seed/division_generic.sql"
     }
   ]
 }

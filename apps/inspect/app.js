@@ -3705,7 +3705,8 @@ async function saveNcr() {
     if (error) throw error;
     closeModal();
     toast(`${data.ref} raised.`, "ok");
-    supabase.functions.invoke("notify-ncr", { body: { type: "raised", ncrId: data.id } }).catch(() => {});
+    const _ncrUrl = S.division && S.division.ncr_notify_fn_url;
+    if (_ncrUrl) fetch(_ncrUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ncrId: data.id }) }).catch(() => {});
     await reload();
     S.view = "ncr"; S.tab = 0; buildNav();
     openNcr(data.id);
