@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.33.0";
+window.APP_VERSION = "0.34.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.34.0", d: "2026-10-20", t: "Report builder UI",
+    n: "New module: Report Builder. Pick any module view as a data source, choose which columns to include " +
+       "(with custom labels), add filters (equals, not equals, contains, greater than, less than, etc.) and " +
+       "a sort column, then preview the first 100 rows live. Save the report definition — it runs live data " +
+       "every time it is opened. Share a report to make it visible to everyone in the division. " +
+       "Download exports the full result (up to 500 rows) as a CSV. " +
+       "Available views: Instrument Calibration Register, Calibration Summary, NCR Register, " +
+       "Customer Care Register, Executive Scorecard, Cost of Quality, Inspections by Month."
+  },
   {
     v: "0.33.0", d: "2026-10-20", t: "Calibration register UI",
     n: "The Calibration Register module is now live. Register tab shows all active instruments with colour-coded expiry status. " +

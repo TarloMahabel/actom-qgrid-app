@@ -62,6 +62,8 @@ const S = {
   instruments: [], calibrationReady: false, calSummary: [], calByMonth: [],
   instrumentLocations: [], calibOpen: null, calibHistory: null,
   calibFilter: { bucket: "all", q: "" },
+  reportViews: [], savedReports: [], reportOpen: null,
+  reportBuilding: null, reportSchema: null, reportResults: null,
   regFilter: "all",               // Register tab: which records are shown
   period: new Date().toISOString().slice(0, 7),
   dash: {},
@@ -184,7 +186,7 @@ async function loadData() {
 
     const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd, fbp, acts,
            ncr, ncra, rcs, dash, cmp, cmpT, cmpS, cbm, cbd, sc, coq, sy, nbd, ibm,
-           inst, calSum, calMon, instLoc] = await Promise.all([
+           inst, calSum, calMon, instLoc, rptViews, rptSaved] = await Promise.all([
       supabase.from("inspection_templates").select("*").order("code"),
       supabase.from("template_revisions").select("*").order("rev", { ascending: false }),
       supabase.from("inspection_requirements").select("*"),
@@ -214,7 +216,9 @@ async function loadData() {
       supabase.from("v_instruments").select("*").order("serial_number").limit(1000),
       supabase.from("v_calibration_summary").select("*"),
       supabase.from("v_calibration_due_by_month").select("*"),
-      supabase.from("instrument_locations").select("*").order("name")
+      supabase.from("instrument_locations").select("*").order("name"),
+      supabase.from("report_allowed_views").select("*").order("sort_order"),
+      supabase.from("saved_reports").select("*").order("updated_at", { ascending: false })
     ]);
     for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd]) if (r.error) throw r.error;
     /* The dashboard views are not load-bearing: a division that has not run
@@ -256,6 +260,8 @@ async function loadData() {
     S.calSummary = calSum.error ? [] : (calSum.data || []);
     S.calByMonth = calMon.error ? [] : (calMon.data || []);
     S.instrumentLocations = instLoc.error ? [] : (instLoc.data || []);
+    S.reportViews = rptViews.error ? [] : (rptViews.data || []);
+    S.savedReports = rptSaved.error ? [] : (rptSaved.data || []);
     S.templates = tpl.data; S.revisions = rev.data; S.requirements = req.data;
     S.projects = prj.data; S.worksOrders = wo.data;
     S.inspections = ins.data; S.failedChecks = fc.data;
@@ -325,6 +331,9 @@ const NAV = [
   { g: "Calibration" },
   { id: "calib", n: 10, t: "Calibration register", col: "--m5",
     tabs: ["Register", "Out of service", "Deliveries", "Reports"] },
+  { g: "Reporting" },
+  { id: "rpt", n: 11, t: "Report builder", col: "--m2",
+    tabs: ["My reports", "Shared"] },
   { g: "Later phases" },
   ...["Document control","Training & competency",
       "Supplier quality","Audits & compliance","Performance analytics"]
@@ -352,6 +361,7 @@ const ICON_PATHS = {
   req:   '<path d="m3 7 2 2 4-4M3 17l2 2 4-4M13 6h8M13 12h8M13 18h8"/>',
   adm:   '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
   calib: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/>',
+  rpt:   '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>',
   later: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
 };
 const navIcon = id => `<svg class="ni" width="17" height="17" viewBox="0 0 24 24" fill="none"
@@ -6252,6 +6262,448 @@ async function openCalib(id) {
   finally { busy(false); render(); }
 }
 
+/* ---- Report builder ---- */
+
+function vReports(m) {
+  if (S.reportOpen) return reportResultsView(m);
+  if (S.reportBuilding) return reportBuilderView(m);
+
+  const my     = (S.savedReports || []).filter(r => r.created_by === S.profile?.id);
+  const shared = (S.savedReports || []).filter(r => r.is_shared && r.created_by !== S.profile?.id);
+
+  let body = S.tab === 0 ? myReportsList(my) : sharedReportsList(shared);
+
+  return head(m,
+    "Define, save and run tabular reports against any module view. Export as CSV.",
+    `<button class="btn" data-act="refresh">Refresh</button>
+     <button class="btn pri" data-act="new-report">New report</button>`)
+    + tabbar(m) + body;
+}
+
+function myReportsList(reports) {
+  if (!reports.length) return `<div class="card"><div class="bd">
+    <div class="empty">No saved reports yet.
+      <button class="btn sm" data-act="new-report" style="margin-left:8px">Create your first report</button>
+    </div></div></div>`;
+  return `<div class="card"><h3>My reports <span class="cl">${reports.length}</span></h3><div class="bd">
+    ${T(["Title", "Data source", "Columns", "Shared", "Updated", ""],
+      reports.map(r => {
+        const v = (S.reportViews || []).find(v => v.view_name === r.base_view);
+        return [
+          `<b>${esc(r.title)}</b>${r.description ? `<div class="sub">${esc(r.description.slice(0, 60))}</div>` : ""}`,
+          esc(v?.label || r.base_view || "—"),
+          r.columns?.length ? String(r.columns.length) : "All",
+          r.is_shared ? `<span class="pill p-ok">Shared</span>` : `<span class="pill p-grey">Private</span>`,
+          fmtDate(r.updated_at),
+          `<button class="btn sm pri" data-act="run-report" data-id="${r.id}">Run</button>
+           <button class="btn sm" data-act="edit-report" data-id="${r.id}">Edit</button>
+           <button class="btn sm" data-act="toggle-share-report" data-id="${r.id}">${r.is_shared ? "Unshare" : "Share"}</button>
+           <button class="btn sm" data-act="delete-report" data-id="${r.id}">Delete</button>`
+        ];
+      }))}
+  </div></div>`;
+}
+
+function sharedReportsList(reports) {
+  if (!reports.length) return `<div class="card"><div class="bd">
+    <div class="empty">No reports have been shared with this division yet.</div>
+  </div></div>`;
+  return `<div class="card"><h3>Shared with division <span class="cl">${reports.length}</span></h3><div class="bd">
+    ${T(["Title", "Data source", "Shared by", ""],
+      reports.map(r => {
+        const v    = (S.reportViews || []).find(v => v.view_name === r.base_view);
+        const owner = (S.people || []).find(p => p.id === r.created_by);
+        return [
+          `<b>${esc(r.title)}</b>${r.description ? `<div class="sub">${esc(r.description.slice(0, 60))}</div>` : ""}`,
+          esc(v?.label || r.base_view || "—"),
+          esc(owner?.name || "—"),
+          `<button class="btn sm pri" data-act="run-report" data-id="${r.id}">Run</button>`
+        ];
+      }))}
+  </div></div>`;
+}
+
+function reportBuilderView(m) {
+  const rb   = S.reportBuilding;
+  const sc   = S.reportSchema;
+  const cols = sc?.cols || [];
+  const OPS  = [["eq","="],["neq","≠"],["lt","<"],["lte","≤"],["gt",">"],["gte","≥"],
+                ["ilike","contains"],["like","like"]];
+
+  return `<div class="phead"><div>
+    <div class="eyebrow"><button class="btn sm" data-act="close-builder"
+        style="margin-right:8px">← Reports</button>${rb.id ? "Edit report" : "New report"}</div>
+    <h1>${esc(rb.title || "Untitled report")}</h1>
+  </div><div class="pact">
+    <button class="btn" data-act="run-report-preview">Preview</button>
+    <button class="btn pri" data-act="save-report">Save</button>
+  </div></div>
+
+  <div class="two">
+    <div>
+      <div class="card"><h3 style="margin-top:0">Details</h3><div class="bd">
+        <div class="fld"><label>Title</label>
+          <input id="rptTitle" value="${esc(rb.title)}"></div>
+        <div class="fld"><label>Description</label>
+          <textarea id="rptDesc" rows="2">${esc(rb.description || "")}</textarea></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+          <input type="checkbox" id="rptShared" ${rb.is_shared ? "checked" : ""}>
+          <label for="rptShared" style="margin:0;font-size:13px">Share with division</label>
+        </div>
+      </div></div>
+
+      <div class="card" style="margin-top:12px"><h3 style="margin-top:0">Data source</h3><div class="bd">
+        <div class="fld">
+          <select id="rptBaseView">
+            <option value="">— pick a view —</option>
+            ${(S.reportViews || []).map(v =>
+              `<option value="${v.view_name}"${rb.base_view === v.view_name ? " selected" : ""}>${esc(v.label)}</option>`
+            ).join("")}
+          </select>
+        </div>
+        ${sc?.error ? `<div class="note q" style="margin-top:8px">Could not load columns: ${esc(sc.error)}</div>` : ""}
+      </div></div>
+
+      <div class="card" style="margin-top:12px"><h3 style="margin-top:0">Filters</h3><div class="bd">
+        ${rb.filters.length === 0
+          ? `<div class="hint" style="margin-bottom:8px">No filters — all rows are returned.</div>` : ""}
+        ${rb.filters.map((f, i) => `
+          <div class="filter-row" style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+            <select class="fc" style="flex:1.5;padding:5px 7px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px">
+              <option value="">column…</option>
+              ${cols.map(c => `<option value="${c}"${f.column===c?" selected":""}>${c}</option>`).join("")}
+            </select>
+            <select class="fo" style="width:96px;padding:5px 7px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px">
+              ${OPS.map(([v,l]) => `<option value="${v}"${f.op===v?" selected":""}>${l}</option>`).join("")}
+            </select>
+            <input class="fv" style="flex:1;padding:5px 7px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px"
+              value="${esc(f.value || "")}" placeholder="value">
+            <button class="btn sm" data-act="remove-filter" data-idx="${i}">×</button>
+          </div>`).join("")}
+        <button class="btn sm" data-act="add-filter"${!rb.base_view ? " disabled" : ""}>+ Add filter</button>
+      </div></div>
+
+      <div class="card" style="margin-top:12px"><h3 style="margin-top:0">Sort</h3><div class="bd">
+        <div class="two">
+          <div class="fld"><label>Column</label>
+            <select id="rptSortCol">
+              <option value="">— no sort —</option>
+              ${cols.map(c => `<option value="${c}"${rb.sort_column===c?" selected":""}>${c}</option>`).join("")}
+            </select></div>
+          <div class="fld"><label>Direction</label>
+            <select id="rptSortDir">
+              <option value="asc"${rb.sort_direction!=="desc"?" selected":""}>Ascending</option>
+              <option value="desc"${rb.sort_direction==="desc"?" selected":""}>Descending</option>
+            </select></div>
+        </div>
+      </div></div>
+    </div>
+
+    <div>
+      <div class="card"><h3 style="margin-top:0">Columns
+        ${cols.length ? `<span class="cl">${cols.length} available</span>` : ""}
+      </h3><div class="bd">
+        ${!rb.base_view
+          ? `<div class="empty">Pick a data source first.</div>`
+          : sc?.loading
+            ? `<div class="empty">Loading columns…</div>`
+            : cols.length === 0
+              ? `<div class="note q">The view appears to be empty — columns cannot be detected automatically. All columns will be fetched when you run the report.</div>`
+              : `<div class="hint" style="margin-bottom:8px">Check the columns to include. Rename with the label field.</div>
+                 <div style="display:flex;flex-direction:column;gap:3px">
+                 ${cols.map(c => {
+                   const sel = rb.columns.find(x => x.key === c);
+                   const checked = sel || rb.columns.length === 0;
+                   return `<div class="col-row" data-key="${c}" data-type="text"
+                     style="display:flex;align-items:center;gap:8px;padding:3px 0">
+                     <input type="checkbox" class="col-ck" ${checked ? "checked" : ""}>
+                     <span style="flex:1;font-family:monospace;font-size:11px;color:var(--muted)">${esc(c)}</span>
+                     <input class="col-lbl"
+                       style="width:130px;padding:3px 6px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px"
+                       placeholder="${esc(c)}" value="${esc(sel?.label && sel.label !== c ? sel.label : "")}">
+                   </div>`;
+                 }).join("")}
+                 </div>`}
+      </div></div>
+    </div>
+  </div>
+
+  ${S.reportResults ? `<div class="card" style="margin-top:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h3 style="margin:0">Preview</h3>
+      ${S.reportResults.data?.length ? `<button class="btn sm" data-act="report-csv">Download CSV</button>` : ""}
+    </div>
+    <div class="bd">
+      ${S.reportResults.loading
+        ? `<div class="empty">Running…</div>`
+        : S.reportResults.error
+          ? `<div class="note q">${esc(S.reportResults.error)}</div>`
+          : S.reportResults.data?.length === 0
+            ? `<div class="empty">No rows matched the filters.</div>`
+            : renderResultsTable(S.reportResults.data, S.reportResults.def?.columns)}
+    </div></div>` : ""}`;
+}
+
+function reportResultsView(m) {
+  const r   = (S.savedReports || []).find(r => r.id === S.reportOpen);
+  const res = S.reportResults || {};
+  const vw  = (S.reportViews || []).find(v => v.view_name === r?.base_view);
+
+  return `<div class="phead"><div>
+    <div class="eyebrow"><button class="btn sm" data-act="close-report"
+        style="margin-right:8px">← Reports</button>${esc(vw?.label || r?.base_view || "")}</div>
+    <h1>${esc(r?.title || "Report")}</h1>
+    ${r?.description ? `<p style="margin:2px 0 0;color:var(--muted);font-size:13px">${esc(r.description)}</p>` : ""}
+  </div><div class="pact">
+    ${r?.created_by === S.profile?.id
+      ? `<button class="btn" data-act="edit-report" data-id="${r.id}">Edit</button>` : ""}
+    ${res.data?.length ? `<button class="btn" data-act="report-csv">Download CSV</button>` : ""}
+  </div></div>
+
+  <div class="card"><div class="bd">
+    ${res.loading
+      ? `<div class="empty">Running report…</div>`
+      : res.error
+        ? `<div class="note q">${esc(res.error)}</div>`
+        : res.data?.length === 0
+          ? `<div class="empty">No rows matched the filters.</div>`
+          : `<div class="hint" style="margin-bottom:8px">${res.data.length} row${res.data.length===1?"":"s"}${res.data.length>=500?" (first 500)":""}</div>
+             ${renderResultsTable(res.data, r?.columns)}`}
+  </div></div>`;
+}
+
+function renderResultsTable(data, colDefs) {
+  if (!data?.length) return "";
+  const keys    = colDefs?.length ? colDefs.map(c => c.key)   : Object.keys(data[0]);
+  const headers = colDefs?.length ? colDefs.map(c => c.label || c.key) : keys;
+  return T(headers, data.slice(0, 500).map(row =>
+    keys.map(k => {
+      const v = row[k];
+      if (v === null || v === undefined) return `<span class="cnt">—</span>`;
+      if (typeof v === "boolean") return v ? "Yes" : "No";
+      if (typeof v === "object") return `<span style="font-size:11px;font-family:monospace">${esc(JSON.stringify(v).slice(0, 60))}</span>`;
+      const s = String(v);
+      if (/^\d{4}-\d{2}-\d{2}/.test(s) && s.length <= 30) return fmtDate(s);
+      return esc(s.slice(0, 120));
+    })
+  ));
+}
+
+/* ---- Report builder actions ---- */
+
+function startNewReport() {
+  S.reportBuilding = { id: null, title: "", description: "",
+    base_view: "", columns: [], filters: [],
+    sort_column: "", sort_direction: "asc", is_shared: false };
+  S.reportSchema  = null;
+  S.reportResults = null;
+  render();
+}
+
+function editReport(id) {
+  const r = (S.savedReports || []).find(r => r.id === id);
+  if (!r) return toast("Report not found.", "bad");
+  S.reportOpen    = null;
+  S.reportResults = null;
+  S.reportBuilding = {
+    id: r.id, title: r.title, description: r.description || "",
+    base_view: r.base_view, columns: r.columns || [], filters: r.filters || [],
+    sort_column: r.sort_column || "", sort_direction: r.sort_direction || "asc",
+    is_shared: r.is_shared,
+  };
+  S.reportSchema = null;
+  render();
+  if (r.base_view) builderViewChange(r.base_view);
+}
+
+async function builderViewChange(view) {
+  const changed = S.reportBuilding.base_view !== view;
+  if (changed) {
+    S.reportBuilding.base_view  = view;
+    S.reportBuilding.columns    = [];
+    S.reportBuilding.filters    = [];
+    S.reportBuilding.sort_column = "";
+    S.reportBuilding.sort_direction = "asc";
+  }
+  if (!view) { S.reportSchema = { loading: false, cols: [] }; return render(); }
+  S.reportSchema = { loading: true, cols: [] };
+  render();
+  try {
+    const { data, error } = await supabase.from(view).select("*").limit(1);
+    if (error) throw error;
+    S.reportSchema = { loading: false, cols: data?.length ? Object.keys(data[0]) : [] };
+  } catch (e) {
+    S.reportSchema = { loading: false, cols: [], error: explain(e) };
+  }
+  render();
+}
+
+function readFiltersFromDom() {
+  return Array.from(document.querySelectorAll(".filter-row")).map(row => ({
+    column: row.querySelector(".fc")?.value || "",
+    op:     row.querySelector(".fo")?.value || "eq",
+    value:  row.querySelector(".fv")?.value || "",
+  })).filter(f => f.column);
+}
+
+function readColumnsFromDom() {
+  return Array.from(document.querySelectorAll(".col-row"))
+    .filter(r => r.querySelector(".col-ck")?.checked)
+    .map(r => ({
+      key:   r.dataset.key,
+      label: r.querySelector(".col-lbl")?.value || r.dataset.key,
+      type:  "text",
+    }));
+}
+
+function readBuilderState() {
+  return {
+    title:          ($("rptTitle")?.value || "").trim(),
+    description:    ($("rptDesc")?.value  || "").trim(),
+    base_view:      S.reportBuilding.base_view,
+    columns:        readColumnsFromDom(),
+    filters:        readFiltersFromDom(),
+    sort_column:    $("rptSortCol")?.value    || "",
+    sort_direction: $("rptSortDir")?.value    || "asc",
+    is_shared:      $("rptShared")?.checked   || false,
+  };
+}
+
+function addReportFilter() {
+  S.reportBuilding.filters = readFiltersFromDom();
+  S.reportBuilding.filters.push({ column: "", op: "eq", value: "" });
+  render();
+}
+
+function removeReportFilter(idx) {
+  S.reportBuilding.filters = readFiltersFromDom();
+  S.reportBuilding.filters.splice(idx, 1);
+  render();
+}
+
+async function buildAndRunQuery(report, limit) {
+  const cols = report.columns?.length
+    ? report.columns.map(c => c.key).join(",")
+    : "*";
+  let q = supabase.from(report.base_view).select(cols);
+  for (const f of report.filters || []) {
+    if (!f.column || !f.op) continue;
+    switch (f.op) {
+      case "eq":    q = q.eq(f.column, f.value);   break;
+      case "neq":   q = q.neq(f.column, f.value);  break;
+      case "lt":    q = q.lt(f.column, f.value);   break;
+      case "lte":   q = q.lte(f.column, f.value);  break;
+      case "gt":    q = q.gt(f.column, f.value);   break;
+      case "gte":   q = q.gte(f.column, f.value);  break;
+      case "like":  q = q.like(f.column, `%${f.value}%`);  break;
+      case "ilike": q = q.ilike(f.column, `%${f.value}%`); break;
+      case "is":    q = q.is(f.column, f.value === "null" ? null : f.value !== "false"); break;
+    }
+  }
+  if (report.sort_column) {
+    q = q.order(report.sort_column, { ascending: report.sort_direction !== "desc" });
+  }
+  return q.limit(limit || 500);
+}
+
+async function runReportPreview() {
+  const def = { ...S.reportBuilding, ...readBuilderState() };
+  if (!def.base_view) return toast("Pick a data source first.", "bad");
+  S.reportResults = { loading: true };
+  render();
+  try {
+    const { data, error } = await buildAndRunQuery(def, 100);
+    if (error) throw error;
+    S.reportResults = { loading: false, data: data || [], def };
+  } catch (e) {
+    S.reportResults = { loading: false, error: explain(e) };
+  }
+  render();
+}
+
+async function saveReport() {
+  const state = readBuilderState();
+  if (!state.title)     return toast("Report title is required.", "bad");
+  if (!state.base_view) return toast("Pick a data source first.", "bad");
+  busy(true);
+  try {
+    const payload = {
+      title:          state.title,
+      description:    state.description || null,
+      base_view:      state.base_view,
+      columns:        state.columns,
+      filters:        state.filters,
+      sort_column:    state.sort_column  || null,
+      sort_direction: state.sort_column  ? state.sort_direction : null,
+      is_shared:      state.is_shared,
+    };
+    const { error } = S.reportBuilding.id
+      ? await supabase.from("saved_reports").update(payload).eq("id", S.reportBuilding.id)
+      : await supabase.from("saved_reports").insert({ ...payload, created_by: S.profile.id });
+    if (error) throw error;
+    toast(S.reportBuilding.id ? "Report saved." : "Report created.", "ok");
+    S.reportBuilding = null; S.reportSchema = null; S.reportResults = null;
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function runReport(id) {
+  const r = (S.savedReports || []).find(r => r.id === id);
+  if (!r) return toast("Report not found.", "bad");
+  S.reportOpen = id; S.reportResults = { loading: true };
+  render();
+  try {
+    const { data, error } = await buildAndRunQuery(r);
+    if (error) throw error;
+    S.reportResults = { loading: false, data: data || [], def: r };
+  } catch (e) {
+    S.reportResults = { loading: false, error: explain(e) };
+  }
+  render();
+}
+
+async function deleteReport(id) {
+  if (!confirm("Delete this report? This cannot be undone.")) return;
+  busy(true);
+  try {
+    const { error } = await supabase.from("saved_reports").delete().eq("id", id);
+    if (error) throw error;
+    toast("Report deleted.", "ok");
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function toggleShareReport(id) {
+  const r = (S.savedReports || []).find(r => r.id === id);
+  if (!r) return;
+  busy(true);
+  try {
+    const { error } = await supabase.from("saved_reports")
+      .update({ is_shared: !r.is_shared }).eq("id", id);
+    if (error) throw error;
+    toast(r.is_shared ? "Report unshared." : "Report shared with division.", "ok");
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+function downloadReportCsv() {
+  const { data, def } = S.reportResults || {};
+  if (!data?.length) return toast("No data to download.", "bad");
+  const cols   = def?.columns?.length ? def.columns : Object.keys(data[0]).map(k => ({ key: k, label: k }));
+  const header = cols.map(c => c.label || c.key).join(",");
+  const rows   = data.map(r =>
+    cols.map(c => `"${String(r[c.key] ?? "").replace(/"/g, '""')}"`).join(",")
+  );
+  const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${(def?.title || "report").replace(/[^a-z0-9]/gi, "-").toLowerCase()}.csv`;
+  a.click();
+}
+
 /* =====================================================================
    Help, the help guide, and the tour.
 
@@ -6357,6 +6809,15 @@ const HELP = [
       "Deliveries tracks instruments currently out with a calibration house. Log the PO number, date sent and expected return, then mark it returned when it comes back.",
       "Out of service shows instruments that have been decommissioned. ISO 9001 requires that instruments found to be out-of-tolerance are recorded; decommissioned instruments stay in the register as evidence and are not deleted.",
       "Only a QC Supervisor or above can add or edit instruments."
+    ] },
+  { sec: "modules", id: "m-rpt", view: "rpt", title: "Report builder",
+    tabs: ["My reports", "Shared"],
+    body: [
+      "The report builder lets you define and save tabular reports against any module view — instruments, NCRs, customer cares, inspections and more.",
+      "Pick a data source, choose which columns to include (and rename them), add filters and a sort column, then run a preview. Save the report and it appears in your My reports list.",
+      "A saved report runs live data every time it is opened — nothing is cached. If the data looks wrong, refresh and run it again.",
+      "Sharing a report makes it visible to everyone in the division under the Shared tab. They can run it but not edit it.",
+      "Download exports the full result as a CSV."
     ] },
   { sec: "modules", id: "m-dsn", view: "dsn", title: "Form designer", setup: true,
     body: [
@@ -6666,7 +7127,7 @@ function hideTourOffer() {
 }
 
 const VIEWS = { main: vMain, dash: vDash, work: vWork, sched: vSched, dsn: vDsn,
-                req: vReq, ncr: vNcr, cust: vCust, calib: vCalib, adm: vAdm, help: vHelp };
+                req: vReq, ncr: vNcr, cust: vCust, calib: vCalib, rpt: vReports, adm: vAdm, help: vHelp };
 function render() {
   /* The report is its own view, not a tab: it has to be able to fill the page
      and print without the surrounding chrome. */
@@ -6954,6 +7415,18 @@ document.addEventListener("click", async e => {
     case "save-delivery": return saveDelivery();
     case "mark-returned": return markReturned(t.dataset.id);
     case "calib-csv": return downloadCalibRegister();
+    case "new-report": return startNewReport();
+    case "run-report": return runReport(t.dataset.id);
+    case "edit-report": return editReport(t.dataset.id);
+    case "delete-report": return deleteReport(t.dataset.id);
+    case "toggle-share-report": return toggleShareReport(t.dataset.id);
+    case "close-report": S.reportOpen = null; S.reportResults = null; return render();
+    case "close-builder": S.reportBuilding = null; S.reportSchema = null; S.reportResults = null; return render();
+    case "add-filter": return addReportFilter();
+    case "remove-filter": return removeReportFilter(Number(t.dataset.idx));
+    case "run-report-preview": return runReportPreview();
+    case "save-report": return saveReport();
+    case "report-csv": return downloadReportCsv();
     case "close": return closeModal();
   }
 });
@@ -7061,6 +7534,10 @@ window.addEventListener("resize", () => { if (!narrow()) setMenu(false); });
    the caret are put back where they were -- otherwise every keystroke
    would throw the cursor out of the box. */
 document.addEventListener("input", e => {
+  if (e.target.id === "rptBaseView") {
+    builderViewChange(e.target.value);
+    return;
+  }
   if (e.target.id === "calibQ") {
     S.calibFilter.q = e.target.value;
     const at = e.target.selectionStart;
