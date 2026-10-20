@@ -103,8 +103,12 @@ input,select,textarea{font-family:inherit;font-size:inherit}
    .16em at 9.5px that made the old ones hard to read, not the tracking
    itself. */
 .nav .grp{font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
-  padding:15px 10px 6px;font-weight:700;margin-top:5px;border-top:1px solid var(--line)}
+  padding:15px 10px 6px;font-weight:700;margin-top:5px;border-top:1px solid var(--line);
+  display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
 .nav .grp:first-child{border-top:0;margin-top:0;padding-top:12px}
+.nav .grp:hover{color:var(--ink-2)}
+.nav .grp-chev{flex:0 0 12px;transition:transform .18s;opacity:.6}
+.nav .grp.grp-collapsed .grp-chev{transform:rotate(-90deg)}
 .nav button{display:flex;align-items:center;gap:10px;width:100%;background:none;border:0;color:var(--ink-2);
   padding:6.5px 10px;border-radius:var(--r-sm);text-align:left;font-size:14px;font-weight:500;line-height:1.25;
   position:relative;margin:1px 0}

@@ -64,6 +64,7 @@ const S = {
   calibFilter: { bucket: "all", q: "" },
   reportViews: [], savedReports: [], reportOpen: null,
   reportBuilding: null, reportSchema: null, reportResults: null,
+  navCollapsed: { "Later phases": true },
   regFilter: "all",               // Register tab: which records are shown
   period: new Date().toISOString().slice(0, 7),
   dash: {},
@@ -369,14 +370,22 @@ const navIcon = id => `<svg class="ni" width="17" height="17" viewBox="0 0 24 24
   aria-hidden="true">${ICON_PATHS[id] || ICON_PATHS.later}</svg>`;
 
 function buildNav() {
+  let curGroup = null;
   $("nav").innerHTML = NAV.filter(n => !(setupIds.includes(n.id) && !canConfigure()))
     .map(n => {
-      if (n.g) return `<div class="grp">${n.g}</div>`;
+      if (n.g) {
+        curGroup = n.g;
+        const collapsed = !!S.navCollapsed[n.g];
+        const chev = `<svg class="grp-chev" width="12" height="12" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>`;
+        return `<div class="grp${collapsed ? " grp-collapsed" : ""}" data-act="nav-toggle" data-group="${n.g}">
+          <span>${n.g}</span>${chev}</div>`;
+      }
+      if (curGroup && S.navCollapsed[curGroup]) return "";
       /* No module numbers (0.28.2). They identified nothing a name did not
          already, cost 29px of a 252px menu, and took the attention the
          active marker should have. */
-      /* No "Phase 2+" label: the section heading and the lock already say
-         it, and the label wrapped half the names onto two lines. */
       if (n.off) return `<button class="off" title="Not built yet -- a later phase" aria-disabled="true">${navIcon("later")}<span>${n.t}</span></button>`;
       const badge = n.id === "work" ? myQueue().length : n.id === "sched" ? unassigned().length : 0;
       return `<button class="${n.id === S.view ? "on" : ""}" data-go="${n.id}">
@@ -6476,17 +6485,21 @@ function renderResultsTable(data, colDefs) {
   if (!data?.length) return "";
   const keys    = colDefs?.length ? colDefs.map(c => c.key)   : Object.keys(data[0]);
   const headers = colDefs?.length ? colDefs.map(c => c.label || c.key) : keys;
-  return T(headers, data.slice(0, 500).map(row =>
-    keys.map(k => {
-      const v = row[k];
-      if (v === null || v === undefined) return `<span class="cnt">—</span>`;
-      if (typeof v === "boolean") return v ? "Yes" : "No";
-      if (typeof v === "object") return `<span style="font-size:11px;font-family:monospace">${esc(JSON.stringify(v).slice(0, 60))}</span>`;
-      const s = String(v);
-      if (/^\d{4}-\d{2}-\d{2}/.test(s) && s.length <= 30) return fmtDate(s);
-      return esc(s.slice(0, 120));
-    })
-  ));
+  return `<div style="overflow-x:auto"><table><thead><tr>${
+    headers.map(h => `<th>${esc(String(h))}</th>`).join("")
+  }</tr></thead><tbody>${
+    data.slice(0, 500).map(row => `<tr>${
+      keys.map(k => {
+        const v = row[k];
+        if (v === null || v === undefined) return `<td><span class="cnt">—</span></td>`;
+        if (typeof v === "boolean") return `<td>${v ? "Yes" : "No"}</td>`;
+        if (typeof v === "object") return `<td><span style="font-size:11px;font-family:monospace">${esc(JSON.stringify(v).slice(0, 60))}</span></td>`;
+        const s = String(v);
+        if (/^\d{4}-\d{2}-\d{2}/.test(s) && s.length <= 30) return `<td>${fmtDate(s)}</td>`;
+        return `<td>${esc(s.slice(0, 120))}</td>`;
+      }).join("")
+    }</tr>`).join("")
+  }</tbody></table></div>`;
 }
 
 /* ---- Report builder actions ---- */
@@ -6529,9 +6542,9 @@ async function builderViewChange(view) {
   S.reportSchema = { loading: true, cols: [] };
   render();
   try {
-    const { data, error } = await supabase.from(view).select("*").limit(1);
+    const { data, error } = await supabase.rpc("get_report_view_columns", { p_view: view });
     if (error) throw error;
-    S.reportSchema = { loading: false, cols: data?.length ? Object.keys(data[0]) : [] };
+    S.reportSchema = { loading: false, cols: (data || []).map(r => r.column_name) };
   } catch (e) {
     S.reportSchema = { loading: false, cols: [], error: explain(e) };
   }
@@ -7415,6 +7428,10 @@ document.addEventListener("click", async e => {
     case "save-delivery": return saveDelivery();
     case "mark-returned": return markReturned(t.dataset.id);
     case "calib-csv": return downloadCalibRegister();
+    case "nav-toggle":
+      S.navCollapsed[t.dataset.group] = !S.navCollapsed[t.dataset.group];
+      buildNav();
+      return;
     case "new-report": return startNewReport();
     case "run-report": return runReport(t.dataset.id);
     case "edit-report": return editReport(t.dataset.id);

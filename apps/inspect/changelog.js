@@ -22,10 +22,18 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.34.0";
+window.APP_VERSION = "0.35.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.35.0", d: "2026-10-20", t: "Report builder fixes + collapsible menu",
+    n: "Report builder: column picker now works for all views even when the view has no data yet " +
+       "(previously showed an empty panel for instruments/calibration views before data was loaded). " +
+       "Results table columns are now always visible. " +
+       "Navigation menu: section headings are now collapsible — click any heading to hide its items. " +
+       '"Later phases" starts collapsed to keep the menu tidy.'
+  },
   {
     v: "0.34.0", d: "2026-10-20", t: "Report builder UI",
     n: "New module: Report Builder. Pick any module view as a data source, choose which columns to include " +
