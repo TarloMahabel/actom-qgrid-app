@@ -65,6 +65,7 @@ const S = {
   reportViews: [], savedReports: [], reportOpen: null,
   reportBuilding: null, reportSchema: null, reportResults: null,
   reportPins: [], reportChart: { type: "table", x: "", y: "__count__" }, dashPinData: {},
+  reportDesigner: null,
   navCollapsed: { Inspections: true, Nonconformance: true, Customer: true, Setup: true, Calibration: true, Reporting: true, "Later phases": true },
   regFilter: "all",               // Register tab: which records are shown
   period: new Date().toISOString().slice(0, 7),
@@ -6536,6 +6537,7 @@ async function openCalib(id) {
 /* ---- Report builder ---- */
 
 function vReports(m) {
+  if (S.reportDesigner) return reportDesignerView(m);
   if (S.reportOpen) return reportResultsView(m);
   if (S.reportBuilding) return reportBuilderView(m);
 
@@ -6547,7 +6549,8 @@ function vReports(m) {
   return head(m,
     "Define, save and run tabular reports against any module view. Export as CSV.",
     `<button class="btn" data-act="refresh">Refresh</button>
-     <button class="btn pri" data-act="new-report">New report</button>`)
+     <button class="btn" data-act="new-report">New report</button>
+     <button class="btn pri" data-act="new-designer-report">New designer report</button>`)
     + tabbar(m) + body;
 }
 
@@ -6568,6 +6571,7 @@ function myReportsList(reports) {
           fmtDate(r.updated_at),
           `<button class="btn sm pri" data-act="run-report" data-id="${r.id}">Run</button>
            <button class="btn sm" data-act="edit-report" data-id="${r.id}">Edit</button>
+           <button class="btn sm" data-act="open-in-designer" data-id="${r.id}">Designer</button>
            <button class="btn sm" data-act="toggle-share-report" data-id="${r.id}">${r.is_shared ? "Unshare" : "Share"}</button>
            <button class="btn sm" data-act="delete-report" data-id="${r.id}">Delete</button>`
         ];
@@ -7096,6 +7100,371 @@ async function unpinReport(pinId) {
 }
 
 /* =====================================================================
+   REPORT DESIGNER
+   QlikSense-style multi-widget canvas. Each widget has its own data
+   source, chart type and axis config. Layout is saved as JSON in the
+   saved_reports.layout column (migration 035).
+   ===================================================================== */
+
+function startDesignerReport() {
+  S.reportBuilding = null; S.reportOpen = null;
+  S.reportDesigner = {
+    id: null, title: "New Report", description: "", is_shared: false,
+    widgets: [], selectedId: null,
+  };
+  render();
+}
+
+function openInDesigner(id) {
+  const r = (S.savedReports || []).find(r => r.id === id);
+  if (!r) return toast("Report not found.", "bad");
+  S.reportOpen = null; S.reportBuilding = null;
+  const layout = r.layout;
+  let widgets = [];
+  if (layout?.widgets?.length) {
+    widgets = layout.widgets.map(w => ({ ...w, _data: [], _loading: false, _error: null, _cols: [] }));
+  } else if (r.base_view) {
+    widgets = [{
+      id: "w-" + Date.now(), type: "table", title: r.title || "Table",
+      col: 0, row: 0, w: 12, h: 5,
+      view: r.base_view, x_col: r.chart_x || "", y_col: r.chart_y || "__count__",
+      filters: [], _data: [], _loading: false, _error: null, _cols: [],
+    }];
+  }
+  S.reportDesigner = {
+    id: r.id, title: r.title, description: r.description || "",
+    is_shared: r.is_shared, selectedId: null, widgets,
+  };
+  render();
+  S.reportDesigner.widgets.forEach(w => fetchWidgetData(w.id));
+}
+
+function reportDesignerView(m) {
+  const ds   = S.reportDesigner;
+  const COLS = 12;
+  const ROWS = Math.max(8, ds.widgets.reduce((mx, w) => Math.max(mx, w.row + w.h), 0) + 4);
+  const sel  = ds.widgets.find(w => w.id === ds.selectedId);
+
+  const ghostCells = Array.from({ length: ROWS * COLS }, (_, i) => {
+    const c = i % COLS, r = Math.floor(i / COLS);
+    return `<div class="dsg-ghost-cell" data-col="${c}" data-row="${r}"
+      style="grid-column:${c + 1};grid-row:${r + 1}"></div>`;
+  }).join("");
+
+  const widgetHtml = ds.widgets.map(w => {
+    const isSel = w.id === ds.selectedId;
+    return `<div class="dsg-widget${isSel ? " selected" : ""}" data-wid="${w.id}"
+      style="grid-column:${w.col + 1}/span ${w.w};grid-row:${w.row + 1}/span ${w.h};z-index:2;position:relative">
+      <div class="dsg-widget-header" draggable="true" data-drag-wid="${w.id}"
+        data-act="dsg-select" data-wid="${w.id}">
+        <span style="flex:1;font-weight:600;font-size:11px;overflow:hidden;text-overflow:ellipsis;
+          white-space:nowrap;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">${esc(w.title)}</span>
+        <button class="btn sm" data-act="dsg-delete-widget" data-wid="${w.id}"
+          style="padding:1px 6px;font-size:11px;line-height:1.4">×</button>
+      </div>
+      <div class="dsg-widget-body">${designerWidgetContent(w)}</div>
+      <div class="dsg-resize" data-resize-wid="${w.id}" title="Drag to resize"></div>
+    </div>`;
+  }).join("");
+
+  const propsPanel = `<div class="dsg-props">
+    ${sel ? `
+      <h4>Widget</h4>
+      <div class="fld"><label>Title</label>
+        <input id="dsgWTitle" value="${esc(sel.title)}"></div>
+      <div class="fld" style="margin-top:8px"><label>Type</label>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
+          ${[["table","Table"],["kpi","KPI"],["bar","Bar"],["pie","Pie"],["trend","Trend"]].map(([v, l]) =>
+            `<button class="btn sm${sel.type === v ? " pri" : ""}" data-act="dsg-set-type"
+              data-wid="${sel.id}" data-val="${v}">${l}</button>`
+          ).join("")}
+        </div>
+      </div>
+      <div class="fld" style="margin-top:8px"><label>Data source</label>
+        <select id="dsgWView">
+          <option value="">— pick a view —</option>
+          ${(S.reportViews || []).map(v =>
+            `<option value="${v.view_name}"${sel.view === v.view_name ? " selected" : ""}>${esc(v.label)}</option>`
+          ).join("")}
+        </select>
+      </div>
+      ${(sel.type === "bar" || sel.type === "trend") ? `
+        <div class="fld" style="margin-top:8px"><label>${sel.type === "trend" ? "Date column" : "Category (X)"}</label>
+          <select id="dsgWX">
+            <option value="">— column —</option>
+            ${(sel._cols || []).map(c => `<option value="${c}"${sel.x_col === c ? " selected" : ""}>${c}</option>`).join("")}
+          </select></div>
+        <div class="fld" style="margin-top:8px"><label>Value (Y)</label>
+          <select id="dsgWY">
+            <option value="__count__"${sel.y_col === "__count__" ? " selected" : ""}>Count of rows</option>
+            ${(sel._cols || []).map(c => `<option value="${c}"${sel.y_col === c ? " selected" : ""}>${c}</option>`).join("")}
+          </select></div>` : ""}
+      ${sel.type === "pie" ? `
+        <div class="fld" style="margin-top:8px"><label>Category column</label>
+          <select id="dsgWX">
+            <option value="">— column —</option>
+            ${(sel._cols || []).map(c => `<option value="${c}"${sel.x_col === c ? " selected" : ""}>${c}</option>`).join("")}
+          </select></div>` : ""}
+      ${sel.type === "kpi" ? `
+        <div class="fld" style="margin-top:8px"><label>Column to sum (blank = row count)</label>
+          <select id="dsgWX">
+            <option value="">Row count</option>
+            ${(sel._cols || []).map(c => `<option value="${c}"${sel.x_col === c ? " selected" : ""}>${c}</option>`).join("")}
+          </select></div>` : ""}
+      <button class="btn sm" style="margin-top:12px;width:100%" data-act="dsg-apply-props"
+        data-wid="${sel.id}">Apply &amp; refresh</button>
+      <hr style="margin:14px 0;border:none;border-top:1px solid var(--line)">
+      <div class="fld"><label>Size (cols × rows)</label>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
+          <input type="number" id="dsgWW" min="1" max="12" value="${sel.w}"
+            style="width:52px;padding:4px 6px;border:1px solid var(--line);border-radius:var(--r-sm)">
+          <span style="color:var(--muted)">×</span>
+          <input type="number" id="dsgWH" min="2" max="20" value="${sel.h}"
+            style="width:52px;padding:4px 6px;border:1px solid var(--line);border-radius:var(--r-sm)">
+          <button class="btn sm" data-act="dsg-resize-widget" data-wid="${sel.id}">Set</button>
+        </div>
+      </div>
+    ` : `<div class="hint" style="margin-top:32px;text-align:center;color:var(--muted)">
+      Click a widget<br>to configure it</div>`}
+  </div>`;
+
+  return `<div class="dsg-shell">
+    <div class="phead">
+      <div>
+        <div class="eyebrow">
+          <button class="btn sm" data-act="close-designer" style="margin-right:8px">← Reports</button>
+          Report Designer
+        </div>
+        <h1>
+          <input id="dsgTitle" value="${esc(ds.title)}"
+            style="border:none;background:transparent;font:inherit;font-size:inherit;
+                   font-weight:inherit;min-width:180px;width:300px;outline:none;
+                   border-bottom:2px solid transparent;padding:0 0 2px"
+            onfocus="this.style.borderBottomColor='var(--brand)'"
+            onblur="this.style.borderBottomColor='transparent'">
+        </h1>
+      </div>
+      <div class="pact" style="gap:6px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+          letter-spacing:.05em;align-self:center">Add</span>
+        ${[["table","⊞ Table"],["kpi","# KPI"],["bar","▮ Bar"],["pie","◍ Pie"],["trend","∿ Trend"]].map(([t, l]) =>
+          `<button class="btn sm" data-act="dsg-add-widget" data-type="${t}">${l}</button>`
+        ).join("")}
+        <div style="width:1px;background:var(--line);height:24px;margin:0 2px;align-self:center"></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;align-self:center">
+          <input type="checkbox" id="dsgShared" ${ds.is_shared ? "checked" : ""}>
+          Shared
+        </label>
+        <button class="btn pri" data-act="dsg-save">Save</button>
+      </div>
+    </div>
+    <div class="dsg-body">
+      <div class="dsg-canvas-wrap">
+        <div class="dsg-canvas" id="dsgCanvas"
+          style="display:grid;grid-template-columns:repeat(${COLS},1fr);
+                 grid-template-rows:repeat(${ROWS},100px);gap:8px;min-width:800px">
+          ${ghostCells}
+          ${widgetHtml}
+          ${ds.widgets.length === 0 ? `
+            <div style="grid-column:1/-1;grid-row:2/6;display:flex;flex-direction:column;
+                align-items:center;justify-content:center;color:var(--muted);gap:12px;
+                border:2px dashed var(--line);border-radius:12px;margin:8px;z-index:1">
+              <div style="font-size:48px;opacity:.4">⊞</div>
+              <div style="font-size:14px">Add a widget from the toolbar to get started</div>
+            </div>` : ""}
+        </div>
+      </div>
+      ${propsPanel}
+    </div>
+  </div>`;
+}
+
+function designerWidgetContent(w) {
+  if (w._loading) return `<div class="empty">Loading…</div>`;
+  if (w._error)   return `<div class="note q" style="font-size:11px">${esc(w._error)}</div>`;
+  if (!w.view)    return `<div class="empty" style="font-size:12px;color:var(--muted)">Pick a data source →</div>`;
+  if (!w._data?.length) return `<div class="empty">No data</div>`;
+
+  switch (w.type) {
+    case "kpi": {
+      const val = w.x_col
+        ? w._data.reduce((s, r) => { const n = Number(r[w.x_col]); return s + (isNaN(n) ? 0 : n); }, 0)
+        : w._data.length;
+      return `<div style="height:100%;display:flex;flex-direction:column;align-items:center;
+          justify-content:center;text-align:center;padding:12px">
+        <div style="font-size:clamp(28px,5cqw,52px);font-weight:800;color:var(--brand);line-height:1">${Number(val).toLocaleString()}</div>
+        <div style="margin-top:8px;font-size:11px;color:var(--muted);font-weight:700;
+          text-transform:uppercase;letter-spacing:.06em">${esc(w.x_col || "Total rows")}</div>
+      </div>`;
+    }
+    case "bar":
+      return w.x_col ? barChartSvg(w._data, w.x_col, w.y_col || "__count__")
+                     : `<div class="empty hint">Set Category (X) column →</div>`;
+    case "pie":
+      return w.x_col ? pieChartSvg(w._data, w.x_col)
+                     : `<div class="empty hint">Set Category column →</div>`;
+    case "trend":
+      return (w.x_col && w.y_col)
+        ? lineChartSvg(w._data, w.x_col, w.y_col)
+        : `<div class="empty hint">Set X and Y columns →</div>`;
+    case "table":
+    default:
+      return renderResultsTable(w._data.slice(0, 200), []);
+  }
+}
+
+async function fetchWidgetData(wid) {
+  const ds = S.reportDesigner;
+  if (!ds) return;
+  const w = ds.widgets.find(x => x.id === wid);
+  if (!w || !w.view) return;
+  w._loading = true; w._error = null;
+  render();
+  try {
+    const { data, error } = await supabase.from(w.view).select("*").limit(500);
+    if (error) throw error;
+    w._data = data || [];
+    w._cols = w._data.length ? Object.keys(w._data[0]) : [];
+  } catch (e) {
+    w._error = explain(e);
+    w._data = []; w._cols = [];
+  }
+  w._loading = false;
+  render();
+}
+
+function addDesignerWidget(type) {
+  const ds = S.reportDesigner;
+  if (!ds) return;
+  const maxRow = ds.widgets.reduce((mx, w) => Math.max(mx, w.row + w.h), 0);
+  const sizes  = { kpi: [3, 2], bar: [6, 4], pie: [5, 5], trend: [8, 4], table: [12, 4] };
+  const [ww, wh] = sizes[type] || [6, 4];
+  const id = "w-" + Date.now() + Math.random().toString(36).slice(2, 6);
+  const titles = { kpi: "KPI", bar: "Bar Chart", pie: "Pie Chart", trend: "Trend", table: "Table" };
+  ds.widgets.push({
+    id, type, title: titles[type] || type,
+    col: 0, row: maxRow, w: ww, h: wh,
+    view: "", x_col: "", y_col: "__count__", filters: [],
+    _data: [], _loading: false, _error: null, _cols: [],
+  });
+  ds.selectedId = id;
+  render();
+}
+
+async function saveDesignerReport() {
+  const ds = S.reportDesigner;
+  if (!ds) return;
+  const title = ($("dsgTitle")?.value || ds.title || "").trim();
+  if (!title) return toast("Report title is required.", "bad");
+  ds.title   = title;
+  ds.is_shared = $("dsgShared")?.checked || false;
+  busy(true);
+  try {
+    const layout   = { widgets: ds.widgets.map(({ _data, _loading, _error, _cols, ...w }) => w) };
+    const baseView = ds.widgets.find(w => w.view)?.view || "v_instruments";
+    const payload  = { title, layout, is_shared: ds.is_shared };
+    const { data, error } = ds.id
+      ? await supabase.from("saved_reports").update(payload).eq("id", ds.id).select("id").single()
+      : await supabase.from("saved_reports")
+          .insert({ ...payload, base_view: baseView, created_by: S.profile.id, columns: [], filters: [] })
+          .select("id").single();
+    if (error) throw error;
+    if (!ds.id && data?.id) ds.id = data.id;
+    toast("Report saved.", "ok");
+    await reload();
+    S.reportDesigner = { ...ds };
+    render();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+function setupDesignerDrag() {
+  const canvas = document.getElementById("dsgCanvas");
+  if (!canvas) return;
+
+  let dragWid = null;
+
+  canvas.addEventListener("dragstart", e => {
+    const hdr = e.target.closest("[data-drag-wid]");
+    if (!hdr) return;
+    dragWid = hdr.dataset.dragWid;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", dragWid);
+    setTimeout(() => {
+      const el = canvas.querySelector(`.dsg-widget[data-wid="${dragWid}"]`);
+      if (el) el.classList.add("drag-source");
+      canvas.classList.add("drag-active");
+    }, 0);
+  });
+
+  canvas.addEventListener("dragover", e => {
+    const cell = e.target.closest(".dsg-ghost-cell");
+    if (!cell) return;
+    e.preventDefault();
+    canvas.querySelectorAll(".dsg-ghost-cell.drag-over").forEach(c => c.classList.remove("drag-over"));
+    cell.classList.add("drag-over");
+  });
+
+  canvas.addEventListener("dragleave", e => {
+    if (!canvas.contains(e.relatedTarget)) {
+      canvas.querySelectorAll(".dsg-ghost-cell.drag-over").forEach(c => c.classList.remove("drag-over"));
+    }
+  });
+
+  canvas.addEventListener("drop", e => {
+    e.preventDefault();
+    const cell = e.target.closest(".dsg-ghost-cell");
+    if (!cell || !dragWid || !S.reportDesigner) return;
+    const col = Number(cell.dataset.col);
+    const row = Number(cell.dataset.row);
+    const w = S.reportDesigner.widgets.find(x => x.id === dragWid);
+    if (w) { w.col = col; w.row = row; }
+    dragWid = null;
+    render();
+  });
+
+  canvas.addEventListener("dragend", () => {
+    dragWid = null;
+    render();
+  });
+
+  canvas.querySelectorAll("[data-resize-wid]").forEach(handle => {
+    handle.addEventListener("mousedown", e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const wid = handle.dataset.resizeWid;
+      const ds  = S.reportDesigner;
+      if (!ds) return;
+      const w = ds.widgets.find(x => x.id === wid);
+      if (!w) return;
+      const startX = e.clientX, startY = e.clientY;
+      const startW = w.w, startH = w.h;
+      const canvasRect = canvas.getBoundingClientRect();
+      const cellW = (canvasRect.width - 11 * 8) / 12;
+      const cellH = 108;
+
+      function onMove(ev) {
+        const dx = ev.clientX - startX, dy = ev.clientY - startY;
+        w.w = Math.max(1, Math.min(12 - w.col, Math.round(startW + dx / cellW)));
+        w.h = Math.max(2, Math.round(startH + dy / cellH));
+        const el = canvas.querySelector(`.dsg-widget[data-wid="${wid}"]`);
+        if (el) {
+          el.style.gridColumn = `${w.col + 1} / span ${w.w}`;
+          el.style.gridRow    = `${w.row + 1} / span ${w.h}`;
+        }
+      }
+      function onUp() {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        render();
+      }
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  });
+}
+
+/* =====================================================================
    Help, the help guide, and the tour.
 
    ONE BODY OF CONTENT, THREE WAYS IN. The Help page, the printable guide
@@ -7597,6 +7966,7 @@ function render() {
     $("chipCalib").textContent = `${calibAlerts} cal. alert${calibAlerts === 1 ? "" : "s"}`;
   }
   paintSignatures();     // canvas bitmaps do not survive a re-render
+  setupDesignerDrag();  // drag/resize wired each render (idempotent — no-ops when #dsgCanvas absent)
 }
 
 /* One delegated listener rather than handlers sprinkled through the markup:
@@ -7831,6 +8201,52 @@ document.addEventListener("click", async e => {
     case "pin-report":   return pinReport();
     case "unpin-report-open": return unpinReportOpen();
     case "unpin-report": return unpinReport(t.dataset.pinId);
+    case "new-designer-report": return startDesignerReport();
+    case "open-in-designer": return openInDesigner(t.dataset.id);
+    case "close-designer":
+      S.reportDesigner = null;
+      return render();
+    case "dsg-add-widget": return addDesignerWidget(t.dataset.type);
+    case "dsg-select":
+      if (S.reportDesigner) S.reportDesigner.selectedId = t.dataset.wid;
+      return render();
+    case "dsg-delete-widget": {
+      if (!S.reportDesigner) return;
+      S.reportDesigner.widgets = S.reportDesigner.widgets.filter(w => w.id !== t.dataset.wid);
+      if (S.reportDesigner.selectedId === t.dataset.wid) S.reportDesigner.selectedId = null;
+      return render();
+    }
+    case "dsg-set-type": {
+      if (!S.reportDesigner) return;
+      const dw = S.reportDesigner.widgets.find(x => x.id === t.dataset.wid);
+      if (dw) dw.type = t.dataset.val;
+      return render();
+    }
+    case "dsg-apply-props": {
+      if (!S.reportDesigner) return;
+      const dw = S.reportDesigner.widgets.find(x => x.id === t.dataset.wid);
+      if (!dw) return;
+      dw.title = $("dsgWTitle")?.value?.trim() || dw.title;
+      const newView = $("dsgWView")?.value;
+      const viewChanged = newView && newView !== dw.view;
+      if (newView) dw.view = newView;
+      dw.x_col = $("dsgWX")?.value || "";
+      dw.y_col = $("dsgWY")?.value || "__count__";
+      render();
+      if (viewChanged || !dw._data?.length) fetchWidgetData(dw.id);
+      return;
+    }
+    case "dsg-resize-widget": {
+      if (!S.reportDesigner) return;
+      const dw = S.reportDesigner.widgets.find(x => x.id === t.dataset.wid);
+      if (!dw) return;
+      const nw = parseInt($("dsgWW")?.value);
+      const nh = parseInt($("dsgWH")?.value);
+      if (!isNaN(nw)) dw.w = Math.max(1, Math.min(12, nw));
+      if (!isNaN(nh)) dw.h = Math.max(2, Math.min(20, nh));
+      return render();
+    }
+    case "dsg-save": return saveDesignerReport();
     case "close": return closeModal();
   }
 });

@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.37.0";
+window.APP_VERSION = "0.38.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.38.0", d: "2026-10-21", t: "Full report designer",
+    items: [
+      "New drag-and-drop report designer: add multiple chart and table widgets to a canvas.",
+      "Widget types: Table, KPI tile, Bar chart, Pie chart, Trend line.",
+      "Each widget has its own data source, axis config and title.",
+      "Drag widgets to reposition; resize with the corner handle or the size inputs in the panel.",
+      "Existing reports open in the designer from the Designer button on the reports list.",
+    ],
+  },
   {
     v: "0.37.0", d: "2026-10-21", t: "Chart type in report designer",
     items: [
