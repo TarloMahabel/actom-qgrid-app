@@ -6668,6 +6668,29 @@ function reportBuilderView(m) {
             </select></div>
         </div>
       </div></div>
+
+      <div class="card" style="margin-top:12px"><h3 style="margin-top:0">Chart</h3><div class="bd">
+        <div class="fld"><label>Type</label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${[["none","None"],["bar","Bar"],["pie","Pie"],["trend","Trend"]].map(([v,l]) =>
+              `<button class="btn sm${rb.chart_type===v?" pri":""}" data-act="set-chart-type" data-val="${v}">${l}</button>`
+            ).join("")}
+          </div>
+        </div>
+        ${rb.chart_type !== "none" ? `
+        <div class="two" style="margin-top:10px">
+          <div class="fld"><label>${rb.chart_type === "trend" ? "Date column" : "Category (X)"}</label>
+            <select id="rptChartX"${!rb.base_view ? " disabled" : ""}>
+              <option value="">— pick column —</option>
+              ${cols.map(c => `<option value="${c}"${rb.chart_x===c?" selected":""}>${c}</option>`).join("")}
+            </select></div>
+          <div class="fld"><label>Value (Y)</label>
+            <select id="rptChartY"${!rb.base_view ? " disabled" : ""}>
+              <option value="__count__"${rb.chart_y==="__count__"?" selected":""}>Count of rows</option>
+              ${cols.map(c => `<option value="${c}"${rb.chart_y===c?" selected":""}>${c}</option>`).join("")}
+            </select></div>
+        </div>` : ""}
+      </div></div>
     </div>
 
     <div>
@@ -6807,7 +6830,8 @@ function renderResultsTable(data, colDefs) {
 function startNewReport() {
   S.reportBuilding = { id: null, title: "", description: "",
     base_view: "", columns: [], filters: [],
-    sort_column: "", sort_direction: "asc", is_shared: false };
+    sort_column: "", sort_direction: "asc", is_shared: false,
+    chart_type: "none", chart_x: "", chart_y: "__count__" };
   S.reportSchema  = null;
   S.reportResults = null;
   render();
@@ -6823,6 +6847,9 @@ function editReport(id) {
     base_view: r.base_view, columns: r.columns || [], filters: r.filters || [],
     sort_column: r.sort_column || "", sort_direction: r.sort_direction || "asc",
     is_shared: r.is_shared,
+    chart_type: r.chart_type || "none",
+    chart_x:    r.chart_x    || "",
+    chart_y:    r.chart_y    || "__count__",
   };
   S.reportSchema = null;
   render();
@@ -6879,6 +6906,9 @@ function readBuilderState() {
     sort_column:    $("rptSortCol")?.value    || "",
     sort_direction: $("rptSortDir")?.value    || "asc",
     is_shared:      $("rptShared")?.checked   || false,
+    chart_type:     S.reportBuilding.chart_type || "none",
+    chart_x:        $("rptChartX")?.value      || "",
+    chart_y:        $("rptChartY")?.value      || "__count__",
   };
 }
 
@@ -6949,6 +6979,9 @@ async function saveReport() {
       sort_column:    state.sort_column  || null,
       sort_direction: state.sort_column  ? state.sort_direction : null,
       is_shared:      state.is_shared,
+      chart_type:     state.chart_type  || "none",
+      chart_x:        state.chart_x     || null,
+      chart_y:        state.chart_y     || null,
     };
     const { error } = S.reportBuilding.id
       ? await supabase.from("saved_reports").update(payload).eq("id", S.reportBuilding.id)
@@ -6965,7 +6998,7 @@ async function runReport(id) {
   const r = (S.savedReports || []).find(r => r.id === id);
   if (!r) return toast("Report not found.", "bad");
   S.reportOpen = id; S.reportResults = { loading: true };
-  S.reportChart = { type: "table", x: "", y: "__count__" };
+  S.reportChart = { type: r.chart_type || "table", x: r.chart_x || "", y: r.chart_y || "__count__" };
   render();
   try {
     const { data, error } = await buildAndRunQuery(r);
@@ -7786,6 +7819,9 @@ document.addEventListener("click", async e => {
     case "close-builder": S.reportBuilding = null; S.reportSchema = null; S.reportResults = null; return render();
     case "add-filter": return addReportFilter();
     case "remove-filter": return removeReportFilter(Number(t.dataset.idx));
+    case "set-chart-type":
+      S.reportBuilding = { ...S.reportBuilding, ...readBuilderState(), chart_type: t.dataset.val };
+      return render();
     case "run-report-preview": return runReportPreview();
     case "save-report": return saveReport();
     case "report-csv": return downloadReportCsv();

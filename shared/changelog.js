@@ -22,10 +22,17 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.36.0";
+window.APP_VERSION = "0.37.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.37.0", d: "2026-10-21", t: "Chart type in report designer",
+    items: [
+      "Chart type (None / Bar / Pie / Trend) and axis selections can now be set directly in the report designer.",
+      "The chosen chart type and axes are saved as part of the report definition and restored when the report is next opened or run.",
+    ],
+  },
   {
     v: "0.36.0", d: "2026-10-21", t: "Report charts and dashboard favourites",
     items: [
