@@ -64,6 +64,7 @@ const S = {
   calibFilter: { bucket: "all", q: "" },
   reportViews: [], savedReports: [], reportOpen: null,
   reportBuilding: null, reportSchema: null, reportResults: null,
+  reportPins: [], reportChart: { type: "table", x: "", y: "__count__" }, dashPinData: {},
   navCollapsed: { Inspections: true, Nonconformance: true, Customer: true, Setup: true, Calibration: true, Reporting: true, "Later phases": true },
   regFilter: "all",               // Register tab: which records are shown
   period: new Date().toISOString().slice(0, 7),
@@ -187,7 +188,7 @@ async function loadData() {
 
     const [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd, fbp, acts,
            ncr, ncra, rcs, dash, cmp, cmpT, cmpS, cbm, cbd, sc, coq, sy, nbd, ibm,
-           inst, calSum, calMon, instLoc, rptViews, rptSaved] = await Promise.all([
+           inst, calSum, calMon, instLoc, rptViews, rptSaved, rptPins] = await Promise.all([
       supabase.from("inspection_templates").select("*").order("code"),
       supabase.from("template_revisions").select("*").order("rev", { ascending: false }),
       supabase.from("inspection_requirements").select("*"),
@@ -219,7 +220,8 @@ async function loadData() {
       supabase.from("v_calibration_due_by_month").select("*"),
       supabase.from("instrument_locations").select("*").order("name"),
       supabase.from("report_allowed_views").select("*").order("sort_order"),
-      supabase.from("saved_reports").select("*").order("updated_at", { ascending: false })
+      supabase.from("saved_reports").select("*").order("updated_at", { ascending: false }),
+      supabase.from("report_pins").select("*").order("sort_order")
     ]);
     for (const r of [tpl, rev, req, prj, wo, ins, fc, ppl, comp, hnd]) if (r.error) throw r.error;
     /* The dashboard views are not load-bearing: a division that has not run
@@ -263,6 +265,8 @@ async function loadData() {
     S.instrumentLocations = instLoc.error ? [] : (instLoc.data || []);
     S.reportViews = rptViews.error ? [] : (rptViews.data || []);
     S.savedReports = rptSaved.error ? [] : (rptSaved.data || []);
+    S.reportPins   = rptPins.error  ? [] : (rptPins.data  || []);
+    if (!rptPins.error) S.dashPinData = {};
     S.templates = tpl.data; S.revisions = rev.data; S.requirements = req.data;
     S.projects = prj.data; S.worksOrders = wo.data;
     S.inspections = ins.data; S.failedChecks = fc.data;
@@ -317,7 +321,7 @@ const NAV = [
   { id: "sched", n: 3, t: "Scheduling",              col: "--m3",
     tabs: ["Schedule", "Unassigned", "Projects & works orders"] },
   { id: "dash",  n: 4, t: "Inspection reports",      col: "--m1",
-    tabs: ["Overview", "Faults per project", "Actions", "Pass rate by stage"] },
+    tabs: ["Overview", "Faults per project", "Actions", "Pass rate by stage", "★ Favourites"] },
   { g: "Nonconformance" },
   { id: "ncr",   n: 5, t: "NCR management",          col: "--m7",
     tabs: ["Register", "Repeat causes", "By department", "By supplier", "Reports"] },
@@ -717,8 +721,9 @@ function vDash(m) {
   if (S.tab === 0) body = dashOverview();
   else if (S.tab === 1) body = dashFaults();
   else if (S.tab === 2) body = dashActions();
-  else { body = `<div class="card"><h3>Pass rate by stage</h3>
+  else if (S.tab === 3) { body = `<div class="card"><h3>Pass rate by stage</h3>
     <div class="bd" id="yieldHost"><div class="empty">Loading…</div></div></div>`; loadYield(); }
+  else { body = dashFavourites(); }
 
   return head(m, "Where the work is, what is failing, and what is being done about it.",
     S.tab === 1 || S.tab === 2 ? periodPicker() : `<button class="btn" data-act="refresh">Refresh</button>`)
@@ -3946,6 +3951,259 @@ function faultsChart(rows, opts) {
 }
 
 /* ---------------------------------------------------------------
+   Generic SVG chart helpers for the report builder and dashboard
+   favourites. All drawn by hand (no external library) so they use
+   the same palette tokens as the rest of the app.
+   --------------------------------------------------------------- */
+
+function _chartAggregate(data, xCol, yCol) {
+  /* Returns [{ label, value }] sorted descending, capped at 20. */
+  const map = {};
+  for (const row of data) {
+    const lbl = String(row[xCol] ?? "—");
+    if (yCol === "__count__") {
+      map[lbl] = (map[lbl] || 0) + 1;
+    } else {
+      const n = Number(row[yCol]);
+      map[lbl] = (map[lbl] || 0) + (isNaN(n) ? 0 : n);
+    }
+  }
+  return Object.entries(map)
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 20);
+}
+
+function barChartSvg(data, xCol, yCol) {
+  const rows = _chartAggregate(data, xCol, yCol);
+  if (!rows.length) return `<div class="empty">No data to chart.</div>`;
+
+  const W = 980, H = 340, padL = 50, padR = 14, padT = 28, padB = 64;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const max = Math.max(...rows.map(r => r.value), 1);
+  const step = plotW / rows.length;
+  const barW = Math.min(72, step * 0.65);
+  const yv   = v => padT + plotH - (v / max) * plotH;
+
+  const tickAt = max <= 1 ? 1 : Math.pow(10, Math.floor(Math.log10(max))) / (max < 5 ? 1 : 2);
+  const ticks = [];
+  for (let v = 0; v <= max + tickAt; v += tickAt) { if (v <= max * 1.05) ticks.push(v); }
+
+  const bars = rows.map((r, i) => {
+    const cx = padL + step * i + step / 2;
+    const bh = (r.value / max) * plotH;
+    const by = yv(r.value);
+    const lbl = r.label.length > 12 ? r.label.slice(0, 11) + "…" : r.label;
+    return `<rect x="${cx - barW / 2}" y="${by}" width="${barW}" height="${bh}"
+        fill="var(--brand)" rx="2"><title>${esc(r.label)}: ${r.value}</title></rect>
+      <text x="${cx}" y="${by - 5}" text-anchor="middle" font-size="12"
+        font-weight="700" fill="var(--brand-dk)">${r.value}</text>
+      <text x="${cx}" y="${H - padB + 16}" text-anchor="middle" font-size="10.5"
+        font-weight="600" fill="var(--ink)" transform="rotate(-30,${cx},${H - padB + 16})">${esc(lbl)}</text>`;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+    ${ticks.map(v => `<line x1="${padL}" x2="${W - padR}" y1="${yv(v)}" y2="${yv(v)}"
+        stroke="var(--line)" stroke-width="1"/>
+      <text x="${padL - 6}" y="${yv(v) + 4}" text-anchor="end" font-size="10"
+        fill="var(--muted)">${v % 1 === 0 ? v : v.toFixed(1)}</text>`).join("")}
+    <line x1="${padL}" x2="${W - padR}" y1="${yv(0)}" y2="${yv(0)}"
+      stroke="var(--ink-2)" stroke-width="1"/>
+    ${bars}
+  </svg>`;
+}
+
+function pieChartSvg(data, xCol) {
+  const rows = _chartAggregate(data, xCol, "__count__");
+  if (!rows.length) return `<div class="empty">No data to chart.</div>`;
+
+  const total = rows.reduce((a, r) => a + r.value, 0);
+  const CX = 200, CY = 180, R = 150;
+  let angle = -Math.PI / 2;
+
+  const slices = rows.map((r, i) => {
+    const frac = r.value / total;
+    const a0 = angle, a1 = angle + frac * 2 * Math.PI;
+    angle = a1;
+    const x0 = CX + R * Math.cos(a0), y0 = CY + R * Math.sin(a0);
+    const x1 = CX + R * Math.cos(a1), y1 = CY + R * Math.sin(a1);
+    const large = frac > 0.5 ? 1 : 0;
+    const col = CAT_COLOURS[i % CAT_COLOURS.length];
+    const pct = Math.round(frac * 100);
+    /* label at midpoint of arc */
+    const am = (a0 + a1) / 2;
+    const lx = CX + (R * 0.65) * Math.cos(am);
+    const ly = CY + (R * 0.65) * Math.sin(am);
+    return `<path d="M${CX},${CY} L${x0},${y0} A${R},${R} 0 ${large},1 ${x1},${y1} Z"
+        fill="${col}" stroke="#fff" stroke-width="1.5">
+        <title>${esc(r.label)}: ${r.value} (${pct}%)</title></path>
+      ${pct >= 5 ? `<text x="${lx}" y="${ly + 4}" text-anchor="middle" font-size="11"
+          font-weight="700" fill="${["#f2e600","#7ab648"].includes(col) ? "#16304f" : "#fff"}">${pct}%</text>` : ""}`;
+  }).join("");
+
+  const legendY = 380;
+  const legend = rows.slice(0, 10).map((r, i) =>
+    `<g transform="translate(${440 + (i % 2) * 240}, ${Math.floor(i / 2) * 22 + legendY - 280})">
+       <rect width="12" height="12" rx="2" fill="${CAT_COLOURS[i % CAT_COLOURS.length]}"/>
+       <text x="17" y="10" font-size="11.5" fill="var(--ink)">${esc(r.label.slice(0, 22))} <tspan font-weight="700">${r.value}</tspan></text>
+     </g>`).join("");
+
+  return `<svg viewBox="0 0 980 370" width="100%" style="display:block">
+    ${slices}
+    ${legend}
+    <text x="${CX}" y="${CY + R + 24}" text-anchor="middle" font-size="12"
+      fill="var(--muted)">n = ${total}</text>
+  </svg>`;
+}
+
+function lineChartSvg(data, xCol, yCol) {
+  /* Sort by xCol (string sort covers ISO dates), collect y values. */
+  const sorted = [...data]
+    .filter(r => r[xCol] != null && r[yCol] != null)
+    .sort((a, b) => String(a[xCol]).localeCompare(String(b[xCol])));
+  if (sorted.length < 2) return `<div class="empty">Need at least 2 rows to draw a trend.</div>`;
+
+  /* Aggregate by unique xCol values */
+  const agg = {};
+  for (const r of sorted) {
+    const k = String(r[xCol]);
+    const n = Number(r[yCol]);
+    if (!isNaN(n)) agg[k] = (agg[k] || 0) + n;
+  }
+  const pts = Object.entries(agg).map(([x, y]) => ({ x, y }));
+  if (pts.length < 2) return `<div class="empty">Need at least 2 distinct X values to draw a trend.</div>`;
+
+  const W = 980, H = 320, padL = 56, padR = 20, padT = 24, padB = 48;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const maxY = Math.max(...pts.map(p => p.y), 1);
+  const n = pts.length;
+  const px = i => padL + (i / (n - 1)) * plotW;
+  const py = v => padT + plotH - (v / maxY) * plotH;
+
+  const tickAt = Math.pow(10, Math.floor(Math.log10(maxY))) / (maxY < 5 ? 1 : 2);
+  const ticks = [];
+  for (let v = 0; v <= maxY * 1.05; v += tickAt) ticks.push(v);
+
+  const points = pts.map((p, i) => `${px(i)},${py(p.y)}`).join(" ");
+  const area   = `${padL},${padT + plotH} ` + pts.map((p, i) => `${px(i)},${py(p.y)}`).join(" ") + ` ${padL + plotW},${padT + plotH}`;
+  const dots   = pts.map((p, i) =>
+    `<circle cx="${px(i)}" cy="${py(p.y)}" r="4" fill="var(--brand)" stroke="#fff" stroke-width="2">
+       <title>${esc(p.x)}: ${p.y}</title></circle>`).join("");
+
+  /* X-axis labels: show up to 12, evenly spaced */
+  const step = Math.max(1, Math.ceil(n / 12));
+  const xlabels = pts.filter((_, i) => i % step === 0 || i === n - 1).map((p, _, arr) => {
+    const i = pts.indexOf(p);
+    const lbl = String(p.x).length > 10 ? String(p.x).slice(0, 10) : String(p.x);
+    return `<text x="${px(i)}" y="${H - padB + 16}" text-anchor="middle" font-size="10.5"
+        font-weight="600" fill="var(--ink)">${esc(lbl)}</text>`;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+    ${ticks.map(v => `<line x1="${padL}" x2="${W - padR}" y1="${py(v)}" y2="${py(v)}"
+        stroke="var(--line)" stroke-width="1"/>
+      <text x="${padL - 6}" y="${py(v) + 4}" text-anchor="end" font-size="10"
+        fill="var(--muted)">${v % 1 === 0 ? v : v.toFixed(1)}</text>`).join("")}
+    <line x1="${padL}" x2="${W - padR}" y1="${py(0)}" y2="${py(0)}"
+      stroke="var(--ink-2)" stroke-width="1"/>
+    <polygon points="${area}" fill="var(--brand-lt)" opacity="0.6"/>
+    <polyline points="${points}" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linejoin="round"/>
+    ${dots}
+    ${xlabels}
+  </svg>`;
+}
+
+function chartAxisPicker(data, xCol, yCol) {
+  if (!data?.length) return "";
+  const allCols  = Object.keys(data[0]);
+  const numCols  = allCols.filter(k => typeof data[0][k] === "number" || !isNaN(Number(data[0][k])) && data[0][k] !== null && data[0][k] !== "");
+  return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px">
+    <div class="fld" style="flex:1;min-width:140px">
+      <label style="font-size:12px">X axis / Category</label>
+      <select id="rptChartX" style="padding:6px 9px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:13px;background:var(--card);color:var(--ink)">
+        ${allCols.map(c => `<option value="${c}"${c === xCol ? " selected" : ""}>${esc(c)}</option>`).join("")}
+      </select>
+    </div>
+    <div class="fld" style="flex:1;min-width:140px">
+      <label style="font-size:12px">Y axis / Value</label>
+      <select id="rptChartY" style="padding:6px 9px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:13px;background:var(--card);color:var(--ink)">
+        <option value="__count__"${yCol === "__count__" ? " selected" : ""}>Count rows</option>
+        ${numCols.map(c => `<option value="${c}"${c === yCol ? " selected" : ""}>${esc(c)}</option>`).join("")}
+      </select>
+    </div>
+  </div>`;
+}
+
+/* ---------------------------------------------------------------
+   Dashboard Favourites tab — pinned report charts.
+   --------------------------------------------------------------- */
+
+function dashFavourites() {
+  const pins = S.reportPins || [];
+  if (!pins.length) {
+    return `<div class="card"><div class="bd">
+      <div class="empty">No charts pinned yet. Open a report, switch to a chart view, and click
+        <strong>★ Pin to dashboard</strong> to add it here.</div>
+    </div></div>`;
+  }
+
+  return pins.map(pin => {
+    const r    = (S.savedReports || []).find(r => r.id === pin.report_id);
+    const pd   = S.dashPinData[pin.id];
+    const title = pin.pin_label || r?.title || "Report";
+
+    let chartTypeLabel = { bar: "Bar chart", pie: "Pie chart", line: "Trend" }[pin.chart_type] || pin.chart_type;
+
+    let body = "";
+    if (!pd) {
+      body = `<div class="empty">Loading…</div>`;
+      loadPinData(pin);
+    } else if (pd.loading) {
+      body = `<div class="empty">Loading…</div>`;
+    } else if (pd.error) {
+      body = `<div class="note q">${esc(pd.error)}</div>`;
+    } else if (!pd.data?.length) {
+      body = `<div class="empty">No data.</div>`;
+    } else if (pin.chart_type === "bar") {
+      body = barChartSvg(pd.data, pin.x_column, pin.y_column || "__count__");
+    } else if (pin.chart_type === "pie") {
+      body = pieChartSvg(pd.data, pin.x_column);
+    } else {
+      body = lineChartSvg(pd.data, pin.x_column, pin.y_column || Object.keys(pd.data[0]).find(k => typeof pd.data[0][k] === "number") || "__count__");
+    }
+
+    return `<div class="card" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 14px 0">
+        <div style="flex:1">
+          <div class="eyebrow" style="font-size:10px">${esc(chartTypeLabel)}</div>
+          <h3 style="margin:2px 0 0">${esc(title)}</h3>
+        </div>
+        <button class="btn sm danger" data-act="unpin-report" data-pin-id="${pin.id}">Unpin</button>
+      </div>
+      <div class="bd">${body}</div>
+    </div>`;
+  }).join("");
+}
+
+async function loadPinData(pin) {
+  const r = (S.savedReports || []).find(r => r.id === pin.report_id);
+  if (!r) {
+    S.dashPinData[pin.id] = { loading: false, error: "Report not found.", data: [] };
+    render(); return;
+  }
+  S.dashPinData[pin.id] = { loading: true };
+  render();
+  try {
+    const { data, error } = await buildAndRunQuery(r);
+    if (error) throw error;
+    S.dashPinData[pin.id] = { loading: false, data: data || [] };
+  } catch (e) {
+    S.dashPinData[pin.id] = { loading: false, error: explain(e) };
+  }
+  render();
+}
+
+/* ---------------------------------------------------------------
    Signature pad.
 
    The signature field used to be a label saying "signing happens when you
@@ -6461,6 +6719,50 @@ function reportResultsView(m) {
   const r   = (S.savedReports || []).find(r => r.id === S.reportOpen);
   const res = S.reportResults || {};
   const vw  = (S.reportViews || []).find(v => v.view_name === r?.base_view);
+  const rc  = S.reportChart || { type: "table", x: "", y: "__count__" };
+
+  const isPinned = (S.reportPins || []).some(p => p.report_id === r?.id &&
+    p.chart_type === rc.type && p.x_column === rc.x && p.y_column === (rc.y || "__count__"));
+
+  const hasData = res.data?.length > 0;
+
+  /* Auto-pick default axis columns from first data row */
+  if (hasData && rc.type !== "table" && !rc.x) {
+    const allCols = Object.keys(res.data[0]);
+    rc.x = allCols[0];
+    if (!rc.y) rc.y = "__count__";
+    S.reportChart = rc;
+  }
+
+  const chartTabs = `<div style="display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap">
+    ${[["table","Table"],["bar","Bar chart"],["pie","Pie chart"],["line","Trend"]].map(([type, label]) =>
+      `<button class="btn sm${rc.type === type ? " pri" : ""}" data-act="rpt-chart-type" data-type="${type}">${label}</button>`
+    ).join("")}
+    ${hasData && rc.type !== "table" ? `
+      <button class="btn sm${isPinned ? " pri" : ""}" data-act="${isPinned ? "unpin-report-open" : "pin-report"}"
+          style="margin-left:auto">
+        ${isPinned ? "★ Pinned" : "☆ Pin to dashboard"}</button>` : ""}
+  </div>`;
+
+  let content = "";
+  if (res.loading) {
+    content = `<div class="empty">Running report…</div>`;
+  } else if (res.error) {
+    content = `<div class="note q">${esc(res.error)}</div>`;
+  } else if (!hasData) {
+    content = `<div class="empty">No rows matched the filters.</div>`;
+  } else if (rc.type === "table") {
+    content = `<div class="hint" style="margin-bottom:8px">${res.data.length} row${res.data.length===1?"":"s"}${res.data.length>=500?" (first 500)":""}</div>
+      ${renderResultsTable(res.data, r?.columns)}`;
+  } else {
+    const x = rc.x || Object.keys(res.data[0])[0];
+    const y = rc.y || "__count__";
+    content = chartAxisPicker(res.data, x, y) + (
+      rc.type === "bar" ? barChartSvg(res.data, x, y) :
+      rc.type === "pie" ? pieChartSvg(res.data, x) :
+      lineChartSvg(res.data, x, y)
+    );
+  }
 
   return `<div class="phead"><div>
     <div class="eyebrow"><button class="btn sm" data-act="close-report"
@@ -6470,18 +6772,12 @@ function reportResultsView(m) {
   </div><div class="pact">
     ${r?.created_by === S.profile?.id
       ? `<button class="btn" data-act="edit-report" data-id="${r.id}">Edit</button>` : ""}
-    ${res.data?.length ? `<button class="btn" data-act="report-csv">Download CSV</button>` : ""}
+    ${hasData ? `<button class="btn" data-act="report-csv">Download CSV</button>` : ""}
   </div></div>
 
   <div class="card"><div class="bd">
-    ${res.loading
-      ? `<div class="empty">Running report…</div>`
-      : res.error
-        ? `<div class="note q">${esc(res.error)}</div>`
-        : res.data?.length === 0
-          ? `<div class="empty">No rows matched the filters.</div>`
-          : `<div class="hint" style="margin-bottom:8px">${res.data.length} row${res.data.length===1?"":"s"}${res.data.length>=500?" (first 500)":""}</div>
-             ${renderResultsTable(res.data, r?.columns)}`}
+    ${!res.loading && !res.error ? chartTabs : ""}
+    ${content}
   </div></div>`;
 }
 
@@ -6669,6 +6965,7 @@ async function runReport(id) {
   const r = (S.savedReports || []).find(r => r.id === id);
   if (!r) return toast("Report not found.", "bad");
   S.reportOpen = id; S.reportResults = { loading: true };
+  S.reportChart = { type: "table", x: "", y: "__count__" };
   render();
   try {
     const { data, error } = await buildAndRunQuery(r);
@@ -6719,6 +7016,50 @@ function downloadReportCsv() {
   a.href = URL.createObjectURL(blob);
   a.download = `${(def?.title || "report").replace(/[^a-z0-9]/gi, "-").toLowerCase()}.csv`;
   a.click();
+}
+
+async function pinReport() {
+  const rc = S.reportChart || {};
+  if (!S.reportOpen || !rc.type || rc.type === "table") return;
+  const x = rc.x || (S.reportResults?.data?.length ? Object.keys(S.reportResults.data[0])[0] : "");
+  if (!x) return toast("Pick an X-axis column first.", "bad");
+  busy(true);
+  try {
+    const payload = {
+      report_id:  S.reportOpen,
+      chart_type: rc.type,
+      x_column:   x,
+      y_column:   rc.y || "__count__",
+      user_id:    S.profile.id,
+    };
+    const { error } = await supabase.from("report_pins").insert(payload);
+    if (error) throw error;
+    toast("Pinned to dashboard ★", "ok");
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function unpinReportOpen() {
+  const rc = S.reportChart || {};
+  const pin = (S.reportPins || []).find(p =>
+    p.report_id  === S.reportOpen &&
+    p.chart_type === rc.type &&
+    p.x_column   === rc.x &&
+    (p.y_column  || "__count__") === (rc.y || "__count__")
+  );
+  if (pin) await unpinReport(pin.id);
+}
+
+async function unpinReport(pinId) {
+  busy(true);
+  try {
+    const { error } = await supabase.from("report_pins").delete().eq("id", pinId);
+    if (error) throw error;
+    toast("Unpinned.", "ok");
+    await reload();
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
 }
 
 /* =====================================================================
@@ -7448,6 +7789,12 @@ document.addEventListener("click", async e => {
     case "run-report-preview": return runReportPreview();
     case "save-report": return saveReport();
     case "report-csv": return downloadReportCsv();
+    case "rpt-chart-type":
+      S.reportChart = { ...S.reportChart, type: t.dataset.type };
+      return render();
+    case "pin-report":   return pinReport();
+    case "unpin-report-open": return unpinReportOpen();
+    case "unpin-report": return unpinReport(t.dataset.pinId);
     case "close": return closeModal();
   }
 });
@@ -7495,6 +7842,8 @@ document.addEventListener("change", e => {
   if (e.target.id === "gStart") return renderGeneratePreview();
   if (d.planned) return rescheduleInspection(d.planned, e.target.value);
   if (e.target.id === "period") { S.period = e.target.value; return render(); }
+  if (e.target.id === "rptChartX") { S.reportChart = { ...S.reportChart, x: e.target.value }; return render(); }
+  if (e.target.id === "rptChartY") { S.reportChart = { ...S.reportChart, y: e.target.value }; return render(); }
   if (d.ncra) {
     const [id, col] = d.ncra.split("|");
     return setNcrActionField(id, col, e.target.value);

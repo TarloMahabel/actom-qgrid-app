@@ -22,10 +22,20 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.35.1";
+window.APP_VERSION = "0.36.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.36.0", d: "2026-10-21", t: "Report charts and dashboard favourites",
+    items: [
+      "Reports now show bar chart, pie chart and trend views alongside the table — switch with the view buttons above results.",
+      "Pick the X axis (category) and Y axis (metric or count) to customise each chart.",
+      "Pin any chart to the dashboard with ★ Pin to dashboard — it appears on the new Favourites tab and re-runs the report live.",
+      "Unpin from the dashboard Favourites tab or from the report view.",
+      "All charts are drawn as inline SVG — no external library, no extra network request.",
+    ]
+  },
   {
     v: "0.35.1", d: "2026-10-20", t: "Nav: all sections collapsed by default",
     n: "All navigation sections now start collapsed. Click any section heading to expand it. " +
