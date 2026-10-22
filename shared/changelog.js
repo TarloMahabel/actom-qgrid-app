@@ -22,10 +22,23 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.38.0";
+window.APP_VERSION = "0.39.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.39.0", d: "2026-10-22", t: "Report designer UX improvements",
+    items: [
+      "Selecting a data source or changing a column now applies immediately — no 'Apply & refresh' button needed.",
+      "Size inputs (cols × rows) apply automatically on change — no 'Set' button.",
+      "Changing the widget type now preserves other settings rather than resetting them.",
+      "The properties panel can be collapsed with the → button to give more canvas space.",
+      "Ghost cells on the canvas now show a subtle grid so you can see the 12-column layout at a glance.",
+      "Delete or Backspace removes the selected widget (when not typing in a field).",
+      "Widget title saves automatically when you click away.",
+      "Empty properties panel now shows usage hints instead of a blank message.",
+    ],
+  },
   {
     v: "0.38.0", d: "2026-10-21", t: "Full report designer",
     items: [

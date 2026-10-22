@@ -7110,7 +7110,7 @@ function startDesignerReport() {
   S.reportBuilding = null; S.reportOpen = null;
   S.reportDesigner = {
     id: null, title: "New Report", description: "", is_shared: false,
-    widgets: [], selectedId: null,
+    widgets: [], selectedId: null, showProps: true,
   };
   render();
 }
@@ -7133,7 +7133,7 @@ function openInDesigner(id) {
   }
   S.reportDesigner = {
     id: r.id, title: r.title, description: r.description || "",
-    is_shared: r.is_shared, selectedId: null, widgets,
+    is_shared: r.is_shared, selectedId: null, widgets, showProps: true,
   };
   render();
   S.reportDesigner.widgets.forEach(w => fetchWidgetData(w.id));
@@ -7167,65 +7167,75 @@ function reportDesignerView(m) {
     </div>`;
   }).join("");
 
-  const propsPanel = `<div class="dsg-props">
-    ${sel ? `
-      <h4>Widget</h4>
-      <div class="fld"><label>Title</label>
-        <input id="dsgWTitle" value="${esc(sel.title)}"></div>
-      <div class="fld" style="margin-top:8px"><label>Type</label>
-        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
+  const propsPanel = `<div class="dsg-props${ds.showProps ? "" : " collapsed"}">
+    <button class="dsg-props-toggle" data-act="dsg-toggle-props"
+      title="${ds.showProps ? "Hide panel" : "Show panel"}">${ds.showProps ? "→" : "←"}</button>
+    ${ds.showProps ? (sel ? `
+      <h4 style="margin-bottom:10px">Configure widget</h4>
+      <div class="dsg-field-row"><label>Title</label>
+        <input id="dsgWTitle" value="${esc(sel.title)}" style="width:100%"></div>
+      <div class="dsg-field-row"><label>Type</label>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">
           ${[["table","Table"],["kpi","KPI"],["bar","Bar"],["pie","Pie"],["trend","Trend"]].map(([v, l]) =>
-            `<button class="btn sm${sel.type === v ? " pri" : ""}" data-act="dsg-set-type"
+            `<button class="dsg-type-btn${sel.type === v ? " active" : ""}" data-act="dsg-set-type"
               data-wid="${sel.id}" data-val="${v}">${l}</button>`
           ).join("")}
         </div>
       </div>
-      <div class="fld" style="margin-top:8px"><label>Data source</label>
-        <select id="dsgWView">
+      <div class="dsg-field-row"><label>Data source</label>
+        <select id="dsgWView" style="width:100%">
           <option value="">— pick a view —</option>
           ${(S.reportViews || []).map(v =>
             `<option value="${v.view_name}"${sel.view === v.view_name ? " selected" : ""}>${esc(v.label)}</option>`
           ).join("")}
         </select>
       </div>
+      ${sel._loading ? `<div class="hint" style="margin-top:8px;font-size:11px">Loading columns…</div>` : ""}
       ${(sel.type === "bar" || sel.type === "trend") ? `
-        <div class="fld" style="margin-top:8px"><label>${sel.type === "trend" ? "Date column" : "Category (X)"}</label>
-          <select id="dsgWX">
+        <div class="dsg-field-row"><label>${sel.type === "trend" ? "Date column (X)" : "Category (X)"}</label>
+          <select id="dsgWX" style="width:100%">
             <option value="">— column —</option>
             ${(sel._cols || []).map(c => `<option value="${c}"${sel.x_col === c ? " selected" : ""}>${c}</option>`).join("")}
           </select></div>
-        <div class="fld" style="margin-top:8px"><label>Value (Y)</label>
-          <select id="dsgWY">
+        <div class="dsg-field-row"><label>Value (Y)</label>
+          <select id="dsgWY" style="width:100%">
             <option value="__count__"${sel.y_col === "__count__" ? " selected" : ""}>Count of rows</option>
             ${(sel._cols || []).map(c => `<option value="${c}"${sel.y_col === c ? " selected" : ""}>${c}</option>`).join("")}
           </select></div>` : ""}
       ${sel.type === "pie" ? `
-        <div class="fld" style="margin-top:8px"><label>Category column</label>
-          <select id="dsgWX">
+        <div class="dsg-field-row"><label>Category column</label>
+          <select id="dsgWX" style="width:100%">
             <option value="">— column —</option>
             ${(sel._cols || []).map(c => `<option value="${c}"${sel.x_col === c ? " selected" : ""}>${c}</option>`).join("")}
           </select></div>` : ""}
       ${sel.type === "kpi" ? `
-        <div class="fld" style="margin-top:8px"><label>Column to sum (blank = row count)</label>
-          <select id="dsgWX">
+        <div class="dsg-field-row"><label>Column to sum (blank = row count)</label>
+          <select id="dsgWX" style="width:100%">
             <option value="">Row count</option>
             ${(sel._cols || []).map(c => `<option value="${c}"${sel.x_col === c ? " selected" : ""}>${c}</option>`).join("")}
           </select></div>` : ""}
-      <button class="btn sm" style="margin-top:12px;width:100%" data-act="dsg-apply-props"
-        data-wid="${sel.id}">Apply &amp; refresh</button>
       <hr style="margin:14px 0;border:none;border-top:1px solid var(--line)">
-      <div class="fld"><label>Size (cols × rows)</label>
+      <div class="dsg-field-row"><label>Size (cols × rows)</label>
         <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
           <input type="number" id="dsgWW" min="1" max="12" value="${sel.w}"
             style="width:52px;padding:4px 6px;border:1px solid var(--line);border-radius:var(--r-sm)">
           <span style="color:var(--muted)">×</span>
           <input type="number" id="dsgWH" min="2" max="20" value="${sel.h}"
             style="width:52px;padding:4px 6px;border:1px solid var(--line);border-radius:var(--r-sm)">
-          <button class="btn sm" data-act="dsg-resize-widget" data-wid="${sel.id}">Set</button>
         </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">Or drag the ◢ corner handle</div>
       </div>
-    ` : `<div class="hint" style="margin-top:32px;text-align:center;color:var(--muted)">
-      Click a widget<br>to configure it</div>`}
+      <button class="btn danger sm" style="margin-top:14px;width:100%" data-act="dsg-delete-widget"
+        data-wid="${sel.id}">Delete widget</button>
+    ` : `
+      <div class="dsg-props-hint" style="margin-top:8px">
+        <strong>How to use</strong><br><br>
+        Click a widget to configure it here.<br><br>
+        <strong>Moving:</strong> drag the widget header.<br><br>
+        <strong>Resizing:</strong> drag the ◢ corner, or type cols × rows above.<br><br>
+        <strong>Deleting:</strong> select a widget and press <kbd style="font-size:10px;padding:1px 4px;border:1px solid var(--line);border-radius:3px">Del</kbd>
+      </div>
+    `) : ""}
   </div>`;
 
   return `<div class="dsg-shell">
@@ -7378,9 +7388,38 @@ async function saveDesignerReport() {
   finally { busy(false); }
 }
 
+let _dsgKeydownBound = false;
+
 function setupDesignerDrag() {
   const canvas = document.getElementById("dsgCanvas");
-  if (!canvas) return;
+  if (!canvas) { _dsgKeydownBound = false; return; }
+
+  // Delete key to remove selected widget — bound once per designer session
+  if (!_dsgKeydownBound) {
+    _dsgKeydownBound = true;
+    document.addEventListener("keydown", e => {
+      if (!S.reportDesigner?.selectedId) return;
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      e.preventDefault();
+      S.reportDesigner.widgets = S.reportDesigner.widgets.filter(w => w.id !== S.reportDesigner.selectedId);
+      S.reportDesigner.selectedId = null;
+      render();
+    });
+  }
+
+  // Widget title: auto-save on blur
+  const titleEl = document.getElementById("dsgWTitle");
+  if (titleEl) {
+    titleEl.addEventListener("blur", () => {
+      const dw = S.reportDesigner?.widgets.find(x => x.id === S.reportDesigner?.selectedId);
+      if (dw && titleEl.value.trim() && titleEl.value.trim() !== dw.title) {
+        dw.title = titleEl.value.trim();
+        render();
+      }
+    });
+  }
 
   let dragWid = null;
 
@@ -8206,6 +8245,9 @@ document.addEventListener("click", async e => {
     case "close-designer":
       S.reportDesigner = null;
       return render();
+    case "dsg-toggle-props":
+      if (S.reportDesigner) S.reportDesigner.showProps = !S.reportDesigner.showProps;
+      return render();
     case "dsg-add-widget": return addDesignerWidget(t.dataset.type);
     case "dsg-select":
       if (S.reportDesigner) S.reportDesigner.selectedId = t.dataset.wid;
@@ -8219,8 +8261,17 @@ document.addEventListener("click", async e => {
     case "dsg-set-type": {
       if (!S.reportDesigner) return;
       const dw = S.reportDesigner.widgets.find(x => x.id === t.dataset.wid);
-      if (dw) dw.type = t.dataset.val;
-      return render();
+      if (!dw) return;
+      dw.title = $("dsgWTitle")?.value?.trim() || dw.title;
+      const newView = $("dsgWView")?.value;
+      const viewChanged = newView && newView !== dw.view;
+      if (newView) dw.view = newView;
+      dw.x_col = $("dsgWX")?.value || "";
+      dw.y_col = $("dsgWY")?.value || "__count__";
+      dw.type = t.dataset.val;
+      render();
+      if (viewChanged || !dw._data?.length) fetchWidgetData(dw.id);
+      return;
     }
     case "dsg-apply-props": {
       if (!S.reportDesigner) return;
@@ -8253,6 +8304,35 @@ document.addEventListener("click", async e => {
 
 document.addEventListener("change", e => {
   const d = e.target.dataset;
+
+  // Auto-apply designer props when data-source or column selects change
+  if (S.reportDesigner && ["dsgWView","dsgWX","dsgWY"].includes(e.target.id)) {
+    const dw = S.reportDesigner.widgets.find(x => x.id === S.reportDesigner.selectedId);
+    if (dw) {
+      const newView = $("dsgWView")?.value;
+      const viewChanged = newView !== undefined && newView !== dw.view;
+      if (newView !== undefined) dw.view = newView;
+      dw.x_col = $("dsgWX")?.value || "";
+      dw.y_col = $("dsgWY")?.value || "__count__";
+      render();
+      if (viewChanged || (newView && !dw._data?.length)) fetchWidgetData(dw.id);
+    }
+    return;
+  }
+
+  // Auto-apply size inputs when they change
+  if (S.reportDesigner && ["dsgWW","dsgWH"].includes(e.target.id)) {
+    const dw = S.reportDesigner.widgets.find(x => x.id === S.reportDesigner.selectedId);
+    if (dw) {
+      const nw = parseInt($("dsgWW")?.value);
+      const nh = parseInt($("dsgWH")?.value);
+      if (!isNaN(nw)) dw.w = Math.max(1, Math.min(12, nw));
+      if (!isNaN(nh)) dw.h = Math.max(2, Math.min(20, nh));
+      render();
+    }
+    return;
+  }
+
   if (d.ref) {
     /* Recorded on change (blur), not on input, and deliberately WITHOUT a
        re-render: repainting the grid mid-edit moves the caret and loses focus.
