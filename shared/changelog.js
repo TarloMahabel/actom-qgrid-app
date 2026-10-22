@@ -22,10 +22,16 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.39.0";
+window.APP_VERSION = "0.40.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.40.0", d: "2026-10-22", t: "Large-screen layout",
+    items: [
+      "On monitors wider than 1920 px the app now stays at 1920 px and centres itself, keeping charts and grids at a readable density rather than stretching across the full screen.",
+    ],
+  },
   {
     v: "0.39.0", d: "2026-10-22", t: "Report designer UX improvements",
     items: [

@@ -152,10 +152,13 @@ input,select,textarea{font-family:inherit;font-size:inherit}
 .who .n{font-weight:600;font-size:13.5px;color:var(--ink)}
 .who .e{font-size:12.5px;color:var(--muted);font-family:var(--mono)}
 
-/* No width cap. At 1620px the content stopped and a wide monitor showed
-   a third of its width as empty canvas. Registers and dashboards are
-   grids and use the room; reading-heavy pages (Help) widen their
-   column count rather than their line length -- see .helpbody. */
+/* No width cap below 1920px. At 1620px the content stopped and a wide
+   monitor showed a third of its width as empty canvas. Registers and
+   dashboards are grids and use the room; reading-heavy pages (Help) widen
+   their column count rather than their line length -- see .helpbody.
+   Above 1920px the shell is capped so charts and grids don't stretch
+   beyond what they were designed for. */
+@media(min-width:1921px){.shell{max-width:1920px;margin-inline:auto}}
 .page{padding:19px 22px 28px}
 .phead{display:flex;align-items:flex-end;gap:13px;margin:4px 0 18px;flex-wrap:wrap}
 .phead h1{margin:5px 0 0;font-family:var(--display);font-size:27px;font-weight:650;letter-spacing:-.022em;color:var(--ink);line-height:1.15}
