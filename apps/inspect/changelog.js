@@ -22,10 +22,16 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.41.0";
+window.APP_VERSION = "0.42.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.42.0", d: "2026-10-23", t: "Show me how",
+    items: [
+      "Every module now has a 'Show me how' button in its header. Clicking it starts a step-by-step walkthrough of that module — what each tab does, and how to complete the main tasks in it.",
+    ],
+  },
   {
     v: "0.41.0", d: "2026-10-23", t: "NCR action done fix",
     items: [

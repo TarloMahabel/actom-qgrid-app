@@ -437,10 +437,14 @@ function head(m, desc, act) {
   /* The brief's order: a small eyebrow naming the section, then the
      title, then a line saying what the page is for. No underline accent;
      the reference has none, and the eyebrow already does its job. */
+  const tourBtn = MODULE_TOURS && MODULE_TOURS[m.id]
+    ? `<button class="btn sm" data-act="module-tour" data-view="${m.id}" title="Step-by-step walkthrough for this module">Show me how</button>`
+    : "";
+  const pact = [act, tourBtn].filter(Boolean).join(" ");
   return `<div class="phead"><div>
     <div class="eyebrow">${esc(navGroup(m.id))}</div>
     <h1>${m.t}</h1>
-    ${desc ? `<p>${desc}</p>` : ""}</div><div class="pact">${act || ""}</div></div>`;
+    ${desc ? `<p>${desc}</p>` : ""}</div><div class="pact">${pact}</div></div>`;
 }
 
 
@@ -7802,6 +7806,130 @@ const TOUR = [
     body: "Everything in this tour, and more, is in Help. You can take the tour again from there." }
 ];
 
+/* Per-module walkthroughs launched by the "Show me how" button in each
+   module header. Steps without a sel appear as centred cards; sel steps
+   highlight a real element the same way the general TOUR does. */
+const MODULE_TOURS = {
+  main: [
+    { title: "Dashboard — overview",
+      body: "The Dashboard shows the health of your quality system at a glance. Two tabs: Executive for the top-line numbers, and Across the modules for a summary of every area." },
+    { sel: ".four", title: "The four key figures",
+      body: "First pass yield, open NCRs, open customer cares, and cost of quality for the financial year. A red line beneath a figure means it has crossed a threshold and needs attention." },
+    { title: "Inspections by month",
+      body: "The bar chart compares completed versus first-pass inspections for the last twelve months. A gap between the two bars is where rework happened." },
+    { title: "What needs attention",
+      body: "Scroll down to see every record across all modules waiting for someone to act on. These are live records — click any row to open it." },
+  ],
+  work: [
+    { title: "Inspection workbench — overview",
+      body: "Four tabs: My queue (inspections assigned to you), Capture (the form you fill in), Register (all completed inspections), and Failed checks (faults waiting for a disposition)." },
+    { title: "Step 1 — Open an inspection",
+      body: "Your queue is on the first tab. Tap any row to open that inspection. The form loads on the Capture tab." },
+    { title: "Step 2 — Fill in the form",
+      body: "Work down each field. Measurements outside their tolerance are flagged as you type. Fields with a camera icon need at least one photo before the form can be signed." },
+    { title: "Step 3 — Sign the inspection",
+      body: "When all required fields are complete, a Sign button appears at the bottom. Signing locks the record permanently. If you need to stop, use Hand over rather than leaving it open." },
+    { title: "Failed checks",
+      body: "When an inspection has a fault, it waits on the Failed checks tab for a disposition: accepted, reworked, or rejected. Until a decision is recorded, it stays there." },
+  ],
+  sched: [
+    { title: "Scheduling — overview",
+      body: "Inspections are generated from works orders using the requirements matrix. This module is where a Planner works." },
+    { title: "Assigning unassigned inspections",
+      body: "The Unassigned tab lists inspections that have been generated but not yet given to anyone. Select one and assign it to an inspector. The number in the left menu counts how many are waiting." },
+    { title: "Creating a works order",
+      body: "Go to the Projects & works orders tab to add or edit works orders. Saving a works order generates the required inspections automatically based on the requirements matrix." },
+  ],
+  dash: [
+    { title: "Inspection reports — overview",
+      body: "Four reporting views: Overview (summary stats), Faults per project (where faults came from), Actions (quality-review action items), and Pass rate by stage (which stage is letting faults through)." },
+    { title: "Filtering by period",
+      body: "Most reports have a month or date-range picker at the top. Change the period and the chart updates immediately. An empty month shows as empty, not a blank chart — so you know the data is real." },
+    { title: "Favourites",
+      body: "The Favourites tab lets you pin any report configuration — month, view, filter — so it reopens exactly as you left it. No need to reconfigure the same view every time." },
+  ],
+  ncr: [
+    { title: "NCR management — overview",
+      body: "An NCR is raised when something does not meet its requirement. It follows a fixed seven-step path: Open → Contained → Cause identified → Action agreed → Action done → Verified → Closed." },
+    { title: "Step 1 — Raise an NCR",
+      body: "Click New NCR. Fill in what was found, where, which part is affected, and who is responsible. Save it — the NCR is now Open." },
+    { title: "Step 2 — Contain the problem",
+      body: "Record the immediate action taken to stop the problem spreading (quarantine, hold, rework). Once saved, the status moves to Contained." },
+    { title: "Step 3 — Find the root cause",
+      body: "Open the NCR and fill in the Root cause field using the five-Why or a similar analysis. Once saved the status moves to Cause identified." },
+    { title: "Step 4 — Agree corrective actions",
+      body: "Add one or more corrective actions, each with an owner and a due date. Once at least one action is recorded the NCR reaches Action agreed." },
+    { title: "Step 5 — Mark actions done",
+      body: "When the work is done, the owner opens the NCR, finds their action, and sets Done by. When all actions are marked done the NCR reaches Action done." },
+    { title: "Step 6 — Verify and close",
+      body: "A Quality Engineer checks that each corrective action actually worked by recording Verified by. Once all actions are verified they can close the NCR. Only QE or above can close it." },
+  ],
+  cust: [
+    { title: "Customer cares — overview",
+      body: "A customer care is logged every time a customer raises a complaint, following the QA-FM-005 form. The response timer starts the moment it is logged." },
+    { title: "Step 1 — Log the care",
+      body: "Click New care. Fill in the customer name, description of the complaint, and whether it is commercial or technical. Save it — the clock starts now." },
+    { title: "Step 2 — Record your response",
+      body: "Once the customer has been answered, open the care and fill in the Response field. The time taken is locked when you save. Do this promptly — the clock is still running." },
+    { title: "Step 3 — Attach documents",
+      body: "Attach quotes, emails or photos while the care is open. Nothing can be attached after it is cleared." },
+    { title: "Step 4 — Clear the care",
+      body: "Clearing needs a note of what was done for the customer. Technical cares also need a root cause and the five-Why before they can be cleared." },
+  ],
+  calib: [
+    { title: "Calibration register — overview",
+      body: "Every measuring instrument in the division is tracked here against ISO 9001:2015 clause 7.1.5. Colour codes: red = overdue, amber = due soon, green = valid." },
+    { title: "Recording a calibration",
+      body: "Open an instrument and click Record calibration. Enter the calibration date, expiry date, and certificate reference. For external calibration you can also record the calibration house and PO number." },
+    { title: "Sending an instrument out for calibration",
+      body: "Log it on the Deliveries tab: enter the PO number, date sent, and expected return date. When it comes back, open the delivery record and mark it returned." },
+    { title: "Out of service",
+      body: "When an instrument is decommissioned, mark it out of service. It moves to the Out of service tab and stays in the register permanently — ISO 9001 requires the history to be kept." },
+  ],
+  rpt: [
+    { title: "Report builder — overview",
+      body: "Build and save tabular reports against any module in the system. Reports run live data every time they are opened — nothing is cached." },
+    { title: "Step 1 — Create a report",
+      body: "Click New report. Choose a data source (NCRs, instruments, inspections, and more), then tick the columns you want to include. You can rename any column." },
+    { title: "Step 2 — Add filters and sort",
+      body: "Use the Filters section to narrow the data. Pick a sort column. Click Run preview to check the result before saving." },
+    { title: "Step 3 — Save and share",
+      body: "Click Save to keep the report in My reports. Click Share to make it visible to everyone in the division under the Shared tab. Others can run it but cannot edit it." },
+    { title: "Step 4 — Download",
+      body: "Click Download on any saved report to export the full result as a CSV file." },
+  ],
+  dsn: [
+    { title: "Form designer — overview",
+      body: "Builds the inspection forms. Changes are made in a draft revision and only reach inspectors once the revision is published. Inspections already in progress keep the revision they were created from." },
+    { title: "Creating a new revision",
+      body: "Open a form and click New revision. The draft copy is yours to change without affecting any inspection currently being captured." },
+    { title: "Adding fields",
+      body: "Use the right-hand panel to add questions: measurements, yes/no checks, text fields, and photo fields. Set the label, tolerance, and whether a photo is required for each." },
+    { title: "Publishing",
+      body: "When the form is ready, click Publish. New inspections will use the updated form. A form with no questions cannot be published." },
+  ],
+  req: [
+    { title: "Inspection requirements — overview",
+      body: "A matrix of product family × manufacturing stage. Each cell says which inspection form applies at that combination. Scheduling reads this matrix when generating inspections." },
+    { title: "Configuring a cell",
+      body: "Click any cell to set or change which form applies. Save the change — new works orders will pick it up immediately." },
+    { title: "How this connects to Scheduling",
+      body: "When a works order is saved in Scheduling, the system reads this matrix to know which forms to generate. Getting this right is what ensures the correct inspections happen at each stage." },
+  ],
+  adm: [
+    { title: "Administration — overview",
+      body: "Five tabs: Users & roles, Competency, Reference lists, Options, and Audit trail. Only Quality Managers and System Administrators can open this module." },
+    { title: "Activating a new user",
+      body: "New users appear inactive on the Users tab after their first sign-in. Open their name, tick Active, and select a role. They will have access on their next sign-in." },
+    { title: "Reference lists",
+      body: "Stages, departments, defect codes and other lookup values live here. Add new items or retire old ones without needing developer involvement." },
+    { title: "Options",
+      body: "Toggle hold points, the second-approver requirement for form publishing, and the AI features (assisted drafting, question panel) for the whole division here." },
+    { title: "Audit trail",
+      body: "Every change made in the system — who did what and when — is recorded here. It is append-only and cannot be edited or deleted." },
+  ],
+};
+
 const tourKey = () => `qms.tour.${S.profile?.id || "anon"}`;
 const tourDone = () => { try { return !!localStorage.getItem(tourKey()); } catch { return true; } };
 const markTourDone = () => { try { localStorage.setItem(tourKey(), window.APP_VERSION || "1"); } catch {} };
@@ -7832,12 +7960,24 @@ function startTour() {
   drawTour();
 }
 
+function startModuleTour(id) {
+  const steps = MODULE_TOURS[id];
+  if (!steps) return;
+  if (S.view !== id) { S.view = id; S.tab = 0; buildNav(); render(); }
+  S.tour = { i: 0, steps };
+  hideTourOffer();
+  drawTour();
+}
+
+const activeTourSteps = () => (S.tour && S.tour.steps) || TOUR;
+
 function tourMove(dir) {
   if (!S.tour) return;
+  const steps = activeTourSteps();
   let i = S.tour.i + dir;
-  while (i >= 0 && i < TOUR.length && tourTarget(TOUR[i]) === undefined) i += dir;
+  while (i >= 0 && i < steps.length && tourTarget(steps[i]) === undefined) i += dir;
   if (i < 0) i = 0;
-  if (i >= TOUR.length) return endTour();
+  if (i >= steps.length) return endTour();
   S.tour.i = i;
   drawTour();
 }
@@ -7853,7 +7993,8 @@ function endTour() {
 function drawTour() {
   const L = $("tourLayer");
   if (!L || !S.tour) return;
-  const st = TOUR[S.tour.i];
+  const steps = activeTourSteps();
+  const st = steps[S.tour.i];
   /* On a narrow screen, open the menu for steps that point into it and
      close it for the ones that do not. */
   const want = !!(st.sel && document.querySelector(st.sel)?.closest(".side"));
@@ -7863,7 +8004,7 @@ function drawTour() {
   const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (el) el.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
 
-  const visible = TOUR.filter(t => tourTarget(t) !== undefined);
+  const visible = steps.filter(t => tourTarget(t) !== undefined);
   const n = visible.indexOf(st) + 1, of = visible.length;
 
   L.classList.remove("hidden");
@@ -8168,6 +8309,7 @@ document.addEventListener("click", async e => {
     case "do-close-complaint": return doCloseComplaint();
     case "cust-csv": return downloadComplaints();
     case "start-tour": return startTour();
+    case "module-tour": return startModuleTour(t.dataset.view);
     case "tour-next": return tourMove(1);
     case "tour-back": return tourMove(-1);
     case "tour-end": return endTour();
