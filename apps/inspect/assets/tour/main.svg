@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="170" font-family="system-ui,sans-serif">
+  <rect width="480" height="170" rx="6" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  <!-- Header bar -->
+  <rect width="480" height="28" rx="6" fill="#3B6FA8"/>
+  <rect y="22" width="480" height="6" fill="#3B6FA8"/>
+  <text x="12" y="18" fill="#FFFFFF" font-size="11" font-weight="600">Dashboard</text>
+  <!-- Tab bar -->
+  <rect y="28" width="480" height="22" fill="#F4F6F9"/>
+  <rect x="8" y="31" width="68" height="16" rx="3" fill="#FFFFFF"/>
+  <text x="42" y="43" fill="#3B6FA8" font-size="10" font-weight="600" text-anchor="middle">Executive</text>
+  <text x="110" y="43" fill="#4F5D72" font-size="10">Across the modules</text>
+  <!-- Content area -->
+  <rect y="50" width="480" height="120" fill="#FAFBFC"/>
+  <!-- Card 1 -->
+  <rect x="8" y="56" width="104" height="54" rx="4" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="60" y="82" fill="#3B6FA8" font-size="18" font-weight="700" text-anchor="middle">94%</text>
+  <text x="60" y="97" fill="#4F5D72" font-size="9" text-anchor="middle">First Pass Yield</text>
+  <rect x="8" y="107" width="104" height="3" fill="#E2E8F0"/>
+  <!-- Card 2 -->
+  <rect x="122" y="56" width="104" height="54" rx="4" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="174" y="82" fill="#B91C1C" font-size="18" font-weight="700" text-anchor="middle">3</text>
+  <text x="174" y="97" fill="#4F5D72" font-size="9" text-anchor="middle">Open NCRs</text>
+  <rect x="122" y="107" width="104" height="3" fill="#B91C1C"/>
+  <!-- Card 3 -->
+  <rect x="236" y="56" width="104" height="54" rx="4" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="288" y="82" fill="#15803D" font-size="18" font-weight="700" text-anchor="middle">1</text>
+  <text x="288" y="97" fill="#4F5D72" font-size="9" text-anchor="middle">Open Cares</text>
+  <rect x="236" y="107" width="104" height="3" fill="#E2E8F0"/>
+  <!-- Card 4 -->
+  <rect x="350" y="56" width="122" height="54" rx="4" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="411" y="82" fill="#1E293B" font-size="13" font-weight="700" text-anchor="middle">R 12 480</text>
+  <text x="411" y="97" fill="#4F5D72" font-size="9" text-anchor="middle">Cost of Quality</text>
+  <rect x="350" y="107" width="122" height="3" fill="#E2E8F0"/>
+  <!-- Hint -->
+  <text x="240" y="155" fill="#4F5D72" font-size="9" text-anchor="middle">Red line beneath a figure = needs attention</text>
+</svg>

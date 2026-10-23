@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="170" font-family="system-ui,sans-serif">
+  <rect width="480" height="170" rx="6" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  <!-- Header -->
+  <rect width="480" height="28" rx="6" fill="#A8473E"/>
+  <rect y="22" width="480" height="6" fill="#A8473E"/>
+  <text x="12" y="18" fill="#FFFFFF" font-size="11" font-weight="600">Scheduling</text>
+  <!-- Tab bar -->
+  <rect y="28" width="480" height="22" fill="#F4F6F9"/>
+  <text x="12" y="43" fill="#4F5D72" font-size="10">Schedule</text>
+  <!-- Unassigned active tab with badge -->
+  <rect x="64" y="31" width="86" height="16" rx="3" fill="#FFFFFF"/>
+  <text x="78" y="43" fill="#A8473E" font-size="10" font-weight="600">Unassigned</text>
+  <rect x="128" y="33" width="16" height="12" rx="6" fill="#B91C1C"/>
+  <text x="136" y="43" fill="#FFFFFF" font-size="8" font-weight="700" text-anchor="middle">7</text>
+  <text x="162" y="43" fill="#4F5D72" font-size="10">Projects &amp; works orders</text>
+  <!-- Content -->
+  <rect y="50" width="480" height="120" fill="#FAFBFC"/>
+  <!-- Row 1 -->
+  <rect x="0" y="50" width="480" height="28" fill="#FFFFFF"/>
+  <text x="12" y="68" fill="#1E293B" font-size="10" font-weight="600">SWITCHGEAR-ITP-04</text>
+  <text x="168" y="68" fill="#4F5D72" font-size="10">MVS-004 · Final inspection</text>
+  <text x="430" y="68" fill="#A8473E" font-size="10" text-anchor="end">Assign →</text>
+  <!-- Row 2 -->
+  <rect x="0" y="78" width="480" height="28" fill="#FAFBFC"/>
+  <text x="12" y="96" fill="#1E293B" font-size="10" font-weight="600">CABLE-ITP-05</text>
+  <text x="120" y="96" fill="#4F5D72" font-size="10">MVS-005 · Termination check</text>
+  <text x="430" y="96" fill="#A8473E" font-size="10" text-anchor="end">Assign →</text>
+  <!-- Row 3 -->
+  <rect x="0" y="106" width="480" height="28" fill="#FFFFFF"/>
+  <text x="12" y="124" fill="#1E293B" font-size="10" font-weight="600">PANEL-ITP-06</text>
+  <text x="112" y="124" fill="#4F5D72" font-size="10">MVS-006 · HV test</text>
+  <text x="430" y="124" fill="#A8473E" font-size="10" text-anchor="end">Assign →</text>
+  <!-- Footer -->
+  <text x="12" y="155" fill="#4F5D72" font-size="9">7 inspections waiting to be assigned</text>
+</svg>

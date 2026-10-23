@@ -7812,8 +7812,10 @@ const TOUR = [
 const MODULE_TOURS = {
   main: [
     { title: "Dashboard — overview",
+      img: "assets/tour/main.svg",
       body: "The Dashboard shows the health of your quality system at a glance. Two tabs: Executive for the top-line numbers, and Across the modules for a summary of every area." },
     { sel: ".four", title: "The four key figures",
+      img: "assets/tour/main.svg",
       body: "First pass yield, open NCRs, open customer cares, and cost of quality for the financial year. A red line beneath a figure means it has crossed a threshold and needs attention." },
     { title: "Inspections by month",
       body: "The bar chart compares completed versus first-pass inspections for the last twelve months. A gap between the two bars is where rework happened." },
@@ -7822,8 +7824,10 @@ const MODULE_TOURS = {
   ],
   work: [
     { title: "Inspection workbench — overview",
+      img: "assets/tour/work.svg",
       body: "Four tabs: My queue (inspections assigned to you), Capture (the form you fill in), Register (all completed inspections), and Failed checks (faults waiting for a disposition)." },
     { title: "Step 1 — Open an inspection",
+      img: "assets/tour/work.svg",
       body: "Your queue is on the first tab. Tap any row to open that inspection. The form loads on the Capture tab." },
     { title: "Step 2 — Fill in the form",
       body: "Work down each field. Measurements outside their tolerance are flagged as you type. Fields with a camera icon need at least one photo before the form can be signed." },
@@ -7834,14 +7838,17 @@ const MODULE_TOURS = {
   ],
   sched: [
     { title: "Scheduling — overview",
+      img: "assets/tour/sched.svg",
       body: "Inspections are generated from works orders using the requirements matrix. This module is where a Planner works." },
     { title: "Assigning unassigned inspections",
+      img: "assets/tour/sched.svg",
       body: "The Unassigned tab lists inspections that have been generated but not yet given to anyone. Select one and assign it to an inspector. The number in the left menu counts how many are waiting." },
     { title: "Creating a works order",
       body: "Go to the Projects & works orders tab to add or edit works orders. Saving a works order generates the required inspections automatically based on the requirements matrix." },
   ],
   dash: [
     { title: "Inspection reports — overview",
+      img: "assets/tour/dash.svg",
       body: "Four reporting views: Overview (summary stats), Faults per project (where faults came from), Actions (quality-review action items), and Pass rate by stage (which stage is letting faults through)." },
     { title: "Filtering by period",
       body: "Most reports have a month or date-range picker at the top. Change the period and the chart updates immediately. An empty month shows as empty, not a blank chart — so you know the data is real." },
@@ -7850,6 +7857,7 @@ const MODULE_TOURS = {
   ],
   ncr: [
     { title: "NCR management — overview",
+      img: "assets/tour/ncr.svg",
       body: "An NCR is raised when something does not meet its requirement. It follows a fixed seven-step path: Open → Contained → Cause identified → Action agreed → Action done → Verified → Closed." },
     { title: "Step 1 — Raise an NCR",
       body: "Click New NCR. Fill in what was found, where, which part is affected, and who is responsible. Save it — the NCR is now Open." },
@@ -7866,6 +7874,7 @@ const MODULE_TOURS = {
   ],
   cust: [
     { title: "Customer cares — overview",
+      img: "assets/tour/cust.svg",
       body: "A customer care is logged every time a customer raises a complaint, following the QA-FM-005 form. The response timer starts the moment it is logged." },
     { title: "Step 1 — Log the care",
       body: "Click New care. Fill in the customer name, description of the complaint, and whether it is commercial or technical. Save it — the clock starts now." },
@@ -7878,6 +7887,7 @@ const MODULE_TOURS = {
   ],
   calib: [
     { title: "Calibration register — overview",
+      img: "assets/tour/calib.svg",
       body: "Every measuring instrument in the division is tracked here against ISO 9001:2015 clause 7.1.5. Colour codes: red = overdue, amber = due soon, green = valid." },
     { title: "Recording a calibration",
       body: "Open an instrument and click Record calibration. Enter the calibration date, expiry date, and certificate reference. For external calibration you can also record the calibration house and PO number." },
@@ -7888,6 +7898,7 @@ const MODULE_TOURS = {
   ],
   rpt: [
     { title: "Report builder — overview",
+      img: "assets/tour/rpt.svg",
       body: "Build and save tabular reports against any module in the system. Reports run live data every time they are opened — nothing is cached." },
     { title: "Step 1 — Create a report",
       body: "Click New report. Choose a data source (NCRs, instruments, inspections, and more), then tick the columns you want to include. You can rename any column." },
@@ -7900,6 +7911,7 @@ const MODULE_TOURS = {
   ],
   dsn: [
     { title: "Form designer — overview",
+      img: "assets/tour/dsn.svg",
       body: "Builds the inspection forms. Changes are made in a draft revision and only reach inspectors once the revision is published. Inspections already in progress keep the revision they were created from." },
     { title: "Creating a new revision",
       body: "Open a form and click New revision. The draft copy is yours to change without affecting any inspection currently being captured." },
@@ -7910,6 +7922,7 @@ const MODULE_TOURS = {
   ],
   req: [
     { title: "Inspection requirements — overview",
+      img: "assets/tour/req.svg",
       body: "A matrix of product family × manufacturing stage. Each cell says which inspection form applies at that combination. Scheduling reads this matrix when generating inspections." },
     { title: "Configuring a cell",
       body: "Click any cell to set or change which form applies. Save the change — new works orders will pick it up immediately." },
@@ -7918,6 +7931,7 @@ const MODULE_TOURS = {
   ],
   adm: [
     { title: "Administration — overview",
+      img: "assets/tour/adm.svg",
       body: "Five tabs: Users & roles, Competency, Reference lists, Options, and Audit trail. Only Quality Managers and System Administrators can open this module." },
     { title: "Activating a new user",
       body: "New users appear inactive on the Users tab after their first sign-in. Open their name, tick Active, and select a role. They will have access on their next sign-in." },
@@ -8017,6 +8031,7 @@ function drawTour() {
         aria-labelledby="tourTitle" tabindex="-1">
       <div class="tourstep">Step ${n} of ${of}</div>
       <h3 id="tourTitle">${esc(st.title)}</h3>
+      ${st.img ? `<img class="tourimg" src="${esc(st.img)}" alt="" loading="lazy">` : ""}
       <p>${esc(st.body)}</p>
       <div class="tourbtns">
         <button class="btn sm" data-act="tour-end">Skip the tour</button>

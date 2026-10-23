@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="170" font-family="system-ui,sans-serif">
+  <rect width="480" height="170" rx="6" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  <!-- Header -->
+  <rect width="480" height="28" rx="6" fill="#A2643A"/>
+  <rect y="22" width="480" height="6" fill="#A2643A"/>
+  <text x="12" y="18" fill="#FFFFFF" font-size="11" font-weight="600">Report builder</text>
+  <!-- Tab bar -->
+  <rect y="28" width="480" height="22" fill="#F4F6F9"/>
+  <rect x="8" y="31" width="68" height="16" rx="3" fill="#FFFFFF"/>
+  <text x="42" y="43" fill="#A2643A" font-size="10" font-weight="600" text-anchor="middle">My reports</text>
+  <text x="90" y="43" fill="#4F5D72" font-size="10">Shared</text>
+  <!-- Content -->
+  <rect y="50" width="480" height="120" fill="#FAFBFC"/>
+  <!-- Row 1 -->
+  <rect x="8" y="58" width="464" height="36" rx="4" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="20" y="73" fill="#1E293B" font-size="10" font-weight="600">Open NCRs by department</text>
+  <text x="20" y="85" fill="#4F5D72" font-size="9">Last run: today</text>
+  <rect x="374" y="62" width="36" height="18" rx="3" fill="#F4F6F9" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="392" y="75" fill="#1E293B" font-size="9" text-anchor="middle">Run</text>
+  <rect x="416" y="62" width="46" height="18" rx="3" fill="#F4F6F9" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="439" y="75" fill="#1E293B" font-size="9" text-anchor="middle">Share</text>
+  <!-- Row 2 -->
+  <rect x="8" y="100" width="464" height="36" rx="4" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="20" y="115" fill="#1E293B" font-size="10" font-weight="600">Overdue instruments</text>
+  <text x="20" y="127" fill="#4F5D72" font-size="9">Last run: yesterday</text>
+  <rect x="374" y="104" width="36" height="18" rx="3" fill="#F4F6F9" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="392" y="117" fill="#1E293B" font-size="9" text-anchor="middle">Run</text>
+  <rect x="416" y="104" width="46" height="18" rx="3" fill="#F4F6F9" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="439" y="117" fill="#1E293B" font-size="9" text-anchor="middle">Share</text>
+  <!-- New report button -->
+  <rect x="8" y="144" width="88" height="18" rx="3" fill="#A2643A"/>
+  <text x="52" y="157" fill="#FFFFFF" font-size="9" text-anchor="middle">+ New report</text>
+</svg>

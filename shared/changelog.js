@@ -22,10 +22,16 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.42.0";
+window.APP_VERSION = "0.43.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.43.0", d: "2026-10-23", t: "Show me how screenshots",
+    items: [
+      "The 'Show me how' walkthroughs now include a screenshot on each overview step so you can see what the module looks like before navigating to it.",
+    ],
+  },
   {
     v: "0.42.0", d: "2026-10-23", t: "Show me how",
     items: [

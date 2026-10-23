@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="170" font-family="system-ui,sans-serif">
+  <rect width="480" height="170" rx="6" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  <!-- Header -->
+  <rect width="480" height="28" rx="6" fill="#A8473E"/>
+  <rect y="22" width="480" height="6" fill="#A8473E"/>
+  <text x="12" y="18" fill="#FFFFFF" font-size="11" font-weight="600">Customer cares</text>
+  <!-- Tab bar -->
+  <rect y="28" width="480" height="22" fill="#F4F6F9"/>
+  <rect x="8" y="31" width="56" height="16" rx="3" fill="#FFFFFF"/>
+  <text x="36" y="43" fill="#A8473E" font-size="10" font-weight="600" text-anchor="middle">Register</text>
+  <text x="76" y="43" fill="#4F5D72" font-size="10">Open</text>
+  <text x="108" y="43" fill="#4F5D72" font-size="10">After Sales report</text>
+  <!-- Content -->
+  <rect y="50" width="480" height="120" fill="#FAFBFC"/>
+  <!-- Column headers -->
+  <text x="12" y="64" fill="#4F5D72" font-size="9" font-weight="600">Customer</text>
+  <text x="230" y="64" fill="#4F5D72" font-size="9" font-weight="600">Date</text>
+  <text x="290" y="64" fill="#4F5D72" font-size="9" font-weight="600">Response time</text>
+  <text x="410" y="64" fill="#4F5D72" font-size="9" font-weight="600">Status</text>
+  <line x1="8" y1="67" x2="472" y2="67" stroke="#E2E8F0" stroke-width="1"/>
+  <!-- Row 1 -->
+  <rect x="0" y="67" width="480" height="34" fill="#FFFFFF"/>
+  <text x="12" y="82" fill="#1E293B" font-size="10" font-weight="600">Eskom</text>
+  <text x="12" y="95" fill="#4F5D72" font-size="9">Delayed delivery</text>
+  <text x="230" y="85" fill="#4F5D72" font-size="10">14 Oct</text>
+  <text x="290" y="85" fill="#15803D" font-size="10" font-weight="600">2d 4h</text>
+  <rect x="408" y="74" width="50" height="14" rx="3" fill="#F0FDF4"/>
+  <text x="433" y="84" fill="#15803D" font-size="9" text-anchor="middle">Cleared</text>
+  <!-- Row 2 -->
+  <rect x="0" y="101" width="480" height="34" fill="#FAFBFC"/>
+  <text x="12" y="116" fill="#1E293B" font-size="10" font-weight="600">City Power</text>
+  <text x="12" y="129" fill="#4F5D72" font-size="9">Panel fault</text>
+  <text x="230" y="119" fill="#4F5D72" font-size="10">22 Oct</text>
+  <text x="290" y="119" fill="#B45309" font-size="10" font-weight="600">1d 2h</text>
+  <rect x="408" y="108" width="50" height="14" rx="3" fill="#FFFBEB"/>
+  <text x="433" y="118" fill="#B45309" font-size="9" text-anchor="middle">Open</text>
+  <!-- hint -->
+  <text x="12" y="158" fill="#4F5D72" font-size="9">Response timer starts when care is logged</text>
+</svg>

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="170" font-family="system-ui,sans-serif">
+  <rect width="480" height="170" rx="6" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  <!-- Header -->
+  <rect width="480" height="28" rx="6" fill="#8A5273"/>
+  <rect y="22" width="480" height="6" fill="#8A5273"/>
+  <text x="12" y="18" fill="#FFFFFF" font-size="11" font-weight="600">NCR management</text>
+  <!-- Tab bar -->
+  <rect y="28" width="480" height="22" fill="#F4F6F9"/>
+  <rect x="8" y="31" width="54" height="16" rx="3" fill="#FFFFFF"/>
+  <text x="35" y="43" fill="#8A5273" font-size="10" font-weight="600" text-anchor="middle">Register</text>
+  <text x="76" y="43" fill="#4F5D72" font-size="10">Repeat causes</text>
+  <text x="152" y="43" fill="#4F5D72" font-size="10">By department</text>
+  <text x="232" y="43" fill="#4F5D72" font-size="10">By supplier</text>
+  <!-- Content -->
+  <rect y="50" width="480" height="120" fill="#FAFBFC"/>
+  <!-- Column headers -->
+  <text x="12" y="64" fill="#4F5D72" font-size="9" font-weight="600">Ref</text>
+  <text x="90" y="64" fill="#4F5D72" font-size="9" font-weight="600">Description</text>
+  <text x="280" y="64" fill="#4F5D72" font-size="9" font-weight="600">Status</text>
+  <text x="400" y="64" fill="#4F5D72" font-size="9" font-weight="600">Dept</text>
+  <line x1="8" y1="67" x2="472" y2="67" stroke="#E2E8F0" stroke-width="1"/>
+  <!-- Row 1 -->
+  <rect x="0" y="67" width="480" height="28" fill="#FFFFFF"/>
+  <text x="12" y="85" fill="#1E293B" font-size="10" font-weight="600">NCR-26-0001</text>
+  <text x="90" y="85" fill="#1E293B" font-size="10">Material out of spec</text>
+  <rect x="278" y="74" width="82" height="14" rx="3" fill="#EEF2FF"/>
+  <text x="319" y="84" fill="#4338CA" font-size="9" text-anchor="middle">Action agreed</text>
+  <text x="400" y="85" fill="#4F5D72" font-size="10">Fabrication</text>
+  <!-- Row 2 -->
+  <rect x="0" y="95" width="480" height="28" fill="#FAFBFC"/>
+  <text x="12" y="113" fill="#1E293B" font-size="10" font-weight="600">NCR-26-0002</text>
+  <text x="90" y="113" fill="#1E293B" font-size="10">Ladder check required</text>
+  <rect x="278" y="102" width="76" height="14" rx="3" fill="#FFFBEB"/>
+  <text x="316" y="112" fill="#B45309" font-size="9" text-anchor="middle">Action done</text>
+  <text x="400" y="113" fill="#4F5D72" font-size="10">Assembly</text>
+  <!-- Row 3 -->
+  <rect x="0" y="123" width="480" height="28" fill="#FFFFFF"/>
+  <text x="12" y="141" fill="#1E293B" font-size="10" font-weight="600">NCR-26-0003</text>
+  <text x="90" y="141" fill="#1E293B" font-size="10">Weld visual fail</text>
+  <rect x="278" y="130" width="56" height="14" rx="3" fill="#F0FDF4"/>
+  <text x="306" y="140" fill="#15803D" font-size="9" text-anchor="middle">Verified</text>
+  <text x="400" y="141" fill="#4F5D72" font-size="10">Welding</text>
+</svg>

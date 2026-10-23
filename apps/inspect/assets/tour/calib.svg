@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="170" font-family="system-ui,sans-serif">
+  <rect width="480" height="170" rx="6" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  <!-- Header -->
+  <rect width="480" height="28" rx="6" fill="#6A5B9E"/>
+  <rect y="22" width="480" height="6" fill="#6A5B9E"/>
+  <text x="12" y="18" fill="#FFFFFF" font-size="11" font-weight="600">Calibration register</text>
+  <!-- Tab bar -->
+  <rect y="28" width="480" height="22" fill="#F4F6F9"/>
+  <rect x="8" y="31" width="56" height="16" rx="3" fill="#FFFFFF"/>
+  <text x="36" y="43" fill="#6A5B9E" font-size="10" font-weight="600" text-anchor="middle">Register</text>
+  <text x="76" y="43" fill="#4F5D72" font-size="10">Out of service</text>
+  <text x="148" y="43" fill="#4F5D72" font-size="10">Deliveries</text>
+  <text x="202" y="43" fill="#4F5D72" font-size="10">Reports</text>
+  <!-- Content -->
+  <rect y="50" width="480" height="120" fill="#FAFBFC"/>
+  <!-- Column headers -->
+  <text x="12" y="64" fill="#4F5D72" font-size="9" font-weight="600">Instrument</text>
+  <text x="178" y="64" fill="#4F5D72" font-size="9" font-weight="600">Serial No.</text>
+  <text x="266" y="64" fill="#4F5D72" font-size="9" font-weight="600">Status</text>
+  <text x="360" y="64" fill="#4F5D72" font-size="9" font-weight="600">Expires</text>
+  <line x1="8" y1="67" x2="472" y2="67" stroke="#E2E8F0" stroke-width="1"/>
+  <!-- Row 1 -->
+  <rect x="0" y="67" width="480" height="26" fill="#FFFFFF"/>
+  <text x="12" y="84" fill="#1E293B" font-size="10" font-weight="600">Digital Multimeter</text>
+  <text x="178" y="84" fill="#4F5D72" font-size="10">DMM-001</text>
+  <rect x="260" y="73" width="44" height="13" rx="3" fill="#F0FDF4"/>
+  <text x="282" y="83" fill="#15803D" font-size="9" text-anchor="middle">Valid</text>
+  <text x="360" y="84" fill="#4F5D72" font-size="10">Mar 2027</text>
+  <!-- Row 2 -->
+  <rect x="0" y="93" width="480" height="26" fill="#FAFBFC"/>
+  <text x="12" y="110" fill="#1E293B" font-size="10" font-weight="600">Torque Wrench</text>
+  <text x="178" y="110" fill="#4F5D72" font-size="10">TW-004</text>
+  <rect x="260" y="99" width="56" height="13" rx="3" fill="#FFFBEB"/>
+  <text x="288" y="109" fill="#B45309" font-size="9" text-anchor="middle">Due soon</text>
+  <text x="360" y="110" fill="#4F5D72" font-size="10">Dec 2026</text>
+  <!-- Row 3 -->
+  <rect x="0" y="119" width="480" height="26" fill="#FFFFFF"/>
+  <text x="12" y="136" fill="#1E293B" font-size="10" font-weight="600">Vernier Calliper</text>
+  <text x="178" y="136" fill="#4F5D72" font-size="10">VC-012</text>
+  <rect x="260" y="125" width="56" height="13" rx="3" fill="#FEF2F2"/>
+  <text x="288" y="135" fill="#B91C1C" font-size="9" text-anchor="middle">OVERDUE</text>
+  <text x="360" y="136" fill="#B91C1C" font-size="10">Sep 2026</text>
+  <!-- Legend -->
+  <circle cx="12" cy="154" r="4" fill="#15803D"/>
+  <text x="20" y="158" fill="#4F5D72" font-size="8">valid</text>
+  <circle cx="52" cy="154" r="4" fill="#B45309"/>
+  <text x="60" y="158" fill="#4F5D72" font-size="8">due within 90 days</text>
+  <circle cx="150" cy="154" r="4" fill="#B91C1C"/>
+  <text x="158" y="158" fill="#4F5D72" font-size="8">overdue</text>
+</svg>
