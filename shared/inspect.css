@@ -733,7 +733,7 @@ input:focus, select:focus, textarea:focus{
   outline:2px solid #fff;outline-offset:0;pointer-events:none;
   transition:top .22s,left .22s,width .22s,height .22s}
 .tourshade{position:fixed;inset:0;background:rgba(15,23,42,.55)}
-.tourcard{position:fixed;width:340px;max-width:calc(100vw - 24px);box-sizing:border-box;
+.tourcard{position:fixed;width:480px;max-width:calc(100vw - 24px);box-sizing:border-box;
   background:var(--card);border:1px solid var(--line);border-radius:var(--r);
   box-shadow:0 12px 40px rgba(15,23,42,.22);padding:16px 17px}
 .tourcard:focus{outline:2px solid var(--brand);outline-offset:2px}
