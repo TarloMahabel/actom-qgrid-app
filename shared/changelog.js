@@ -22,10 +22,16 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.40.0";
+window.APP_VERSION = "0.41.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.41.0", d: "2026-10-23", t: "NCR action done fix",
+    items: [
+      "Inspectors can now mark corrective actions as done. Previously selecting a 'Done by' person showed an access error and blocked the NCR from moving to Action done status.",
+    ],
+  },
   {
     v: "0.40.0", d: "2026-10-22", t: "Large-screen layout",
     items: [
