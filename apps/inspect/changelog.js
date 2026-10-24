@@ -22,10 +22,19 @@
 
    Edit HERE, then run ./shared/sync.sh.
    ===================================================================== */
-window.APP_VERSION = "0.44.0";
+window.APP_VERSION = "0.45.0";
 
 /* Pre-1.0 while Phase 1 is in pilot. 1.0.0 is the MV Switchgear go-live. */
 window.CHANGELOG = [
+  {
+    v: "0.45.0", d: "2026-10-24", t: "Customer care escalation + calibration certificates",
+    items: [
+      "Setup has moved to the bottom of the navigation menu.",
+      "Calibration: you can now attach a PDF or image certificate to a calibration record directly from the instrument detail.",
+      "Customer care: each complaint can now have a responsible person assigned — someone accountable for resolving it.",
+      "Customer care: an escalation matrix automatically labels complaints Level 1, Level 2, or CEO based on how many days they have been open. Thresholds and the CEO's contact details are configured under Admin → Options.",
+    ],
+  },
   {
     v: "0.44.0", d: "2026-10-23", t: "Larger tour screenshots",
     items: [

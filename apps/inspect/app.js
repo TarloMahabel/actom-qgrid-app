@@ -329,17 +329,17 @@ const NAV = [
   { g: "Customer" },
   { id: "cust",  n: 6, t: "Customer cares",          col: "--m3",
     tabs: ["Register", "Open", "After Sales report"] },
-  { g: "Setup" },
-  { id: "dsn",   n: 7, t: "Form designer",           col: "--m4", tabs: [] },
-  { id: "req",   n: 8, t: "Inspection requirements", col: "--m5", tabs: ["Requirements matrix"] },
-  { id: "adm",   n: 9, t: "Administration",          col: "--m6",
-    tabs: ["Users & roles", "Competency", "Reference lists", "Options", "Audit trail"] },
   { g: "Calibration" },
   { id: "calib", n: 10, t: "Calibration register", col: "--m5",
     tabs: ["Register", "Out of service", "Deliveries", "Reports"] },
   { g: "Reporting" },
   { id: "rpt", n: 11, t: "Report builder", col: "--m2",
     tabs: ["My reports", "Shared"] },
+  { g: "Setup" },
+  { id: "dsn",   n: 7, t: "Form designer",           col: "--m4", tabs: [] },
+  { id: "req",   n: 8, t: "Inspection requirements", col: "--m5", tabs: ["Requirements matrix"] },
+  { id: "adm",   n: 9, t: "Administration",          col: "--m6",
+    tabs: ["Users & roles", "Competency", "Reference lists", "Options", "Audit trail"] },
   { g: "Later phases" },
   ...["Document control","Training & competency",
       "Supplier quality","Audits & compliance","Performance analytics"]
@@ -1624,6 +1624,26 @@ function vAdm(m) {
       <div class="note q" style="margin-top:11px">It writes nothing. It cannot raise, close or edit anything, and there is no lookup that changes a record. Read <b>v_ai_refusals</b> before an audit: it lists every question the boundary stopped an answer to, and who asked.</div>
 
       <div class="note q" style="margin-top:11px">Neither of these decides whether anything conforms, passes or fails. That determination stays with the named inspector and is refused on the server, not merely discouraged: a suggestion that reads like a verdict is withheld and the refusal is recorded. Ask to see <b>v_ai_oversight</b> before an audit — how often the boundary fires, and on what, is the question that will be asked.</div>
+
+      <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
+        <div class="t">Customer care escalation matrix</div>
+        <div class="d" style="margin:4px 0 12px">Number of days before an open customer care escalates. Approval for CEO-level escalations goes to the divisional CEO.</div>
+        <div class="two">
+          <div class="fld"><label>Level 1 escalation (days)</label>
+            <input type="number" id="eL1" min="1" max="30" value="${S.division?.escalation_l1_days ?? 1}"></div>
+          <div class="fld"><label>Level 2 escalation (days)</label>
+            <input type="number" id="eL2" min="1" max="30" value="${S.division?.escalation_l2_days ?? 3}"></div>
+        </div>
+        <div class="fld"><label>CEO escalation (days)</label>
+          <input type="number" id="eCEO" min="1" max="90" value="${S.division?.escalation_ceo_days ?? 5}"></div>
+        <div class="two">
+          <div class="fld"><label>Divisional CEO name</label>
+            <input id="eCEOName" value="${esc(S.division?.ceo_name || "")}" placeholder="Full name"></div>
+          <div class="fld"><label>CEO email</label>
+            <input id="eCEOEmail" type="email" value="${esc(S.division?.ceo_email || "")}" placeholder="email@actom.co.za"></div>
+        </div>
+        <button class="btn sm pri" data-act="save-escalation-config" style="margin-top:10px">Save escalation settings</button>
+      </div>
     </div></div>`;
   }
   else { body = `<div class="card"><h3>Audit trail</h3><div class="bd" id="auditHost"><div class="empty">Loading…</div></div></div>`; loadAudit(); }
@@ -5393,6 +5413,20 @@ function closeModal() { $("modal").classList.remove("open"); modalCtx = {}; }
 
 /* ---- Customer complaints: log, answer, close ---------------------- */
 
+/* Escalation level badge for an open complaint based on division thresholds. */
+function escalationPill(c) {
+  if (c.status === "closed" || c.legacy_closed) return "";
+  const d = S.division || {};
+  const age = c.age_days || 0;
+  const l1 = d.escalation_l1_days ?? 1;
+  const l2 = d.escalation_l2_days ?? 3;
+  const lceo = d.escalation_ceo_days ?? 5;
+  if (age >= lceo) return `<span class="pill p-bad">CEO</span>`;
+  if (age >= l2)   return `<span class="pill p-warn">Level 2</span>`;
+  if (age >= l1)   return `<span class="pill p-info">Level 1</span>`;
+  return "";
+}
+
 /* The same .fld markup the other modals use, wrapped so the long ones
    below stay readable. The hint is where a field explains why it exists. */
 function lab(label, control, hint) {
@@ -5431,7 +5465,14 @@ function newComplaintModal() {
         "The same list the inspection module uses, so a fault is counted once however it was found.")}</div>
       <div>${lab("Site engineer", `<input id="kEng" placeholder="who attends, if known">`)}</div>
     </div>
-    ${lab("Contract number", `<input id="kContract" placeholder="optional">`)}
+    <div class="two">
+      <div>${lab("Contract number", `<input id="kContract" placeholder="optional">`)}</div>
+      <div>${lab("Responsible person", `<select id="kResp">
+        <option value="">— assign later —</option>
+        ${(S.people || []).filter(p => p.active).sort((a, b) => a.full_name.localeCompare(b.full_name))
+          .map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("")}
+        </select>`, "Who is handling this customer care.")}</div>
+    </div>
     ${lab("Documents", `<div id="careStage"><div class="cnt">Nothing attached.</div></div>
       <button class="btn sm" type="button" data-act="stage-care-doc" style="margin-top:8px">Attach a document</button>`,
       "Quotes, printed emails, delivery notes. They are held here and attached once the customer care has a reference to attach them to.")}
@@ -5460,6 +5501,7 @@ async function saveComplaint() {
   const customer = $("kCust").value.trim();
   const details = $("kDetails").value.trim();
   const revId = $("kCCRev")?.value || null;
+  const responsibleId = $("kResp")?.value || null;
   if (!customer) { toast("A complaint needs a customer.", "bad"); return; }
   if (!details) { toast("Say what the customer reported.", "bad"); return; }
   busy(true);
@@ -5477,6 +5519,10 @@ async function saveComplaint() {
       p_template_rev_id: revId || null
     });
     if (error) throw error;
+
+    if (responsibleId && data.id) {
+      await supabase.from("complaints").update({ responsible_id: responsibleId }).eq("id", data.id);
+    }
 
     /* Uploaded after the insert, because the path needs the id. If one
        fails the customer care still exists and the failure is named —
@@ -5569,14 +5615,25 @@ async function openComplaint(id) {
   const when = d => d ? new Date(d).toLocaleString("en-ZA") : null;
   const row = (k, v) => `<div class="fld"><label>${esc(k)}</label><div>${v}</div></div>`;
 
+  const isOpen = c.status !== "closed" && !c.legacy_closed;
+  const escPill = escalationPill(c);
+  const d = S.division || {};
   openModal(`${c.ref} — ${c.customer}`, `
     <div class="filters" style="margin-bottom:12px">
       ${pill(({ open: "Open", in_progress: "In progress", closed: "Closed" })[c.status] || c.status)}
+      ${escPill ? escPill : ""}
       ${c.complaint_type ? pill(c.complaint_type) : `<span class="cnt">not classified</span>`}
       ${c.section ? `<span class="cnt">${esc(c.section)}</span>` : ""}
       <span class="spacer"></span>
       <span class="cnt">${c.age_days} day${c.age_days === 1 ? "" : "s"} old</span>
     </div>
+    ${escPill && isOpen ? `<div class="note q" style="margin-bottom:12px">
+      ${(c.age_days || 0) >= (d.escalation_ceo_days ?? 5)
+        ? `Escalated to CEO${d.ceo_name ? ` — <b>${esc(d.ceo_name)}</b>` : ""}. Closing requires CEO approval.`
+        : (c.age_days || 0) >= (d.escalation_l2_days ?? 3)
+          ? "Escalated to Level 2 — supervisor review required."
+          : "Level 1 escalation — response is overdue."}
+    </div>` : ""}
     ${row("What the customer reported", esc(c.details))}
     <div class="two">
       ${row("Called", when(c.called_at))}
@@ -5588,6 +5645,13 @@ async function openComplaint(id) {
       ${row("Owner", esc(c.owner || "—"))}
       ${row("Site engineer", esc(c.site_engineer || "—"))}
     </div>
+    ${row("Responsible person", c.responsible_name
+      ? `${esc(c.responsible_name)}${isOpen
+          ? ` <button class="btn sm" data-act="assign-responsible" data-id="${c.id}" style="margin-left:8px">Change</button>`
+          : ""}`
+      : isOpen
+        ? `<span class="cnt">not assigned</span> <button class="btn sm" data-act="assign-responsible" data-id="${c.id}" style="margin-left:8px">Assign</button>`
+        : `<span class="cnt">not assigned</span>`)}
     ${c.closed_at ? `<div class="two">
         ${row("Closed", `${when(c.closed_at)} <span class="cnt">— ${c.days_to_close} days</span>`)}
         ${row("Nonconformance", c.ncr_ref ? esc(c.ncr_ref) : "none linked")}
@@ -5610,6 +5674,51 @@ async function openComplaint(id) {
           ["Cancel", "close-modal", ""]
         ]);
   loadCareDocs(id).catch(() => { });
+}
+
+function assignResponsible(id) {
+  openModal("Assign responsible person", `
+    <div class="fld"><label>Responsible person</label>
+      <select id="aResp">
+        <option value="">— clear assignment —</option>
+        ${(S.people || []).filter(p => p.active).sort((a, b) => a.full_name.localeCompare(b.full_name))
+          .map(p => `<option value="${p.id}">${esc(p.full_name)}</option>`).join("")}
+      </select></div>`,
+    [["Save", "do-assign-responsible", "pri"], ["Cancel", "close-modal", ""]],
+    { complaintId: id });
+}
+
+async function doAssignResponsible() {
+  busy(true);
+  try {
+    const { error } = await supabase.from("complaints")
+      .update({ responsible_id: $("aResp").value || null })
+      .eq("id", modalCtx.complaintId);
+    if (error) throw error;
+    closeModal(); await reload();
+    toast("Responsible person updated.", "ok");
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function saveEscalationConfig() {
+  const l1 = parseInt($("eL1")?.value, 10);
+  const l2 = parseInt($("eL2")?.value, 10);
+  const lceo = parseInt($("eCEO")?.value, 10);
+  if (!l1 || !l2 || !lceo) { toast("All day thresholds are required.", "bad"); return; }
+  if (l1 >= l2 || l2 >= lceo) { toast("Level thresholds must be in ascending order (Level 1 < Level 2 < CEO).", "bad"); return; }
+  busy(true);
+  try {
+    const { error } = await supabase.from("division_profile").update({
+      escalation_l1_days: l1, escalation_l2_days: l2, escalation_ceo_days: lceo,
+      ceo_name: $("eCEOName")?.value.trim() || null,
+      ceo_email: $("eCEOEmail")?.value.trim() || null,
+    }).eq("id", true);
+    if (error) throw error;
+    await reload();
+    toast("Escalation settings saved.", "ok");
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
 }
 
 function downloadComplaints() {
@@ -5940,7 +6049,7 @@ function vCust(m) {
                           "Owner", "Response", "Progress", ""],
         rows.slice(0, 200).map(c => [
           `<span class="id">${esc(c.ref)}</span>${c.legacy_ref ? `<div class="sub">was ${esc(c.legacy_ref)}</div>` : ""}`,
-          `${fmtDate(c.called_at)}<div class="sub">${c.age_days} day${c.age_days === 1 ? "" : "s"} old</div>`,
+          `${fmtDate(c.called_at)}<div class="sub">${c.age_days} day${c.age_days === 1 ? "" : "s"} old</div>${escalationPill(c) ? `<div style="margin-top:3px">${escalationPill(c)}</div>` : ""}`,
           `${esc((c.customer || "").slice(0, 34))}${c.site ? `<div class="sub">${esc(c.site.slice(0, 30))}</div>` : ""}`,
           esc((c.details || "").slice(0, 60)),
           c.complaint_type ? esc(c.complaint_type) : `<span class="cnt">not classified</span>`,
@@ -6228,6 +6337,12 @@ function calibDetail(m) {
           ${inst.calibrated_by ? `<tr><th>Calibrated by</th><td>${esc(inst.calibrated_by)}</td></tr>` : ""}
           ${inst.calibration_comment ? `<tr><th>Comment</th><td>${esc(inst.calibration_comment)}</td></tr>` : ""}
         </tbody></table>
+        ${inst.calibration_id ? `
+          <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+            <div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:6px">Certificate file</div>
+            <div id="calibCerts"><div class="cnt">Loading…</div></div>
+            ${canConfigure() && inst.active ? `<button class="btn sm" data-act="stage-cal-cert" data-id="${inst.calibration_id}" style="margin-top:8px">Attach certificate</button>` : ""}
+          </div>` : ""}
         ${canConfigure() && inst.active ? `<div style="margin-top:12px">
           <button class="btn sm pri" data-act="new-cal-record" data-id="${inst.id}">Record next calibration</button>
         </div>` : ""}` : `
@@ -6536,6 +6651,58 @@ async function openCalib(id) {
     S.calibHistory = data || [];
   } catch (e) { toast(explain(e), "bad"); S.calibHistory = []; }
   finally { busy(false); render(); }
+  const inst = (S.instruments || []).find(i => i.id === id);
+  if (inst?.calibration_id) loadCalCerts(inst.calibration_id).catch(() => {});
+}
+
+async function loadCalCerts(calibrationId) {
+  const host = $("calibCerts");
+  if (!host) return;
+  try {
+    const { data, error } = await supabase.from("calibration_documents")
+      .select("*").eq("calibration_id", calibrationId).order("uploaded_at");
+    if (error) throw error;
+    const docs = data || [];
+    host.innerHTML = docs.length
+      ? docs.map(d => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+          <button class="btn sm" data-act="open-cal-cert" data-path="${esc(d.storage_path)}">${esc(d.filename)}</button>
+          <span class="cnt">${d.bytes ? Math.round(d.bytes / 1024) + " kB · " : ""}${fmtDate(d.uploaded_at)}</span>
+        </div>`).join("")
+      : `<div class="cnt">No certificate attached.</div>`;
+  } catch (e) {
+    const h = $("calibCerts");
+    if (h) h.innerHTML = `<div class="cnt">Could not load certificates.</div>`;
+  }
+}
+
+async function uploadCalCert(file, calibrationId) {
+  if (!file) return;
+  if (file.size > 15 * 1024 * 1024) { toast(`${file.name} is over 15 MB.`, "bad"); return; }
+  busy(true);
+  try {
+    const safe = file.name.replace(/[^\w.\- ]+/g, "_").slice(-90);
+    const path = `${calibrationId}/${Date.now()}-${safe}`;
+    const { error: upErr } = await supabase.storage.from("calibration-certs").upload(path, file);
+    if (upErr) throw upErr;
+    const { error: rowErr } = await supabase.from("calibration_documents").insert({
+      calibration_id: calibrationId, storage_path: path,
+      filename: file.name, bytes: file.size, uploaded_by: S.profile.id,
+    });
+    if (rowErr) throw rowErr;
+    toast("Certificate attached.", "ok");
+    await loadCalCerts(calibrationId);
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
+}
+
+async function openCalCert(path) {
+  busy(true);
+  try {
+    const { data, error } = await supabase.storage.from("calibration-certs").createSignedUrl(path, 120);
+    if (error) throw error;
+    window.open(data.signedUrl, "_blank");
+  } catch (e) { toast(explain(e), "bad"); }
+  finally { busy(false); }
 }
 
 /* ---- Report builder ---- */
@@ -8315,6 +8482,14 @@ document.addEventListener("click", async e => {
     case "unstage-care-doc":
       S.careStaged.splice(Number(t.dataset.id), 1); return renderStaged();
     case "open-care-doc": return openCareDoc(t.dataset.id);
+    case "assign-responsible": return assignResponsible(t.dataset.id);
+    case "do-assign-responsible": return doAssignResponsible();
+    case "save-escalation-config": return saveEscalationConfig();
+    case "stage-cal-cert":
+      S.calibCertFor = t.dataset.id;
+      { const picker = $("docPicker"); if (picker) { picker.value = ""; picker.click(); } }
+      return;
+    case "open-cal-cert": return openCalCert(t.dataset.path);
     case "ncr-csv": return downloadNcrRegister();
     case "new-complaint": return newComplaintModal();
     case "save-complaint": return saveComplaint();
@@ -8662,6 +8837,11 @@ $("photoPicker").addEventListener("change", onPicked);
 $("docPicker")?.addEventListener("change", e => {
   const files = Array.from(e.target.files || []);
   e.target.value = "";
+  if (S.calibCertFor) {
+    const calId = S.calibCertFor; S.calibCertFor = null;
+    if (files[0]) uploadCalCert(files[0], calId).catch(() => {});
+    return;
+  }
   if (S.careUploadFor === "new") {
     S.careStaged = (S.careStaged || []).concat(
       files.filter(f => {
